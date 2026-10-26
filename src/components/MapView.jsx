@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TERRAIN } from '../game/rules.js';
 
 const NEUTRAL = '#b9b2a0';
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n }) {
+  const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
   const drag = useRef(null);
@@ -80,7 +81,21 @@ export default function MapView({ world, regions, nations, selected, targets, on
     onContext?.(rid);
   };
 
-  const s = world.size;
+  const s = world.unit;
+  const arrows = (battles || []).map((b, i) => {
+    const a = world.regions[b.from], t = world.regions[b.to];
+    const dx = t.cx - a.cx, dy = t.cy - a.cy, L = Math.hypot(dx, dy) || 1;
+    const x1 = a.cx + (dx / L) * s * 1.2, y1 = a.cy + (dy / L) * s * 1.2, x2 = t.cx - (dx / L) * s * 1.3, y2 = t.cy - (dy / L) * s * 1.3;
+    const mx = (x1 + x2) / 2 - (dy / L) * L * 0.15, my = (y1 + y2) / 2 + (dx / L) * L * 0.15;
+    const col = nations[b.attacker]?.color || '#c00';
+    const d = `M${x1.toFixed(1)} ${y1.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    return (
+      <g key={i}>
+        <path d={d} fill="none" stroke="#111" strokeWidth={s * 0.62} strokeLinecap="round" opacity={0.75} />
+        <path d={d} fill="none" stroke={col} strokeWidth={s * 0.36} strokeLinecap="round" strokeDasharray={b.win ? undefined : `${s * 0.6} ${s * 0.4}`} markerEnd={`url(#${clipId}-ah)`} />
+      </g>
+    );
+  });
   const zoomed = vb[2] < world.W * 0.55;
   const color = (rid) => {
     const o = regions[rid].owner;
@@ -109,15 +124,23 @@ export default function MapView({ world, regions, nations, selected, targets, on
         onPointerLeave={onPointerUp}
         preserveAspectRatio="xMidYMid meet"
       >
+        <defs>
+          <clipPath id={clipId}>
+            <path d={statics.land} />
+          </clipPath>
+          <marker id={`${clipId}-ah`} viewBox="0 0 10 10" refX="7" refY="5" markerWidth="3.2" markerHeight="3.2" orient="auto-start-reverse">
+            <path d="M0 0L10 5L0 10z" fill="context-stroke" />
+          </marker>
+        </defs>
         <rect x={-world.W} y={-world.H} width={world.W * 3} height={world.H * 3} fill="#8fb8cc" />
-        <g>
+        <path d={statics.land} fill={NEUTRAL} />
+        <g clipPath={`url(#${clipId})`}>
           {world.regions.map((r) => (
             <path
               key={r.id}
               d={statics.regionPath[r.id]}
               fill={color(r.id)}
-              stroke={color(r.id)}
-              strokeWidth={0.8}
+              fillRule="evenodd"
               onClick={(e) => click(r.id, e)}
               onContextMenu={(e) => context(r.id, e)}
               style={{ cursor: 'pointer' }}
@@ -125,53 +148,60 @@ export default function MapView({ world, regions, nations, selected, targets, on
           ))}
         </g>
         <g pointerEvents="none">
-          <path d={statics.glyph.tundra} fill="#ffffff" opacity={0.35} />
-          <path d={statics.glyph.forest} fill="#1f5a2a" opacity={0.35} />
-          <path d={statics.glyph.hills} fill="none" stroke="#5b4422" strokeWidth={s * 0.12} opacity={0.5} />
-          <path d={statics.glyph.desert} fill="none" stroke="#8a6a2a" strokeWidth={s * 0.18} strokeLinecap="round" opacity={0.6} />
-          <path d={statics.glyph.mountain} fill="#5b4632" opacity={0.55} />
-          <path d={statics.peaks} fill={TERRAIN[7].color} />
-          <path d={statics.glyph.peakCap} fill="#ece8df" opacity={0.85} />
-          <path d={statics.riverD} fill="none" stroke="#3f86b4" strokeWidth={s * 0.28} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
-          <path d={statics.borders} fill="none" stroke="#00000055" strokeWidth={0.7} />
-          <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" />
-          <path d={statics.coast} fill="none" stroke="#2c5468" strokeWidth={1.2} />
-          {seaLines}
+          <g clipPath={`url(#${clipId})`}>
+            <path d={statics.glyph.tundra} fill="none" stroke="#ffffff" strokeWidth={s * 0.15} opacity={0.6} />
+            <path d={statics.glyph.forest} fill="#1f5a2a" opacity={0.35} />
+            <path d={statics.glyph.hills} fill="none" stroke="#5b4422" strokeWidth={s * 0.12} opacity={0.5} />
+            <path d={statics.glyph.desert} fill="none" stroke="#8a6a2a" strokeWidth={s * 0.18} strokeLinecap="round" opacity={0.6} />
+            <path d={statics.glyph.mountain} fill="#5b4632" opacity={0.55} />
+            <path d={statics.peaks} fill={TERRAIN[7].color} fillRule="evenodd" />
+            <path d={statics.glyph.peakCap} fill="#ece8df" opacity={0.85} />
+            <path d={statics.borders} fill="none" stroke="#00000045" strokeWidth={0.7} />
+            <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
           {targets &&
             [...targets.entries()].map(([rid, kind]) => (
               <path
                 key={rid}
                 d={statics.outline[rid]}
-                fill="none"
+                fill={kind === 'attack' ? '#ff554433' : kind === 'move' ? '#ffe06622' : 'none'}
+                fillRule="evenodd"
                 stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
                 strokeWidth={2.4}
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
               />
             ))}
-          {selected !== null && selected !== undefined && <path d={statics.outline[selected]} fill="none" stroke="#fff" strokeWidth={3} />}
+          {selected !== null && selected !== undefined && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
+          </g>
+          <path d={statics.riverD} fill="none" stroke="#3f86b4" strokeWidth={s * 0.28} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
+          <path d={statics.land} fill="none" stroke="#2c5468" strokeWidth={1.1} />
+          {seaLines}
+          {arrows}
           {!compact &&
             world.regions.map((r) => {
               const reg = regions[r.id];
               const own = reg.owner;
               const col = own === null ? '#666' : nations[own].color;
-              const t = reg.troops;
-              const fs = t >= 100 ? s * 0.75 : s * 0.9;
+              const t = fmt(reg.troops);
+              const fs = s * 0.8;
+              const bw = Math.max(s * 1.9, String(t).length * fs * 0.62 + s * 0.6);
+              const rebel = reg.loyalty !== undefined && reg.owner !== null && reg.loyalty < 30;
               const gc = genCount?.[r.id] || 0;
               const b = reg.buildings;
               const icons = (b.walls ? '🏰' : '') + (b.market ? '💰' : '') + (b.port ? '⚓' : '') + (b.barracks ? '⚔️' : '');
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
-                  <circle r={s * 0.95} fill="#fffdf6" stroke={col} strokeWidth={s * 0.22} />
+                  <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill="#fffdf6" stroke={col} strokeWidth={s * 0.22} />
+                  {rebel && <circle cx={bw / 2} cy={-s * 0.7} r={s * 0.35} fill="#e2655a" stroke="#000" strokeWidth={0.4} />}
                   <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill="#222">
                     {t}
                   </text>
                   {capitals.has(r.id) && (
-                    <text x={-s * 1.55} dy={s * 0.35} fontSize={s * 1.05} textAnchor="middle" fill="#ffd34d" stroke="#000" strokeWidth={0.4}>
+                    <text x={-bw / 2 - s * 0.6} dy={s * 0.35} fontSize={s * 1.05} textAnchor="middle" fill="#ffd34d" stroke="#000" strokeWidth={0.4}>
                       ♛
                     </text>
                   )}
                   {gc > 0 && (
-                    <text x={s * 1.5} dy={s * 0.3} fontSize={s * 0.8} textAnchor="middle" fill="#ffe066" stroke="#000" strokeWidth={0.35} fontWeight="700">
+                    <text x={bw / 2 + s * 0.55} dy={s * 0.3} fontSize={s * 0.8} textAnchor="middle" fill="#ffe066" stroke="#000" strokeWidth={0.35} fontWeight="700">
                       ★{gc > 1 ? gc : ''}
                     </text>
                   )}

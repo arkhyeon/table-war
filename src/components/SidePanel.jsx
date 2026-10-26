@@ -1,7 +1,8 @@
-import { TERRAIN, BUILDINGS, COST, TRAITS, EDGE } from '../game/rules.js';
+import { TERRAIN, BUILDINGS, COST, TRAITS, EDGE, TAX } from '../game/rules.js';
+import { fmtTroops } from '../game/format.js';
 import { CIVS } from '../game/civs.js';
 import {
-  doTax, doConscript, doBuild, buildCost, conscriptAmount, gensIn, nationRegions, nationGenerals, appearChance, getRel,
+  doConscript, doBuild, regionTax, buildCost, conscriptAmount, gensIn, nationRegions, nationGenerals, appearChance, getRel,
   poachChance, doPoach, income, isVassalOf,
 } from '../game/engine.js';
 
@@ -56,10 +57,18 @@ export default function SidePanel({ world, game, selected, moveMode, setMoveMode
             {myRegions.length}지역 / 전체 {game.regions.length}
           </span>
           <span>병력</span>
-          <span>{troops}명</span>
+          <span>{fmtTroops(troops)}</span>
           <span>수입</span>
           <span>
-            +{inc.gross} − 유지비 {inc.upkeep} = {inc.net}금
+            세금 +{inc.gross} − 군량 {inc.upkeep} = {inc.net}금/턴
+          </span>
+          <span>세율</span>
+          <span className="row" style={{ gap: 4 }}>
+            {Object.entries(TAX).map(([k, t]) => (
+              <button key={k} className={'sm' + ((me.taxRate || 'normal') === k ? ' primary' : '')} title={t.desc} onClick={() => act((s) => ((s.nations[pid].taxRate = k), { ok: true }))}>
+                {t.name}
+              </button>
+            ))}
           </span>
           <span>장수</span>
           <span>
@@ -101,13 +110,23 @@ export default function SidePanel({ world, game, selected, moveMode, setMoveMode
             </span>
             <span>병사</span>
             <span>
-              <b>{r.troops}</b>명
+              <b>{r.troops.toLocaleString('ko-KR')}</b>명
             </span>
+            {r.owner !== null && (
+              <>
+                <span>민심</span>
+                <span style={{ color: r.loyalty < 25 ? 'var(--danger)' : r.loyalty < 50 ? 'var(--accent)' : undefined }}>
+                  {Math.round(r.loyalty ?? 100)} {r.loyalty < 25 && '⚠️ 반란 위험'}
+                </span>
+                <span>세수</span>
+                <span>{regionTax(game, selected).toFixed(1)}금/턴</span>
+              </>
+            )}
             <span>인구</span>
             <span>{Math.round(r.pop)}천</span>
             <span>특징</span>
             <span>
-              {[wr.coastal && '해안', wr.river && '강 유역', r.unrest > 0 && '징세 피로'].filter(Boolean).join(' · ') || '-'}
+              {[wr.coastal && '해안', wr.river && '강 유역'].filter(Boolean).join(' · ') || '-'}
             </span>
             <span>건물</span>
             <span>
@@ -132,11 +151,8 @@ export default function SidePanel({ world, game, selected, moveMode, setMoveMode
                 <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)} disabled={r.troops < 2}>
                   🚩 이동·공격 (M)
                 </button>
-                <button onClick={() => act((s) => doTax(s, world, pid, selected))} disabled={r.taxed || me.ap < COST.tax}>
-                  💰 징세 ({COST.tax}AP)
-                </button>
-                <button onClick={() => act((s) => doConscript(s, world, pid, selected))} disabled={r.conscripted || me.ap < COST.conscript || me.gold < COST.conscriptGold} title={`약 +${conscriptAmount(game, selected, pid)}명`}>
-                  🪖 징병 +{conscriptAmount(game, selected, pid)} ({COST.conscript}AP·{COST.conscriptGold}금)
+                <button onClick={() => act((s) => doConscript(s, world, pid, selected))} disabled={r.conscripted || me.ap < COST.conscript || me.gold < COST.conscriptGold} title="민심 -6">
+                  🪖 징병 +{fmtTroops(conscriptAmount(game, selected, pid))} ({COST.conscript}AP·{COST.conscriptGold}금)
                 </button>
               </div>
               <h4 style={{ marginTop: 10 }}>건설</h4>

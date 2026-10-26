@@ -44,7 +44,7 @@ function adjacentNations(s, world, nid) {
 
 function regionValue(s, world, rid, forNation) {
   const r = s.regions[rid];
-  let v = r.pop * 1.5 + r.troops * 0.8 + Object.values(r.buildings).reduce((a, b) => a + b, 0) * 30 + 20;
+  let v = r.pop * 1.5 + (r.troops / 1000) * 0.8 + Object.values(r.buildings).reduce((a, b) => a + b, 0) * 30 + 20;
   const touches = world.regions[rid].neighbors.some((n) => s.regions[n.id].owner === forNation);
   if (!touches) v *= 0.5;
   if (s.nations[r.owner]?.capital === rid) v += 80;
@@ -133,6 +133,7 @@ export function applyDeal(s, world, from, to, deal) {
       g.region = s.nations[old].capital !== rid ? s.nations[old].capital : home[0];
     }
     r.owner = newOwner;
+    r.loyalty = Math.min(r.loyalty ?? 100, 40);
     if (s.nations[old].capital === rid) {
       const rest = nationRegions(s, old);
       s.nations[old].capital = rest.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0] ?? null;

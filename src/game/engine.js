@@ -1,5 +1,6 @@
 import { stateRng } from './rng.js';
-import { T, TERRAIN, EDGE, BUILDINGS, COST } from './rules.js';
+import { T, TERRAIN, EDGE, BUILDINGS, COST, TAX } from './rules.js';
+import { fmtTroops } from './format.js';
 import { POOLS, rating } from './generals.js';
 import { fixJosa } from './josa.js';
 
@@ -25,7 +26,7 @@ export function log(s, text, nations = [], kind = 'info') {
 
 export function nationPower(s, nid) {
   let p = 0;
-  for (const r of s.regions) if (r.owner === nid) p += r.troops + 6 + r.pop * 0.2;
+  for (const r of s.regions) if (r.owner === nid) p += r.troops / 1000 + 6 + r.pop * 0.2;
   return p + s.nations[nid].gold / 10 + nationGenerals(s, nid).length * 8;
 }
 
@@ -43,15 +44,26 @@ export function computeMaxAp(s, nid) {
   return Math.max(2, ap);
 }
 
+// 지역별 세수: 매 턴 자동 징수 (세율·민심·시장·정치 장수 반영)
+export function regionTax(s, rid) {
+  const r = s.regions[rid];
+  const n = s.nations[r.owner];
+  let g = (1 + r.pop * 0.4) * TAX[n.taxRate || 'normal'].mult * (0.4 + 0.6 * (r.loyalty ?? 100) / 100);
+  if (r.buildings.market) g *= 1.5;
+  if (hasTrait(gensIn(s, rid, r.owner), '정치')) g *= 1.3;
+  return g + (r.buildings.port ? 3 : 0);
+}
+
 export function income(s, nid) {
-  let inc = 0;
-  for (const r of s.regions) {
-    if (r.owner !== nid) continue;
-    inc += 2 + Math.floor(r.pop / 10) + (r.buildings.market ? 4 : 0) + (r.buildings.port ? 3 : 0);
-  }
-  const troops = s.regions.reduce((a, r) => a + (r.owner === nid ? r.troops : 0), 0);
-  const upkeep = Math.ceil(troops / 25);
-  return { gross: inc, upkeep, net: inc - upkeep };
+  let inc = 0, troops = 0;
+  s.regions.forEach((r, i) => {
+    if (r.owner !== nid) return;
+    inc += regionTax(s, i);
+    troops += r.troops;
+  });
+  inc = Math.round(inc);
+  const upkeep = Math.round(troops / 4000);
+  return { gross: inc, upkeep, net: inc - upkeep, troops };
 }
 
 export function moveCost(world, from, to) {
@@ -126,27 +138,12 @@ export function canAct(s, nid, ap) {
   return null;
 }
 
-export function doTax(s, world, nid, rid) {
-  const r = s.regions[rid];
-  if (r.owner !== nid) return fail('내 지역이 아닙니다.');
-  if (r.taxed) return fail('이번 턴에 이미 징세했습니다.');
-  const err = canAct(s, nid, COST.tax);
-  if (err) return fail(err);
-  let g = (4 + r.pop * 0.5) * (r.buildings.market ? 1.5 : 1);
-  if (hasTrait(gensIn(s, rid, nid), '정치')) g *= 1.3;
-  g = Math.round(g);
-  s.nations[nid].gold += g;
-  s.nations[nid].ap -= COST.tax;
-  r.taxed = true;
-  r.unrest = (r.unrest || 0) + 1;
-  return { ok: true, msg: `${r.name}에서 세금 ${g}금을 거뒀습니다.` };
-}
-
 export function conscriptAmount(s, rid, nid) {
   const r = s.regions[rid];
-  let add = r.pop * 0.22 * (r.buildings.barracks ? 1.5 : 1);
+  let add = r.pop * 220 * (r.buildings.barracks ? 1.5 : 1);
   if (hasTrait(gensIn(s, rid, nid), '징병')) add *= 1.3;
-  return Math.max(2, Math.round(add));
+  if ((r.loyalty ?? 100) < 40) add *= 0.5;
+  return Math.max(1000, Math.round(add / 100) * 100);
 }
 
 export function doConscript(s, world, nid, rid) {
@@ -159,11 +156,12 @@ export function doConscript(s, world, nid, rid) {
   if (err) return fail(err);
   const add = conscriptAmount(s, rid, nid);
   r.troops += add;
-  r.pop = Math.max(3, r.pop - Math.round(add * 0.4));
+  r.pop = Math.max(3, r.pop - add * 0.0003);
+  r.loyalty = Math.max(0, (r.loyalty ?? 100) - 6);
   r.conscripted = true;
   n.gold -= COST.conscriptGold;
   n.ap -= COST.conscript;
-  return { ok: true, msg: `${r.name}에서 병사 ${add}명을 징병했습니다.` };
+  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(add)}을 징병했습니다. (민심 -6)` };
 }
 
 export function buildCost(s, rid, nid, kind) {
@@ -279,7 +277,7 @@ export function doMove(s, world, nid, from, to, count, genIds = []) {
     fr.troops -= count;
     tr.troops += count;
     for (const g of gens) g.region = to;
-    return { ok: true, msg: `${fr.name} → ${tr.name}: 병사 ${count}명 이동.` };
+    return { ok: true, msg: `${fr.name} → ${tr.name}: 병사 ${fmtTroops(count)} 이동.` };
   }
   const defender = tr.owner;
   if (defender !== null) {
@@ -290,6 +288,7 @@ export function doMove(s, world, nid, from, to, count, genIds = []) {
   const A = count * f.attMult * rng.range(0.85, 1.15);
   const D = tr.troops * f.defMult * rng.range(0.85, 1.15);
   fr.troops -= count;
+  (s.battles = s.battles || []).push({ from, to, attacker: nid, win: A > D });
   const defName = defender === null ? '중립 세력' : s.nations[defender].name;
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
   const capturedGen = (g, captor, killChanceBonus) => {
@@ -336,10 +335,10 @@ export function doMove(s, world, nid, from, to, count, genIds = []) {
     }
     transferRegion(s, world, to, nid);
     tr.troops = survivors;
-    tr.taxed = true;
+    tr.loyalty = 15;
     tr.conscripted = true;
     for (const g of gens) g.region = to;
-    let msg = `⚔️ ${n.name}이(가) ${tr.name}(${defName})을(를) 점령! 아군 손실 ${report.attLoss}, 적 ${report.defLoss} 격파.`;
+    let msg = `⚔️ ${n.name}이(가) ${tr.name}(${defName})을(를) 점령! 아군 손실 ${fmtTroops(report.attLoss)}, 적 ${fmtTroops(report.defLoss)} 격파.`;
     if (wasCapital) msg += ` 수도 함락, ${plunder}금 약탈.`;
     if (report.captured.length) msg += ` 포로: ${report.captured.join(', ')}.`;
     if (report.killed.length) msg += ` 전사: ${report.killed.join(', ')}.`;
@@ -366,7 +365,7 @@ export function doMove(s, world, nid, from, to, count, genIds = []) {
       }
     }
     if (defender !== null) s.opinion[defender][nid] -= 15;
-    let msg = `🛡️ ${n.name}의 ${tr.name}(${defName}) 공격 실패. 아군 손실 ${report.attLoss}, 적 손실 ${report.defLoss}.`;
+    let msg = `🛡️ ${n.name}의 ${tr.name}(${defName}) 공격 실패. 아군 손실 ${fmtTroops(report.attLoss)}, 적 손실 ${fmtTroops(report.defLoss)}.`;
     if (report.captured.length) msg += ` 포로로 잡힘: ${report.captured.join(', ')}.`;
     if (report.killed.length) msg += ` 전사: ${report.killed.join(', ')}.`;
     report.msg = msg;
@@ -512,7 +511,7 @@ export function appearChance(s, nid) {
   const counts = alive.map((n) => nationGenerals(s, n.id).length);
   const avg = counts.reduce((a, b) => a + b, 0) / Math.max(1, counts.length);
   const mine = nationGenerals(s, nid).length;
-  let p = 0.2 * Math.max(0.25, Math.min(2.5, 1 + (avg - mine) * 0.4));
+  let p = 0.13 * Math.max(0.25, Math.min(2.5, 1 + (avg - mine) * 0.4));
   if (nationRegions(s, nid).length <= 3) p += 0.05;
   return Math.min(0.75, p);
 }

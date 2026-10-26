@@ -26,7 +26,7 @@ export const TRAITS = {
   수군: '해상 페널티 무시, 항구 없이 항해 가능',
   산악: '험산 방어 보정 무시',
   도하: '도강 페널티 무시',
-  정치: '주둔 지역 징세 +30%',
+  정치: '주둔 지역 세수 +30%',
   징병: '주둔 지역 징병 +30%',
   건축: '주둔 지역 건설비 -30%',
   외교: '외교 수락률 증가',
@@ -36,16 +36,15 @@ export const TRAITS = {
 };
 
 export const BUILDINGS = {
-  market: { name: '시장', icon: '💰', cost: 60, ap: 2, desc: '징세 +50%, 턴 수입 +4' },
+  market: { name: '시장', icon: '💰', cost: 60, ap: 2, desc: '세수 +50%, 인구 상한 증가' },
   walls: { name: '성벽', icon: '🏰', cost: 80, ap: 2, desc: '방어 +50%' },
   port: { name: '항구', icon: '⚓', cost: 70, ap: 2, desc: '해상 이동 가능, 턴 수입 +3', coastal: true },
   barracks: { name: '병영', icon: '⚔️', cost: 60, ap: 2, desc: '징병 +50%' },
 };
 
 export const COST = {
-  tax: 1,
   conscript: 1,
-  conscriptGold: 15,
+  conscriptGold: 20,
   move: 1,
   diplomacy: 1,
   recruit: 1,
@@ -59,4 +58,11 @@ export const TREATY = {
   alliance: '동맹',
   nap: '불가침',
   vassal: '종속',
+};
+
+// 세율 정책: 매 턴 자동 징수
+export const TAX = {
+  low: { name: '낮음', mult: 0.6, loyalty: 3, growth: 1.6, desc: '세수 60% · 민심 +3/턴 · 인구 증가 빠름' },
+  normal: { name: '보통', mult: 1, loyalty: 0, growth: 1, desc: '세수 100%' },
+  high: { name: '높음', mult: 1.45, loyalty: -4, growth: 0.3, desc: '세수 145% · 민심 -4/턴 · 인구 정체' },
 };

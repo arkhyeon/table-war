@@ -85,20 +85,19 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       }
     }
     const isCap = plan.find((n) => n.region === i);
-    const troops = owner[i] === null ? rng.int(2, 7) + (wr.terrain === T.MOUNTAIN ? 3 : 0) : rng.int(5, 9);
+    const troops = (owner[i] === null ? rng.int(20, 70) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : namer(civ),
       owner: owner[i],
       troops,
       pop: wr.pop,
       buildings: { market: 0, walls: 0, port: 0, barracks: 0 },
-      taxed: false,
       conscripted: false,
-      unrest: 0,
+      loyalty: owner[i] === null ? 50 : 80,
     };
   });
   const s = {
-    version: 1,
+    version: 2,
     scenarioId: scn.id,
     seed,
     opts,
@@ -120,7 +119,8 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   };
   for (const n of plan) {
     const capReg = regions[n.region];
-    capReg.troops = 12 + n.size * 2;
+    capReg.troops = (12 + n.size * 2) * 1000;
+    capReg.loyalty = 100;
     capReg.buildings.walls = 1;
     capReg.buildings.market = 1;
     if (world.regions[n.region].coastal) capReg.buildings.port = 1;
@@ -135,6 +135,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       ap: 0,
       maxAp: 0,
       reputation: 60,
+      taxRate: 'normal',
       alive: true,
       isPlayer: n.id === playerId,
       aggression: Math.round(rng.range(0.35, 0.95) * 100) / 100,

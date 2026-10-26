@@ -1,7 +1,25 @@
 import { stateRng } from './rng.js';
-import { TERRAIN } from './rules.js';
-import { aiActions, aiDiplomacy, aiPrisoners } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions } from './engine.js';
+import { TERRAIN, TAX } from './rules.js';
+import { fmtTroops } from './format.js';
+import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination } from './engine.js';
+
+function revolt(s, world, rid, rng) {
+  const r = s.regions[rid];
+  const old = r.owner;
+  const rebels = Math.max(Math.round(r.troops * 0.6), Math.round(r.pop * 150));
+  const own = world.regions[rid].neighbors.map((x) => x.id).filter((x) => s.regions[x].owner === old);
+  for (const g of gensIn(s, rid, old)) g.region = own[0] ?? s.nations[old].capital;
+  r.owner = null;
+  r.troops = Math.round(rebels / 100) * 100;
+  r.loyalty = 50;
+  if (s.nations[old].capital === rid) {
+    const rest = nationRegions(s, old);
+    s.nations[old].capital = rest.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0] ?? null;
+  }
+  log(s, `🔥 ${r.name}에서 반란이 일어나 ${s.nations[old].name}의 지배에서 벗어났습니다! (반란군 ${fmtTroops(r.troops)})`, [old], 'warn');
+  checkElimination(s, world, old);
+}
 
 function upkeep(s, world) {
   const rng = stateRng(s);
@@ -18,19 +36,26 @@ function upkeep(s, world) {
     n.gold += net;
     if (n.gold < 0) {
       n.gold = 0;
-      for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(1, Math.floor(r.troops * 0.9));
+      for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.floor(r.troops * 0.009) * 100);
       log(s, `💸 ${n.name}의 국고가 바닥나 병사들이 탈영했습니다.`, [n.id], 'warn');
     }
   }
   for (let i = 0; i < s.regions.length; i++) {
     const r = s.regions[i];
+    const tax = r.owner === null ? TAX.normal : TAX[s.nations[r.owner].taxRate || 'normal'];
     const cap = (TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0);
-    if (!r.unrest && r.pop < cap) r.pop = Math.min(cap, r.pop * 1.03 + 0.5);
+    if (r.pop < cap) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth) + 0.3 * tax.growth);
     r.pop = Math.round(r.pop * 10) / 10;
-    r.unrest = Math.max(0, (r.unrest || 0) - 1);
-    r.taxed = false;
     r.conscripted = false;
-    if (r.owner === null && s.turn % 3 === 0 && r.troops < 12) r.troops += 1;
+    if (r.owner === null) {
+      if (s.turn % 3 === 0 && r.troops < 12000) r.troops += 1000;
+      continue;
+    }
+    // 민심: 매 턴 회복, 세율·주둔군·수도 여부 반영
+    const garrison = r.troops >= 3000 ? 2 : 0;
+    const isCap = s.nations[r.owner].capital === i ? 3 : 0;
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap));
+    if (r.loyalty < 25 && rng() < (25 - r.loyalty) / 70) revolt(s, world, i, rng);
   }
   for (const n of s.nations) if (n.alive) spawnGeneral(s, n.id, rng);
   for (const [k, rel] of Object.entries(s.relations)) {
@@ -70,10 +95,12 @@ export function checkGameOver(s) {
 
 export function endTurn(s, world) {
   s.turnNews = [];
+  s.battles = [];
   const rng = stateRng(s);
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {
     if (!s.nations[id].alive) continue;
+    aiTaxPolicy(s, id);
     aiDiplomacy(s, world, id);
     aiPrisoners(s, id);
     aiActions(s, world, id);

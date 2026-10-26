@@ -1,7 +1,7 @@
 import { stateRng } from './rng.js';
 import { COST } from './rules.js';
 import {
-  getRel, nationRegions, gensIn, nationPower, moveCost, estimateBattle, doMove, doTax, doConscript, doBuild,
+  getRel, nationRegions, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
   buildCost, recruitChance, doRecruit, doExecute, doRelease, log,
 } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal } from './diplomacy.js';
@@ -24,7 +24,7 @@ function frontierInfo(s, world, nid) {
       if (o === nid) continue;
       if (o !== null && getRel(s, nid, o).type === 'alliance') continue;
       front = true;
-      if (o !== null) th += s.regions[nb.id].troops * (nb.type === 'sea' ? 0.5 : 1);
+      if (o !== null) th += (s.regions[nb.id].troops / 1000) * (nb.type === 'sea' ? 0.5 : 1); // 단위: 천 명
     }
     threat[r] = th;
     if (front) {
@@ -63,7 +63,7 @@ export function aiActions(s, world, nid) {
     const opts = [];
     for (const r of mine) {
       const reg = s.regions[r];
-      if (reg.troops < 3) continue;
+      if (reg.troops < 3000) continue;
       const gens = gensIn(s, r, nid).map((g) => g.id);
       for (const nb of world.regions[r].neighbors) {
         const t = s.regions[nb.id];
@@ -72,10 +72,10 @@ export function aiActions(s, world, nid) {
         const cost = moveCost(world, r, nb.id);
         if (cost > n.ap) continue;
         if (nb.type === 'sea' && !reg.buildings.port && !gens.some((id) => s.generals[id].trait === '수군')) continue;
-        let keep = threat[r] > 0 ? Math.min(Math.floor(reg.troops / 3), Math.ceil(threat[r] * 0.3)) : 0;
+        let keep = threat[r] > 0 ? Math.min(Math.floor(reg.troops / 3), Math.ceil(threat[r] * 300)) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
-        const count = reg.troops - 1 - keep;
-        if (count < 2) continue;
+        const count = reg.troops - 1000 - keep;
+        if (count < 2000) continue;
         const est = estimateBattle(s, world, nid, r, nb.id, count, gens);
         const need = t.owner === null ? 1.25 : 1.15 + (1 - n.aggression) * 0.45;
         if (est.ratio < need) continue;
@@ -84,11 +84,9 @@ export function aiActions(s, world, nid) {
       }
     }
     if (n.gold >= COST.conscriptGold) {
-      const c = mine.filter((r) => !s.regions[r].conscripted).sort((a, b) => threat[b] + s.regions[b].pop * 0.5 - (threat[a] + s.regions[a].pop * 0.5))[0];
+      const c = mine.filter((r) => !s.regions[r].conscripted && (s.regions[r].loyalty ?? 100) >= 45).sort((a, b) => threat[b] + s.regions[b].pop * 0.5 - (threat[a] + s.regions[a].pop * 0.5))[0];
       if (c !== undefined) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 ? 12 : 0) + (dist[c] === 0 ? 6 : 0), run: () => doConscript(s, world, nid, c) });
     }
-    const tx = mine.filter((r) => !s.regions[r].taxed).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
-    if (tx !== undefined) opts.push({ score: 16 + s.regions[tx].pop * 0.3 + (n.gold < 60 ? 15 : 0), run: () => doTax(s, world, nid, tx) });
     if (n.ap >= 2 && n.gold >= 110) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
       if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
@@ -103,11 +101,11 @@ export function aiActions(s, world, nid) {
     }
     for (const r of mine) {
       const reg = s.regions[r];
-      if (reg.troops < 5 || dist[r] === undefined || dist[r] === 0) continue;
+      if (reg.troops < 5000 || dist[r] === undefined || dist[r] === 0) continue;
       const nb = world.regions[r].neighbors.find((x) => x.type !== 'sea' && s.regions[x.id].owner === nid && dist[x.id] < dist[r]);
       if (!nb || moveCost(world, r, nb.id) > n.ap) continue;
       const gens = gensIn(s, r, nid).map((g) => g.id);
-      opts.push({ score: 14 + reg.troops * 0.4, run: () => doMove(s, world, nid, r, nb.id, reg.troops - 1, gens) });
+      opts.push({ score: 14 + (reg.troops / 1000) * 0.4, run: () => doMove(s, world, nid, r, nb.id, reg.troops - 1000, gens) });
     }
     if (!opts.length) break;
     opts.sort((a, b) => b.score - a.score);
@@ -179,4 +177,15 @@ export function onProposalDeclined(s, prop) {
     s.nations[from].grudge = s.playerId;
     log(s, `😠 ${s.nations[from].name}이(가) 요구를 거절당해 분노했습니다.`, [from, s.playerId], 'diplo');
   }
+}
+
+// AI 세율: 국고 사정과 민심에 따라 조정
+export function aiTaxPolicy(s, nid) {
+  const n = s.nations[nid];
+  const mine = nationRegions(s, nid);
+  const avgLoy = mine.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, mine.length);
+  if (avgLoy < 45) n.taxRate = 'low';
+  else if (n.gold < 60 && avgLoy > 60) n.taxRate = 'high';
+  else if (n.gold > 350) n.taxRate = 'low';
+  else n.taxRate = 'normal';
 }

@@ -9,6 +9,7 @@ import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LA
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
+import { fmtTroops } from '../game/format.js';
 import { relTag, GenLine } from './SidePanel.jsx';
 
 function Modal({ title, onClose, wide, children }) {
@@ -35,7 +36,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
   const fr = game.regions[from], tr = game.regions[to];
   const edge = edgeBetween(world, from, to);
   const myGens = gensIn(game, from, pid);
-  const [count, setCount] = useState(Math.max(1, fr.troops - 1));
+  const [count, setCount] = useState(Math.max(1, fr.troops - 1000));
   const [sel, setSel] = useState(() => myGens.map((g) => g.id));
   const isAttack = tr.owner !== pid;
   const err = moveCheck(game, world, pid, from, to, count, sel);
@@ -53,7 +54,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
         </span>
         <span>대상</span>
         <span>
-          {owner} · {TERRAIN[world.regions[to].terrain].name} · 병사 {tr.troops}
+          {owner} · {TERRAIN[world.regions[to].terrain].name} · 병사 {tr.troops.toLocaleString('ko-KR')}명
           {tr.buildings.walls ? ' · 🏰성벽' : ''}
         </span>
         <span>행동력</span>
@@ -61,8 +62,8 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
       </div>
       <div className="col">
         <label>
-          병력 {count} / {fr.troops - 1}
-          <input type="range" min={1} max={Math.max(1, fr.troops - 1)} value={count} onChange={(e) => setCount(+e.target.value)} style={{ width: '100%' }} />
+          병력 {count.toLocaleString('ko-KR')} / {(fr.troops - 1).toLocaleString('ko-KR')}명
+          <input type="range" min={1} max={Math.max(1, fr.troops - 1)} step={fr.troops > 2000 ? 100 : 1} value={count} onChange={(e) => setCount(Math.min(fr.troops - 1, +e.target.value))} style={{ width: '100%' }} />
         </label>
         {myGens.length > 0 && (
           <div>
@@ -78,7 +79,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
           <div className="card">
             <div className="row" style={{ justifyContent: 'space-between' }}>
               <span>
-                공격력 <b>{Math.round(est.A)}</b> vs 방어력 <b>{Math.round(est.D)}</b>
+                공격력 <b>{fmtTroops(est.A)}</b> vs 방어력 <b>{fmtTroops(est.D)}</b>
               </span>
               <b style={{ color: est.winChance > 0.6 ? 'var(--ok)' : est.winChance > 0.35 ? 'var(--accent)' : 'var(--danger)' }}>승률 {Math.round(est.winChance * 100)}%</b>
             </div>
@@ -181,7 +182,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
                 </td>
                 <td>{game.generals[n.ruler]?.name || '-'}</td>
                 <td>{nationRegions(game, n.id).length}</td>
-                <td>{game.regions.reduce((a, r) => a + (r.owner === n.id ? r.troops : 0), 0)}</td>
+                <td>{fmtTroops(game.regions.reduce((a, r) => a + (r.owner === n.id ? r.troops : 0), 0))}</td>
                 <td>{Math.round((nationPower(game, n.id) / myPower) * 100)}%</td>
                 <td>{relText(game, pid, n.id)}</td>
                 <td>
@@ -225,7 +226,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
                   .sort((a, b) => adjTo(b, t.id) - adjTo(a, t.id))
                   .map((rid) => (
                     <label key={rid}>
-                      <input type="checkbox" checked={deal.give.regions.includes(rid)} onChange={() => toggle('give', rid)} /> {game.regions[rid].name} <small className="muted">병{game.regions[rid].troops}{adjTo(rid, t.id) ? ' · 접경' : ''}{me.capital === rid ? ' · 수도' : ''}</small>
+                      <input type="checkbox" checked={deal.give.regions.includes(rid)} onChange={() => toggle('give', rid)} /> {game.regions[rid].name} <small className="muted">병{fmtTroops(game.regions[rid].troops)}{adjTo(rid, t.id) ? ' · 접경' : ''}{me.capital === rid ? ' · 수도' : ''}</small>
                     </label>
                   ))}
               </div>
@@ -241,7 +242,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
                   .sort((a, b) => adjTo(b, pid) - adjTo(a, pid))
                   .map((rid) => (
                     <label key={rid}>
-                      <input type="checkbox" checked={deal.get.regions.includes(rid)} onChange={() => toggle('get', rid)} /> {game.regions[rid].name} <small className="muted">병{game.regions[rid].troops}{adjTo(rid, pid) ? ' · 접경' : ''}{t.capital === rid ? ' · 수도' : ''}</small>
+                      <input type="checkbox" checked={deal.get.regions.includes(rid)} onChange={() => toggle('get', rid)} /> {game.regions[rid].name} <small className="muted">병{fmtTroops(game.regions[rid].troops)}{adjTo(rid, pid) ? ' · 접경' : ''}{t.capital === rid ? ' · 수도' : ''}</small>
                     </label>
                   ))}
               </div>
@@ -446,7 +447,7 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
         <div className="help">
           <ul>
             <li>매 턴 각 국가에 확률적으로 역사 속 장수가 출현합니다. 한 판에 같은 장수는 두 번 나오지 않습니다.</li>
-            <li>기본 20%. 평균보다 장수가 적은 나라는 확률이 오르고(최대 2.5배), 많은 나라는 내려갑니다. 영토가 3개 이하인 약소국은 +5%.</li>
+            <li>기본 13%. 평균보다 장수가 적은 나라는 확률이 오르고(최대 2.5배), 많은 나라는 내려갑니다. 영토가 3개 이하인 약소국은 +5%.</li>
             <li>이미 강한 장수진을 가진 나라에는 능력치가 낮은 장수가, 약한 나라에는 뛰어난 장수가 나올 가중치가 커집니다.</li>
             <li>판을 거듭하며 자주 출현한 장수일수록 다음 판의 출현 가중치가 1/(1+0.5×출현횟수)로 줄어듭니다.</li>
             <li>장수는 자기 문명(또는 세력)의 인물이 주로 나오며, 삼국지에서는 재야 인물도 등장합니다.</li>
@@ -546,7 +547,10 @@ export function HelpModal({ onClose }) {
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6개당 1(최대 +5) + 신속 장수(최대 +2). 속국은 -1, 배신하면 다음 턴 -2.</li>
           <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 (우클릭으로 바로 열기). 최소 1명은 남겨야 합니다.</li>
           <li><b>지형</b>: 숲 방어+15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 바다 건너 -30%(항구 필요, AP+1).</li>
-          <li><b>내정</b>: 징세(턴당 1회, 시장 +50%), 징병(15금, 병영 +50%), 건설(시장·성벽·항구·병영). 병력 25명당 유지비 1금.</li>
+          <li><b>세금</b>: 매 턴 자동 징수. 세율(낮음·보통·높음)로 세수와 민심·인구 증가를 조절합니다. 병력 4천 명당 군량 1금.</li>
+          <li><b>민심</b>: 점령 직후 15에서 시작해 매 턴 회복(주둔군 3천 이상·수도·낮은 세율이면 더 빠름). 민심이 낮으면 세수·징병이 줄고, 25 미만이면 반란이 일어나 중립 반란군이 됩니다(지도에 빨간 점). 징병은 민심 -6.</li>
+          <li><b>내정</b>: 징병(20금, 병영 +50%), 건설(시장·성벽·항구·병영).</li>
+          <li><b>전황</b>: 지난 턴의 공격이 지도에 화살표로 표시됩니다(실선=점령, 점선=실패).</li>
           <li><b>장수</b>: 턴마다 확률적으로 출현(공평 규칙 적용). 이동 시 동행하면 공격 보정, 지역에 주둔하면 방어 보정. 적 지역 점령 시 수비 장수를 포로로 잡아 등용·처형·석방할 수 있고, 적 장수를 금으로 회유할 수도 있습니다.</li>
           <li><b>외교</b>: 금·영토를 주고받거나 동맹(상호 공격 불가), 불가침, 속국화, 공동 공격을 제안할 수 있습니다. 불가침·종속 상대를 공격하면 배신 페널티를 받습니다.</li>
           <li><b>맵 조작</b>: 휠 확대/축소, 드래그 이동. 자동 저장됩니다.</li>

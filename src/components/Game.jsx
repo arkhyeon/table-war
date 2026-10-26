@@ -6,6 +6,7 @@ import { endTurn } from '../game/turn.js';
 import { edgeBetween, getRel, canSail, income } from '../game/engine.js';
 import { fixJosa } from '../game/josa.js';
 import { clearSave } from '../storage.js';
+import { fmtTroops } from '../game/format.js';
 
 export default function Game({ world, scn, game, setGame, onExit }) {
   const [selected, setSelected] = useState(game.nations[game.playerId].capital);
@@ -165,6 +166,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             selected={selected}
             targets={targets}
             genCount={genCount}
+            battles={game.battles}
+            fmt={fmtTroops}
             onClick={onRegionClick}
             onContext={onRegionContext}
           />
