@@ -528,6 +528,8 @@ export function generateWorld(scn0, seed) {
   finalizeRegions(scn, g);
   buildGeometry(g);
   g.toPx = g.geo ? g.geo.toPx : null;
+  // 기후 판정용 위도
+  for (const r of g.regions) r.lat = g.geo ? g.geo.toLL(r.cx, r.cy)[1] : 62 - (r.cy / H) * 124;
   g.nearestRegion = (x, y, filter) => {
     let best = -1, bd = Infinity;
     const c = pixelToCell(size, cols, rows, x, y);

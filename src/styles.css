@@ -124,3 +124,5 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
   .diplo { grid-template-columns: 1fr; }
   .log { max-height: 26%; }
 }
+.replay { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: min(520px, 92%); background: #15171bf2; border: 1px solid var(--danger); border-radius: 10px; padding: 10px 12px; font-size: 13px; z-index: 5; }
+.setup-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; margin-bottom: 12px; }

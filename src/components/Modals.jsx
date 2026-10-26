@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import MapView from './MapView.jsx';
+import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp } from '../game/duel.js';
+import { decodeOwners } from '../game/fog.js';
+import { makeRng } from '../game/rng.js';
 import { TERRAIN, EDGE, TRAITS, COST, BUILDINGS } from '../game/rules.js';
 import { CIVS } from '../game/civs.js';
 import {
   estimateBattle, moveCheck, moveCost, doMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
-  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween,
+  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX,
 } from '../game/engine.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
@@ -31,7 +35,7 @@ function Modal({ title, onClose, wide, children }) {
 }
 
 // ───────── 이동/공격 ─────────
-export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
+export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel }) {
   const pid = game.playerId;
   const fr = game.regions[from], tr = game.regions[to];
   const edge = edgeBetween(world, from, to);
@@ -44,6 +48,9 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
   const rel = tr.owner !== null && tr.owner !== pid ? getRel(game, pid, tr.owner) : null;
   const betrayal = rel && (rel.type === 'nap' || rel.type === 'vassal');
   const owner = tr.owner === null ? '중립 세력' : game.nations[tr.owner].name;
+  const defGens = isAttack && tr.owner !== null ? gensIn(game, to, tr.owner) : [];
+  const canDuel = isAttack && sel.length > 0 && defGens.length > 0;
+  const [wantDuel, setWantDuel] = useState(true);
 
   return (
     <Modal title={isAttack ? `⚔️ ${tr.name} 공격` : fixJosa(`🚩 ${tr.name}(으)로 이동`)} onClose={onClose}>
@@ -55,10 +62,10 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
         <span>대상</span>
         <span>
           {owner} · {TERRAIN[world.regions[to].terrain].name} · 병사 {tr.troops.toLocaleString('ko-KR')}명
-          {tr.buildings.walls ? ' · 🏰성벽' : ''}
+          {tr.buildings.walls ? ` · 🏰성벽 ${tr.buildings.walls}/${WALL_MAX} (이겨도 성벽이 남으면 함락 안 됨)` : ''}
         </span>
         <span>행동력</span>
-        <span>{moveCost(world, from, to)} AP</span>
+        <span>{moveCost(world, from, to, game)} AP</span>
       </div>
       <div className="col">
         <label>
@@ -95,6 +102,11 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
             </div>
           </div>
         )}
+        {canDuel && (
+          <label style={{ fontSize: 13 }}>
+            <input type="checkbox" checked={wantDuel} onChange={(e) => setWantDuel(e.target.checked)} /> ⚔️ 일기토 신청 — {duelist(sel.map((id) => game.generals[id])).name} vs {duelist(defGens).name} (이기면 전투력 +15%, 지면 -15%)
+          </label>
+        )}
         {betrayal && <div style={{ color: 'var(--danger)' }}>⚠️ {rel.type === 'nap' ? '불가침 조약' : '종속 관계'} 중인 상대입니다. 공격 시 조약 파기, 평판 -25, 모든 국가 호감도 하락, 다음 턴 행동력 -2.</div>}
         {err && <div style={{ color: 'var(--danger)' }}>{err}</div>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -103,7 +115,11 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone }) {
             className="primary"
             disabled={!!err}
             onClick={() => {
-              const res = act((s) => doMove(s, world, pid, from, to, count, sel));
+              if (canDuel && wantDuel) {
+                onDuel({ from, to, count, sel });
+                return;
+              }
+              const res = act((s) => doMove(s, world, pid, from, to, count, sel, { duel: canDuel ? false : undefined }));
               if (res?.ok) onDone();
             }}
           >
@@ -182,7 +198,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
                 </td>
                 <td>{game.generals[n.ruler]?.name || '-'}</td>
                 <td>{nationRegions(game, n.id).length}</td>
-                <td>{fmtTroops(game.regions.reduce((a, r) => a + (r.owner === n.id ? r.troops : 0), 0))}</td>
+                <td>{game.opts?.revealTroops ? fmtTroops(game.regions.reduce((a, r) => a + (r.owner === n.id ? r.troops : 0), 0)) : '?'}</td>
                 <td>{Math.round((nationPower(game, n.id) / myPower) * 100)}%</td>
                 <td>{relText(game, pid, n.id)}</td>
                 <td>
@@ -447,7 +463,7 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
         <div className="help">
           <ul>
             <li>매 턴 각 국가에 확률적으로 역사 속 장수가 출현합니다. 한 판에 같은 장수는 두 번 나오지 않습니다.</li>
-            <li>기본 13%. 평균보다 장수가 적은 나라는 확률이 오르고(최대 2.5배), 많은 나라는 내려갑니다. 영토가 3개 이하인 약소국은 +5%.</li>
+            <li>기본 6%. 평균보다 장수가 적은 나라는 확률이 오르고(최대 2.5배), 많은 나라는 내려갑니다. 민심(평균 75 기준)·국고(200금 이상 +20%, 30금 미만 -30%)·평판도 확률에 반영되며, 영토 3곳 이하 약소국은 +2%p. 최대 30%.</li>
             <li>이미 강한 장수진을 가진 나라에는 능력치가 낮은 장수가, 약한 나라에는 뛰어난 장수가 나올 가중치가 커집니다.</li>
             <li>판을 거듭하며 자주 출현한 장수일수록 다음 판의 출현 가중치가 1/(1+0.5×출현횟수)로 줄어듭니다.</li>
             <li>장수는 자기 문명(또는 세력)의 인물이 주로 나오며, 삼국지에서는 재야 인물도 등장합니다.</li>
@@ -519,7 +535,7 @@ export function NewsModal({ news, turn, onClose }) {
   );
 }
 
-export function GameOverModal({ result, game, onNew, onContinue }) {
+export function GameOverModal({ result, game, onNew, onContinue, onChronicle }) {
   const me = game.nations[game.playerId];
   return (
     <Modal title={result.win ? '🏆 승리!' : '💀 패배'}>
@@ -528,6 +544,7 @@ export function GameOverModal({ result, game, onNew, onContinue }) {
         {me.name} · {game.turn}턴 · 영토 {nationRegions(game, game.playerId).length}
       </p>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button onClick={onChronicle}>📽️ 연대기</button>
         {result.win && <button onClick={onContinue}>계속 플레이</button>}
         <button className="primary" onClick={onNew}>
           새 게임
@@ -547,10 +564,17 @@ export function HelpModal({ onClose }) {
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6개당 1(최대 +5) + 신속 장수(최대 +2). 속국은 -1, 배신하면 다음 턴 -2.</li>
           <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 (우클릭으로 바로 열기). 최소 1명은 남겨야 합니다.</li>
           <li><b>지형</b>: 숲 방어+15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 바다 건너 -30%(항구 필요, AP+1).</li>
-          <li><b>세금</b>: 매 턴 자동 징수. 세율(낮음·보통·높음)로 세수와 민심·인구 증가를 조절합니다. 병력 4천 명당 군량 1금.</li>
-          <li><b>민심</b>: 점령 직후 15에서 시작해 매 턴 회복(주둔군 3천 이상·수도·낮은 세율이면 더 빠름). 민심이 낮으면 세수·징병이 줄고, 25 미만이면 반란이 일어나 중립 반란군이 됩니다(지도에 빨간 점). 징병은 민심 -6.</li>
-          <li><b>내정</b>: 징병(20금, 병영 +50%), 건설(시장·성벽·항구·병영).</li>
-          <li><b>전황</b>: 지난 턴의 공격이 지도에 화살표로 표시됩니다(실선=점령, 점선=실패).</li>
+          <li><b>세금</b>: 매 턴 자동 징수. 국가 카드에서 세율을 일괄 설정하고, 지역마다 따로 바꿀 수도 있습니다(높음=세수↑ 민심↓ 인구 정체).</li>
+          <li><b>유지비</b>: 병력 2,500명당 1금 + 장수 1명당 녹봉 1금. 국고가 바닥나면 병사가 탈영합니다.</li>
+          <li><b>징병</b>: 금 20과 인구를 소모하고 민심 -6. 병영이 있으면 +50%.</li>
+          <li><b>민심</b>: 점령 직후 15에서 회복. 낮으면 세수·징병 감소, 25 미만이면 반란. 영토가 15곳 늘 때마다 통치 부담으로 회복이 느려집니다.</li>
+          <li><b>보급</b>: 수도와 내 땅으로(바닷길은 양쪽 항구) 이어지지 않은 지역은 ✂ 표시, 병력 -8%/턴·전투력 -20%.</li>
+          <li><b>공성</b>: 성벽(내구 3)이 있으면 이겨도 성벽만 깎입니다(압승 시 2). 0이 되어야 함락. 포위당하지 않은 턴에는 1씩 복구됩니다.</li>
+          <li><b>날씨</b>: 계절(1턴=한 계절)·위도에 따라 비(공격 -10%, 도강 추가 감소)·눈(공격 -25%, 진입 AP+1)·폭풍(항해 불가)·가뭄(세수 -35%)·풍년(세수 +35%).</li>
+          <li><b>사건</b>: 시나리오별 역사 사건(쿠릴타이, 흑사병, 적벽의 동남풍 등)과 무작위 사건(역병, 금광, 의용군 등).</li>
+          <li><b>견제</b>: 영토 30% 이상의 강대국은 다른 나라들의 호감도가 계속 떨어집니다.</li>
+          <li><b>일기토</b>: 양쪽에 장수가 있으면 신청 가능. 공격 &gt; 강타, 강타 &gt; 방어, 방어 &gt; 공격(약한 피해)·반격, 반격 &gt; 공격·강타. 이기면 전투력 +15%.</li>
+          <li><b>장수 성장</b>: 전투·일기토 승리로 경험치를 얻어 레벨업(능력치 상승), 3·5·7·9레벨에 칭호.</li>
           <li><b>장수</b>: 턴마다 확률적으로 출현(공평 규칙 적용). 이동 시 동행하면 공격 보정, 지역에 주둔하면 방어 보정. 적 지역 점령 시 수비 장수를 포로로 잡아 등용·처형·석방할 수 있고, 적 장수를 금으로 회유할 수도 있습니다.</li>
           <li><b>외교</b>: 금·영토를 주고받거나 동맹(상호 공격 불가), 불가침, 속국화, 공동 공격을 제안할 수 있습니다. 불가침·종속 상대를 공격하면 배신 페널티를 받습니다.</li>
           <li><b>맵 조작</b>: 휠 확대/축소, 드래그 이동. 자동 저장됩니다.</li>
@@ -590,5 +614,159 @@ export function ConfirmModal({ text, onYes, onNo }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// ───────── 일기토 ─────────
+export function DuelModal({ game, attId, defId, onFinish }) {
+  const ag = game.generals[attId], dg = game.generals[defId];
+  const rng = useMemo(() => makeRng(Date.now()), []);
+  const [d, setD] = useState(() => newDuel(ag, dg));
+  const play = (m) => {
+    const next = structuredClone(d);
+    const am = aiMove(rng, dg, ag, m);
+    duelRound(next, ag, dg, m, am, rng);
+    setD(next);
+  };
+  const bar = (hp, max, color) => (
+    <div className="odds" style={{ background: '#444' }}>
+      <i style={{ width: `${(hp / max) * 100}%`, background: color }} />
+    </div>
+  );
+  const last = d.rounds[d.rounds.length - 1];
+  return (
+    <Modal title="⚔️ 일기토">
+      <div className="diplo">
+        <div className="card">
+          <b>{ag.name}</b> <small className="muted">무{ag.war} 지{ag.intel}</small>
+          {bar(d.hpA, d.maxA, 'var(--ok)')}
+          <small>
+            체력 {d.hpA}/{d.maxA}
+          </small>
+        </div>
+        <div className="card">
+          <b>{dg.name}</b> <small className="muted">무{dg.war} 지{dg.intel}</small>
+          {bar(d.hpB, d.maxB, 'var(--danger)')}
+          <small>
+            체력 {d.hpB}/{d.maxB}
+          </small>
+        </div>
+      </div>
+      <div className="col" style={{ marginTop: 10, fontSize: 13 }}>
+        {d.rounds.map((r, i) => (
+          <div key={i}>
+            {i + 1}합: {MOVES[r.m1].icon}{MOVES[r.m1].name} vs {MOVES[r.m2].icon}{MOVES[r.m2].name} → {ag.name} -{r.dA} / {dg.name} -{r.dB}
+          </div>
+        ))}
+        {last && last.m2 && <div className="muted">상대는 지력이 높을수록 내 수를 간파합니다.</div>}
+      </div>
+      {!d.done ? (
+        <>
+          <div className="actions" style={{ marginTop: 10 }}>
+            {Object.entries(MOVES).map(([k, m]) => (
+              <button key={k} onClick={() => play(k)} title={m.desc}>
+                {m.icon} {m.name}
+              </button>
+            ))}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            공격 &gt; 강타 · 강타 &gt; 방어 · 방어 &gt; 공격(약한 피해)·반격 · 반격 &gt; 공격·강타. 최대 6합, 체력이 0이 되면 패배(전사 위험).
+          </div>
+        </>
+      ) : (
+        <div className="row" style={{ justifyContent: 'space-between', marginTop: 12 }}>
+          <b>{d.winner === 0 ? '무승부!' : `${d.winner === 1 ? ag.name : dg.name} 승리!${d.ko ? ' (쓰러뜨림)' : ' (판정)'}`}</b>
+          <button className="primary" onClick={() => onFinish(d)}>
+            전투 개시 ▶
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ───────── 전투 다시보기 ─────────
+export function BattleReplay({ game, battles, index, onNext, onSkip }) {
+  const b = battles[index];
+  useEffect(() => {
+    const t = setTimeout(onNext, 2200);
+    return () => clearTimeout(t);
+  }, [index, onNext]);
+  const att = game.nations[b.attacker];
+  const def = b.defender === null ? null : game.nations[b.defender];
+  const res = b.result === 'win' ? '점령' : b.result === 'siege' ? '포위 공격' : '격퇴됨';
+  return (
+    <div className="replay">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <b>
+          ⚔️ 전투 {index + 1}/{battles.length}
+        </b>
+        <span className="row" style={{ gap: 4 }}>
+          <button className="sm" onClick={onNext}>
+            다음 ⏭
+          </button>
+          <button className="sm" onClick={onSkip}>
+            모두 건너뛰기
+          </button>
+        </span>
+      </div>
+      <div style={{ marginTop: 6 }}>
+        <span className="chip" style={{ background: att.color }} />
+        {att.name} → {def ? (
+          <>
+            <span className="chip" style={{ background: def.color }} />
+            {def.name}
+          </>
+        ) : (
+          '중립 세력'
+        )}{' '}
+        · {game.regions[b.to].name} · <b style={{ color: b.result === 'win' ? 'var(--accent)' : undefined }}>{res}</b>
+      </div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        {b.msg}
+      </div>
+    </div>
+  );
+}
+
+// ───────── 연대기 ─────────
+export function ChronicleModal({ world, game, onClose, view }) {
+  const frames = useMemo(() => [...(game.history || []), null], [game.history]);
+  const [i, setI] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  useEffect(() => {
+    if (!playing) return;
+    const t = setTimeout(() => (i < frames.length - 1 ? setI(i + 1) : setPlaying(false)), 450);
+    return () => clearTimeout(t);
+  }, [i, playing, frames.length]);
+  const owners = frames[i] === null ? game.regions.map((r) => r.owner) : decodeOwners(frames[i]);
+  const regions = owners.map((o) => ({ owner: o, troops: 0, buildings: {} }));
+  const nations = game.nations.map((n) => ({ ...n, alive: false }));
+  const counts = {};
+  owners.forEach((o) => o !== null && (counts[o] = (counts[o] || 0) + 1));
+  const top = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+  return (
+    <Modal title="📽️ 연대기" onClose={onClose} wide>
+      <div style={{ height: 420, borderRadius: 8, overflow: 'hidden' }}>
+        <MapView world={world} regions={regions} nations={nations} compact view={game.gameOver ? undefined : view} />
+      </div>
+      <div className="row" style={{ marginTop: 10 }}>
+        <button className="sm" onClick={() => (i >= frames.length - 1 ? (setI(0), setPlaying(true)) : setPlaying(!playing))}>
+          {playing ? '⏸' : '▶'}
+        </button>
+        <input type="range" min={0} max={frames.length - 1} value={i} onChange={(e) => (setPlaying(false), setI(+e.target.value))} style={{ flex: 1 }} />
+        <b>{i + 1}턴</b>
+      </div>
+      <div className="row" style={{ marginTop: 6, fontSize: 13 }}>
+        {top.map(([nid, c]) => (
+          <span key={nid}>
+            <span className="chip" style={{ background: game.nations[nid].color }} />
+            {game.nations[nid].name} {c}
+          </span>
+        ))}
+      </div>
+    </Modal>
   );
 }

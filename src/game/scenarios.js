@@ -5,6 +5,7 @@ const N = (name, civ, lon, lat, size, capital, ruler, pools) => ({ name, civ, lo
 export const SCENARIOS = [
   {
     id: 'random',
+    startYear: 1,
     name: '랜덤 대륙',
     era: '가상 세계',
     desc: '시드로 생성되는 가상 대륙. 문명과 국가가 무작위로 배치됩니다.',
@@ -16,6 +17,7 @@ export const SCENARIOS = [
   },
   {
     id: 'world1200',
+    startYear: 1200,
     name: '세계사 1200년',
     era: '몽골 제국 직전',
     desc: '테무진이 초원을 통일하기 직전의 세계. 송·금·호라즘·십자군 국가들이 공존합니다.',
@@ -54,6 +56,7 @@ export const SCENARIOS = [
   },
   {
     id: 'eastasia650',
+    startYear: 650,
     name: '동아시아 650년',
     era: '삼국 통일 전쟁기',
     desc: '당 태종의 대당제국, 고구려·백제·신라, 토번과 돌궐이 각축하는 7세기 동아시아.',
@@ -82,6 +85,7 @@ export const SCENARIOS = [
   },
   {
     id: 'threekingdoms200',
+    startYear: 200,
     name: '삼국지 200년',
     era: '관도대전 전야',
     desc: '조조와 원소가 하북·중원을 두고 맞서고, 손권·유표·유장·마등이 기회를 엿보는 후한 말.',
@@ -106,6 +110,7 @@ export const SCENARIOS = [
   },
   {
     id: 'europe1400',
+    startYear: 1400,
     name: '유럽사 1400년',
     era: '백년전쟁과 오스만의 부상',
     desc: '백년전쟁 중의 잉글랜드·프랑스, 칼마르 동맹, 폴란드-리투아니아, 발칸으로 진격하는 오스만.',
@@ -146,6 +151,7 @@ export const SCENARIOS = [
   },
   {
     id: 'africa1400',
+    startYear: 1400,
     name: '아프리카사 1400년',
     era: '황금과 소금의 시대',
     desc: '사하라 교역로의 말리·송가이, 에티오피아와 아달, 스와힐리 해안 도시와 그레이트 짐바브웨.',

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
-import { edgeBetween, getRel, canSail, income } from '../game/engine.js';
+import { edgeBetween, getRel, canSail, income, doMove, gensIn, supplied, nationRegions } from '../game/engine.js';
+import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
+import { duelist } from '../game/duel.js';
+import { SEASONS, seasonOf } from '../game/weather.js';
 import { fixJosa } from '../game/josa.js';
 import { clearSave } from '../storage.js';
 import { fmtTroops } from '../game/format.js';
@@ -18,6 +21,9 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const confirmIt = useCallback((text, onYes) => setAsk({ text, onYes }), []);
   const toastId = useRef(0);
   const me = game.nations[game.playerId];
+  const pid = game.playerId;
+  const [replay, setReplay] = useState(null); // { list, i }
+  const vis = useMemo(() => visibleSet(game, world, pid), [game, world, pid]);
 
   const toast = useCallback((text, bad = false) => {
     const id = ++toastId.current;
@@ -29,6 +35,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     (fn) => {
       const s = structuredClone(game);
       const res = fn(s);
+      updateExplored(s, world);
       if (res && res.ok === false) {
         toast(res.msg, true);
         return res;
@@ -37,15 +44,19 @@ export default function Game({ world, scn, game, setGame, onExit }) {
       if (res?.msg) toast(res.msg, res.accepted === false);
       return res;
     },
-    [game, setGame, toast],
+    [game, setGame, toast, world],
   );
 
   const doEndTurn = () => {
     setMoveMode(false);
     const s = structuredClone(game);
+    const before = visibleSet(game, world, pid);
     endTurn(s, world);
     setGame(s);
-    if (s.turnNews?.length && !s.gameOver) setModal({ type: 'news' });
+    const after = visibleSet(s, world, pid);
+    const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid || before.has(b.to) || after.has(b.to) || before.has(b.from));
+    if (s.opts?.showBattles !== false && seen.length && !s.gameOver) setReplay({ list: seen, i: 0 });
+    else if (s.turnNews?.length && !s.gameOver) setModal({ type: 'news' });
     if (!s.nations[s.playerId].alive) setSelected(null);
   };
 
@@ -104,8 +115,37 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   };
 
   const inc = income(game, game.playerId);
+  const finishReplay = useCallback(() => {
+    setReplay(null);
+    if (game.turnNews?.length) setModal({ type: 'news' });
+  }, [game.turnNews]);
+  const nextReplay = useCallback(() => {
+    if (!replay) return;
+    if (replay.i + 1 < replay.list.length) setReplay({ ...replay, i: replay.i + 1 });
+    else finishReplay();
+  }, [replay, finishReplay]);
+  const view = useCallback((rid) => viewOf(game, vis, rid), [game, vis]);
+  const showTroops = useCallback((rid) => troopsShown(game, viewOf(game, vis, rid)), [game, vis]);
+  const cutSet = useMemo(() => {
+    const sup = supplied(game, world, pid);
+    return new Set(nationRegions(game, pid).filter((r) => !sup.has(r)));
+  }, [game, world, pid]);
+  const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
+  const year = (scn.startYear ?? 1) + Math.floor((game.turn - 1) / 4);
+
+  const startDuel = ({ from, to, count, sel }) => {
+    const ag = duelist(sel.map((id) => game.generals[id]));
+    const dg = duelist(gensIn(game, to, game.regions[to].owner));
+    if (dg.war < ag.war - 15 && Math.random() < 0.7) {
+      toast(`${dg.name}이(가) 일기토를 거절하고 성문을 걸어 잠갔습니다.`);
+      const res = act((s) => doMove(s, world, pid, from, to, count, sel, { duel: false }));
+      if (res?.ok) { setModal(null); setMoveMode(false); }
+      return;
+    }
+    setModal({ type: 'duel', from, to, count, sel, attId: ag.id, defId: dg.id });
+  };
   const proposal = game.proposals[0];
-  const showProposal = proposal && !modal && !game.gameOver;
+  const showProposal = proposal && !modal && !replay && !game.gameOver;
 
   return (
     <div className="game">
@@ -118,8 +158,10 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           </b>
         </div>
         <div className="stat">
-          <small>턴</small>
-          <b>{game.turn}</b>
+          <small>턴 {game.turn}</small>
+          <b>
+            {year}년 {SEASONS[seasonOf(game.turn)]}
+          </b>
         </div>
         <div className="stat">
           <small>국고</small>
@@ -145,6 +187,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <button onClick={() => setModal({ type: 'diplo' })}>🤝 외교</button>
         <button onClick={() => setModal({ type: 'gens' })}>⭐ 장수</button>
         <button onClick={() => setShowLog((v) => !v)}>📜 기록</button>
+        <button onClick={() => setModal({ type: 'chronicle' })} title="연대기">📽️</button>
         <button onClick={() => setModal({ type: 'help' })}>❓</button>
         <button
           onClick={() => {
@@ -166,11 +209,17 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             selected={selected}
             targets={targets}
             genCount={genCount}
-            battles={game.battles}
+            battles={shownBattles}
             fmt={fmtTroops}
+            view={view}
+            showTroops={showTroops}
+            weather={game.weather}
+            cutSet={cutSet}
+            focus={replay ? replay.list[replay.i].to : null}
             onClick={onRegionClick}
             onContext={onRegionContext}
           />
+          {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} />}
           {moveMode && <div className="map-hint">이동/공격할 인접 지역을 클릭하세요 (Esc 취소) · 노랑=이동 빨강=공격</div>}
           {showLog && (
             <div className="log">
@@ -194,13 +243,28 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           world={world}
           game={game}
           selected={selected}
+          vis={vis}
           moveMode={moveMode}
           setMoveMode={setMoveMode}
           act={act}
           openGenerals={() => setModal({ type: 'gens' })}
         />
       </div>
-      {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
+      {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} onDuel={startDuel} />}
+      {modal?.type === 'duel' && (
+        <DuelModal
+          game={game}
+          attId={modal.attId}
+          defId={modal.defId}
+          onFinish={(d) => {
+            const m = modal;
+            act((s) => doMove(s, world, pid, m.from, m.to, m.count, m.sel, { duel: d }));
+            setModal(null);
+            setMoveMode(false);
+          }}
+        />
+      )}
+      {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
       {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
@@ -216,7 +280,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           }}
         />
       )}
-      {game.gameOver && (
+      {game.gameOver && modal?.type !== 'chronicle' && (
         <GameOverModal
           result={game.gameOver}
           game={game}
@@ -225,6 +289,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             onExit();
           }}
           onContinue={() => setGame({ ...game, gameOver: null, sandbox: true })}
+          onChronicle={() => setModal({ type: 'chronicle' })}
         />
       )}
     </div>

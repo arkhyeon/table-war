@@ -2,7 +2,7 @@ import { stateRng } from './rng.js';
 import { COST } from './rules.js';
 import {
   getRel, nationRegions, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
-  buildCost, recruitChance, doRecruit, doExecute, doRelease, log,
+  buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log,
 } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal } from './diplomacy.js';
 
@@ -69,13 +69,14 @@ export function aiActions(s, world, nid) {
         const t = s.regions[nb.id];
         if (t.owner === nid || !hostile(s, nid, t.owner)) continue;
         if (t.owner !== null && s.turn <= 3) continue; // 초반 3턴은 국가 간 전쟁 유예
-        const cost = moveCost(world, r, nb.id);
+        const cost = moveCost(world, r, nb.id, s);
         if (cost > n.ap) continue;
         if (nb.type === 'sea' && !reg.buildings.port && !gens.some((id) => s.generals[id].trait === '수군')) continue;
         let keep = threat[r] > 0 ? Math.min(Math.floor(reg.troops / 3), Math.ceil(threat[r] * 300)) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
         const count = reg.troops - 1000 - keep;
         if (count < 2000) continue;
+        if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;
         const est = estimateBattle(s, world, nid, r, nb.id, count, gens);
         const need = t.owner === null ? 1.25 : 1.15 + (1 - n.aggression) * 0.45;
         if (est.ratio < need) continue;
@@ -103,8 +104,9 @@ export function aiActions(s, world, nid) {
       const reg = s.regions[r];
       if (reg.troops < 5000 || dist[r] === undefined || dist[r] === 0) continue;
       const nb = world.regions[r].neighbors.find((x) => x.type !== 'sea' && s.regions[x.id].owner === nid && dist[x.id] < dist[r]);
-      if (!nb || moveCost(world, r, nb.id) > n.ap) continue;
+      if (!nb || moveCost(world, r, nb.id, s) > n.ap) continue;
       const gens = gensIn(s, r, nid).map((g) => g.id);
+      if (moveCheck(s, world, nid, r, nb.id, reg.troops - 1000, gens)) continue;
       opts.push({ score: 14 + (reg.troops / 1000) * 0.4, run: () => doMove(s, world, nid, r, nb.id, reg.troops - 1000, gens) });
     }
     if (!opts.length) break;

@@ -2,7 +2,11 @@ import { stateRng } from './rng.js';
 import { TERRAIN, TAX } from './rules.js';
 import { fmtTroops } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX } from './engine.js';
+import { rollWeather, weatherOf } from './weather.js';
+import { runEvents } from './events.js';
+import { updateExplored, encodeOwners } from './fog.js';
+import { hashString } from './rng.js';
 
 function revolt(s, world, rid, rng) {
   const r = s.regions[rid];
@@ -40,11 +44,17 @@ function upkeep(s, world) {
       log(s, `💸 ${n.name}의 국고가 바닥나 병사들이 탈영했습니다.`, [n.id], 'warn');
     }
   }
+  const supply = {};
+  const sizes = {};
+  for (const r of s.regions) if (r.owner !== null) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
+  for (const n of s.nations) if (n.alive) supply[n.id] = supplied(s, world, n.id);
   for (let i = 0; i < s.regions.length; i++) {
     const r = s.regions[i];
-    const tax = r.owner === null ? TAX.normal : TAX[s.nations[r.owner].taxRate || 'normal'];
+    const tax = r.owner === null ? TAX.normal : TAX[effTax(s, i)];
+    const w = weatherOf(s, i);
     const cap = (TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0);
-    if (r.pop < cap) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth) + 0.3 * tax.growth);
+    if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth) + 0.3 * tax.growth);
+    if (r.buildings.walls > 0 && r.buildings.walls < WALL_MAX && r.siegedTurn !== s.turn) r.buildings.walls += 1;
     r.pop = Math.round(r.pop * 10) / 10;
     r.conscripted = false;
     if (r.owner === null) {
@@ -54,10 +64,26 @@ function upkeep(s, world) {
     // 민심: 매 턴 회복, 세율·주둔군·수도 여부 반영
     const garrison = r.troops >= 3000 ? 2 : 0;
     const isCap = s.nations[r.owner].capital === i ? 3 : 0;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap));
+    // 보급이 끊긴 지역: 병력 감소·민심 하락
+    const cut = !supply[r.owner]?.has(i);
+    if (cut) r.troops = Math.max(100, Math.round((r.troops * 0.92) / 100) * 100);
+    const sprawl = Math.floor((sizes[r.owner] || 0) / 15); // 대제국일수록 통치 부담
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty - (cut ? 3 : 0) - sprawl));
     if (r.loyalty < 25 && rng() < (25 - r.loyalty) / 70) revolt(s, world, i, rng);
   }
   for (const n of s.nations) if (n.alive) spawnGeneral(s, n.id, rng);
+  // 견제: 영토 30% 이상을 가진 강대국은 다른 나라들의 경계를 산다
+  const total = s.regions.length;
+  for (const n of s.nations) {
+    if (!n.alive) continue;
+    const share = nationRegions(s, n.id).length / total;
+    if (share < 0.3) continue;
+    for (const o of s.nations) if (o.alive && o.id !== n.id && !isVassalOf(s, o.id, n.id)) s.opinion[o.id][n.id] -= 3;
+    if (!n.warnedHegemon) {
+      n.warnedHegemon = true;
+      log(s, `👁️ ${n.name}의 세력이 너무 커져 주변국들이 경계하기 시작했습니다.`, s.nations.map((x) => x.id), 'diplo');
+    }
+  }
   for (const [k, rel] of Object.entries(s.relations)) {
     if (rel.type === 'nap' && rel.until <= s.turn) {
       const [a, b] = k.split('-').map(Number);
@@ -106,7 +132,11 @@ export function endTurn(s, world) {
     aiActions(s, world, id);
   }
   upkeep(s, world);
+  (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
+  s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
+  runEvents(s, world, stateRng(s));
+  updateExplored(s, world);
   s.gameOver = s.sandbox && s.nations[s.playerId].alive ? null : checkGameOver(s);
   return s;
 }

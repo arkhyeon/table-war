@@ -37,7 +37,7 @@ export const TRAITS = {
 
 export const BUILDINGS = {
   market: { name: '시장', icon: '💰', cost: 60, ap: 2, desc: '세수 +50%, 인구 상한 증가' },
-  walls: { name: '성벽', icon: '🏰', cost: 80, ap: 2, desc: '방어 +50%' },
+  walls: { name: '성벽', icon: '🏰', cost: 80, ap: 2, desc: '방어 +50%, 내구 3: 0이 되기 전엔 함락 불가' },
   port: { name: '항구', icon: '⚓', cost: 70, ap: 2, desc: '해상 이동 가능, 턴 수입 +3', coastal: true },
   barracks: { name: '병영', icon: '⚔️', cost: 60, ap: 2, desc: '징병 +50%' },
 };

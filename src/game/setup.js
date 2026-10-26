@@ -3,6 +3,8 @@ import { T } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
 import { addGeneral, computeMaxAp } from './engine.js';
+import { rollWeather } from './weather.js';
+import { updateExplored, encodeOwners } from './fog.js';
 
 const colorFor = (i) => `hsl(${Math.round((i * 137.508 + 20) % 360)}, ${58 + (i % 3) * 10}%, ${46 + ((i * 7) % 3) * 6}%)`;
 
@@ -97,7 +99,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     };
   });
   const s = {
-    version: 2,
+    version: 3,
     scenarioId: scn.id,
     seed,
     opts,
@@ -116,12 +118,15 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     tried: {},
     log: [],
     gameOver: null,
+    buffs: [],
+    battles: [],
+    history: [],
   };
   for (const n of plan) {
     const capReg = regions[n.region];
     capReg.troops = (12 + n.size * 2) * 1000;
     capReg.loyalty = 100;
-    capReg.buildings.walls = 1;
+    capReg.buildings.walls = 3;
     capReg.buildings.market = 1;
     if (world.regions[n.region].coastal) capReg.buildings.port = 1;
     s.nations.push({
@@ -168,6 +173,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
   }
+  s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, ...opts };
+  s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
+  s.history.push(encodeOwners(s));
+  updateExplored(s, world);
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다. (시드: ${seed})`, nations: [playerId], kind: 'info' });
   return s;
 }

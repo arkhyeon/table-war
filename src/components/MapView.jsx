@@ -1,15 +1,25 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { TERRAIN } from '../game/rules.js';
+import { WEATHER } from '../game/weather.js';
 
 const NEUTRAL = '#b9b2a0';
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
   const drag = useRef(null);
 
   useEffect(() => setVb([0, 0, world.W, world.H]), [world]);
+  // 전투 다시보기: 해당 지역으로 화면 이동
+  useEffect(() => {
+    if (focus === null || focus === undefined) return;
+    const r = world.regions[focus];
+    setVb(([, , w, h]) => {
+      const nw = Math.min(w, world.W * 0.45), nh = nw * (h / w);
+      return [r.cx - nw / 2, r.cy - nh / 2, nw, nh];
+    });
+  }, [focus, world]);
 
   // 정적 레이어
   const statics = useMemo(() => {
@@ -97,6 +107,19 @@ export default function MapView({ world, regions, nations, selected, targets, on
     );
   });
   const zoomed = vb[2] < world.W * 0.55;
+  const viewOf = (rid) => (view ? view(rid) : 'visible');
+  const fogKey = view ? world.regions.map((r) => viewOf(r.id)[0]).join('') : '';
+  const fog = useMemo(() => {
+    let hidden = '', dim = '';
+    if (!view) return { hidden, dim };
+    world.regions.forEach((r, i) => {
+      const v = fogKey[i];
+      if (v === 'h') hidden += world.paths.regionPath[i];
+      else if (v === 'k') dim += world.paths.regionPath[i];
+    });
+    return { hidden, dim };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [world, fogKey]);
   const color = (rid) => {
     const o = regions[rid].owner;
     return o === null ? NEUTRAL : nations[o].color;
@@ -158,6 +181,9 @@ export default function MapView({ world, regions, nations, selected, targets, on
             <path d={statics.glyph.peakCap} fill="#ece8df" opacity={0.85} />
             <path d={statics.borders} fill="none" stroke="#00000045" strokeWidth={0.7} />
             <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+            <path d={fog.dim} fill="#1b1d22" opacity={0.22} fillRule="evenodd" />
+            <path d={fog.hidden} fill="#3a3c40" fillRule="evenodd" />
+            {focus !== null && focus !== undefined && <path d={statics.outline[focus]} fill="#ff334422" fillRule="evenodd" stroke="#ff3344" strokeWidth={3.2} />}
           {targets &&
             [...targets.entries()].map(([rid, kind]) => (
               <path
@@ -179,18 +205,33 @@ export default function MapView({ world, regions, nations, selected, targets, on
           {!compact &&
             world.regions.map((r) => {
               const reg = regions[r.id];
+              const v = viewOf(r.id);
+              if (v === 'hidden') return null;
+              const visible = v === 'visible';
               const own = reg.owner;
               const col = own === null ? '#666' : nations[own].color;
-              const t = fmt(reg.troops);
+              const t = !showTroops || showTroops(r.id) ? fmt(reg.troops) : '?';
               const fs = s * 0.8;
               const bw = Math.max(s * 1.9, String(t).length * fs * 0.62 + s * 0.6);
-              const rebel = reg.loyalty !== undefined && reg.owner !== null && reg.loyalty < 30;
-              const gc = genCount?.[r.id] || 0;
+              const rebel = visible && reg.loyalty !== undefined && reg.owner !== null && reg.loyalty < 30;
+              const wx = weather ? WEATHER[weather[r.id]] : null;
+              const cut = cutSet?.has(r.id);
+              const gc = visible ? genCount?.[r.id] || 0 : 0;
               const b = reg.buildings;
-              const icons = (b.walls ? '🏰' : '') + (b.market ? '💰' : '') + (b.port ? '⚓' : '') + (b.barracks ? '⚔️' : '');
+              const icons = (b.walls ? `🏰${b.walls < 3 ? b.walls : ''}` : '') + (b.market ? '💰' : '') + (b.port ? '⚓' : '') + (b.barracks ? '⚔️' : '');
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
                   <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill="#fffdf6" stroke={col} strokeWidth={s * 0.22} />
+                  {wx && wx.icon && (
+                    <text x={-bw / 2 - s * 0.1} dy={-s * 0.75} fontSize={s * 0.75} textAnchor="middle">
+                      {wx.icon}
+                    </text>
+                  )}
+                  {cut && (
+                    <text x={bw / 2 + s * 0.2} dy={s * 1.3} fontSize={s * 0.75} textAnchor="middle" fill="#ff9a3c" stroke="#000" strokeWidth={0.3} fontWeight="700">
+                      ✂
+                    </text>
+                  )}
                   {rebel && <circle cx={bw / 2} cy={-s * 0.7} r={s * 0.35} fill="#e2655a" stroke="#000" strokeWidth={0.4} />}
                   <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill="#222">
                     {t}

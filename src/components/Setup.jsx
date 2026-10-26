@@ -15,6 +15,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [nationCount, setNationCount] = useState(8);
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true });
   const scn = SCENARIOS.find((s) => s.id === scnId);
   const opts = useMemo(() => (scn.procedural ? { nationCount } : {}), [scn, nationCount]);
 
@@ -31,7 +32,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const pid = preview && player < preview.nations.length ? player : 0;
 
   const start = () => {
-    const state = createGame(world, scn, seed, pid, opts, loadHistory());
+    const state = createGame(world, scn, seed, pid, { ...opts, ...rules }, loadHistory());
     onStart(world, scn, state);
   };
 
@@ -88,7 +89,20 @@ export default function Setup({ onStart, onResume, hasSave }) {
             같은 시드는 같은 지도를 만듭니다. {scn.procedural ? '' : '역사 시나리오는 실제 지형·국가 배치를 쓰고, 시드는 지역 구획과 세부를 바꿉니다.'}
           </span>
         </div>
-        <h3>2. 국가 선택</h3>
+        <h3>2. 게임 옵션</h3>
+        <div className="setup-opts">
+          {[
+            ['revealMap', '🗺️ 지도 전체 공개', '끄면 정찰하지 않은 땅은 안개로 가려짐'],
+            ['revealTroops', '👁️ 병력 전체 공개', '끄면 시야 밖 지역의 병력은 ?로 표시'],
+            ['rememberExplored', '🧭 탐색 지역 기억', '한 번 본 땅은 계속 지도에 표시 (지도 전체 공개를 껐을 때)'],
+            ['showBattles', '⚔️ 턴마다 전투 다시보기', '시야 안에서 벌어진 전투만, 건너뛰기 가능'],
+          ].map(([k, label, tip]) => (
+            <label key={k} title={tip}>
+              <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
+            </label>
+          ))}
+        </div>
+        <h3>3. 국가 선택</h3>
         <div className="setup-body">
           <div className="preview">
             {world && preview ? (
