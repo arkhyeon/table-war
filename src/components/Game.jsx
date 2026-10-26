@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
 import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
-import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
+import { SEASONS, seasonOf, yearOf } from '../game/weather.js';
+import { spawnGeneral } from '../game/engine.js';
+import { stateRng } from '../game/rng.js';
+import { G } from '../game/rules.js';
 import { fixJosa } from '../game/josa.js';
 import { clearSave } from '../storage.js';
-import { fmtTroops } from '../game/format.js';
+import { fmtTroops, fmtGold } from '../game/format.js';
 
 export default function Game({ world, scn, game, setGame, onExit }) {
   const [selected, setSelected] = useState(game.nations[game.playerId].capital);
@@ -23,6 +26,11 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const me = game.nations[game.playerId];
   const pid = game.playerId;
   const [replay, setReplay] = useState(null); // { list, i }
+  const [replayDelay, setReplayDelay] = useState(1200);
+  const spect = !!game.spectator;
+  const [auto, setAuto] = useState(false);
+  const [autoSpeed, setAutoSpeed] = useState(900);
+  const tps = game.opts?.turnsPerSeason || 2;
   const vis = useMemo(() => visibleSet(game, world, pid), [game, world, pid]);
 
   const toast = useCallback((text, bad = false) => {
@@ -53,12 +61,49 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     const before = visibleSet(game, world, pid);
     endTurn(s, world);
     setGame(s);
+    if (s.spectator) return;
     const after = visibleSet(s, world, pid);
     const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid || before.has(b.to) || after.has(b.to) || before.has(b.from));
     if (s.opts?.showBattles !== false && seen.length && !s.gameOver) setReplay({ list: seen, i: 0 });
     else if ((s.turnNews?.length || s.turnEvents?.length) && !s.gameOver) setModal({ type: 'news' });
     if (!s.nations[s.playerId].alive) setSelected(null);
   };
+
+  // 관전 자동 진행
+  useEffect(() => {
+    if (!spect || !auto || modal) return;
+    const t = setTimeout(doEndTurn, autoSpeed);
+    return () => clearTimeout(t);
+  });
+
+  const takeOver = (nid) => {
+    const s = structuredClone(game);
+    s.spectator = false;
+    s.playerId = nid;
+    s.nations.forEach((n) => (n.isPlayer = n.id === nid));
+    s.gameOver = null;
+    s.explored = null;
+    updateExplored(s, world);
+    s.log.unshift({ turn: s.turn, text: `🎯 ${s.nations[nid].name}(으)로 난입했습니다!`, nations: [nid], kind: 'info' });
+    setGame(s);
+    setAuto(false);
+    setModal(null);
+    setSelected(s.nations[nid].capital);
+  };
+
+  const gift = (nid, kind, amount) =>
+    act((s) => {
+      const n = s.nations[nid];
+      if (kind === 'gold') n.gold += amount;
+      if (kind === 'troops' && n.capital !== null) s.regions[n.capital].troops += amount;
+      if (kind === 'general') {
+        const g = spawnGeneral(s, nid, stateRng(s), true);
+        if (!g) return { ok: false, msg: '더 출현할 장수가 없습니다.' };
+      }
+      const what = kind === 'gold' ? `금 ${fmtGold(amount)}` : kind === 'troops' ? `병력 ${fmtTroops(amount)}` : '장수';
+      s.log.unshift({ turn: s.turn, text: `🎁 하늘의 도움: ${n.name}에 ${what}`, nations: [nid], kind: 'info' });
+      return { ok: true, msg: `${n.name}에 ${what}을(를) 주었습니다.` };
+    });
 
   useEffect(() => {
     const onKey = (e) => {
@@ -123,6 +168,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     setReplay(null);
     if (game.turnNews?.length || game.turnEvents?.length) setModal({ type: 'news' });
   }, [game.turnNews, game.turnEvents]);
+  const toggleReplaySpeed = () => setReplayDelay((d) => (d < 1000 ? 1200 : 550));
   const nextReplay = useCallback(() => {
     if (!replay) return;
     if (replay.i + 1 < replay.list.length) setReplay({ ...replay, i: replay.i + 1 });
@@ -135,7 +181,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     return new Set(nationRegions(game, pid).filter((r) => !sup.has(r)));
   }, [game, world, pid]);
   const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
-  const year = yearOf(game.turn, scn.startYear ?? 1);
+  const year = yearOf(game.turn, scn.startYear ?? 1, tps);
   const myEvents = (game.turnEvents || []).filter((e) => e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
   const startDuel = ({ from, to, count, sel, opts }) => {
@@ -165,13 +211,13 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <div className="stat">
           <small>턴 {game.turn}</small>
           <b>
-            {year}년 {SEASONS[seasonOf(game.turn)]} <small className="muted">{((game.turn - 1) % TURNS_PER_SEASON) + 1}/{TURNS_PER_SEASON}</small>
+            {year}년 {SEASONS[seasonOf(game.turn, tps)]} {tps > 1 && <small className="muted">{((game.turn - 1) % tps) + 1}/{tps}</small>}
           </b>
         </div>
         <div className="stat">
           <small>국고</small>
           <b>
-            💰 {Math.floor(me.gold)} <small className="muted">({inc.net >= 0 ? '+' : ''}{inc.net}/턴)</small>
+            💰 {fmtGold(me.gold)} <small className="muted">({inc.net >= 0 ? '+' : ''}{fmtGold(inc.net)}/턴)</small>
           </b>
         </div>
         <div className="stat">
@@ -189,6 +235,23 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           <b>{me.reputation}</b>
         </div>
         <div className="spacer" />
+        {spect && (
+          <div className="spectate">
+            <b>👁️ 관전</b>
+            <button className={'sm' + (auto ? ' primary' : '')} onClick={() => setAuto(!auto)}>
+              {auto ? '⏸ 멈춤' : '▶ 자동 진행'}
+            </button>
+            <select value={autoSpeed} onChange={(e) => setAutoSpeed(+e.target.value)}>
+              <option value={1500}>느리게</option>
+              <option value={900}>보통</option>
+              <option value={300}>빠르게</option>
+            </select>
+            <button className="sm" onClick={() => setModal({ type: 'god' })}>🎁 지원</button>
+            <button className="sm primary" onClick={() => setModal({ type: 'takeover' })}>
+              🎯 난입
+            </button>
+          </div>
+        )}
         <button onClick={() => setModal({ type: 'diplo' })}>🤝 외교</button>
         <button onClick={() => setModal({ type: 'gens' })}>⭐ 장수</button>
         <button onClick={() => setShowLog((v) => !v)}>📜 기록</button>
@@ -201,7 +264,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         >
           ☰
         </button>
-        <button className="primary" onClick={doEndTurn} disabled={!!game.gameOver || !me.alive}>
+        <button className="primary" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
           턴 종료 ⏭
         </button>
       </div>
@@ -224,7 +287,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             onClick={onRegionClick}
             onContext={onRegionContext}
           />
-          {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} />}
+          {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} delay={replayDelay} onSpeed={toggleReplaySpeed} />}
           {moveMode && <div className="map-hint">이동/공격할 인접 지역을 클릭하세요 (Esc 취소) · 노랑=이동 빨강=공격</div>}
           {showLog && (
             <div className="log">
@@ -249,6 +312,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           game={game}
           selected={selected}
           vis={vis}
+          spectator={spect}
           moveMode={moveMode}
           setMoveMode={setMoveMode}
           act={act}
@@ -273,6 +337,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           }}
         />
       )}
+      {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
+      {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
       {modal?.type === 'conscript' && <ConscriptModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}

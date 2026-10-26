@@ -22,6 +22,17 @@ export const TRAITS = {
   신속: { cat: 'mil', scope: 'nation', val: [1, 1, 2], desc: (v) => `국가 행동력 +${v}` },
   징병: { cat: 'mil', scope: 'region', val: [0.1, 0.2, 0.3], desc: (v) => `주둔지 징병 +${pct(v)}` },
   보급: { cat: 'mil', scope: 'army', val: [0.4, 0.7, 1], desc: (v) => `보급 끊김 페널티 -${pct(v)}` },
+  설중: { cat: 'mil', scope: 'army', val: [0.05, 0.1, 0.15], desc: (v) => `눈 페널티 무시, 눈 속 공격 +${pct(v)}` },
+  우전: { cat: 'mil', scope: 'army', val: [0.05, 0.1, 0.15], desc: (v) => `비 페널티 무시, 빗속 공격 +${pct(v)}` },
+  사막: { cat: 'mil', scope: 'army', val: [0.05, 0.1, 0.15], desc: (v) => `사막 소모 무시, 사막 공격 +${pct(v)}` },
+  화공: { cat: 'mil', scope: 'army', val: [0.08, 0.14, 0.2], desc: (v) => `맑거나 가문 날 숲·구릉 공격 +${pct(v)}` },
+  위압: { cat: 'mil', scope: 'army', val: [0.05, 0.08, 0.12], desc: (v) => `적 방어력 -${pct(v)}` },
+  추격: { cat: 'mil', scope: 'army', val: [0.15, 0.25, 0.35], desc: (v) => `승리 시 적장 포로율 +${pct(v)}` },
+  노련: { cat: 'mil', scope: 'army', val: [0.15, 0.25, 0.35], desc: (v) => `공격 실패 시 생환 병력 +${pct(v)}` },
+  상륙: { cat: 'mil', scope: 'army', val: [0.4, 0.7, 1], desc: (v) => `상륙·절벽 상륙 페널티 -${pct(v)}` },
+  항해: { cat: 'mil', scope: 'army', val: [0.3, 0.6, 1], desc: (v, t) => `바다 병력 손실 -${pct(v)}${t >= 3 ? ', 폭풍·용오름 속 항해 가능' : ''}` },
+  해안방어: { cat: 'mil', scope: 'region', val: [0.1, 0.18, 0.25], desc: (v) => `주둔지가 바다에서 공격받을 때 방어 +${pct(v)}` },
+  철벽: { cat: 'mil', scope: 'region', val: [0.2, 0.35, 0.5], desc: (v) => `주둔지 방어 시 아군 손실 -${pct(v / (1 + v))}` },
   // ── 문관 ──
   정치: { cat: 'civ', scope: 'region', val: [0.1, 0.2, 0.3], desc: (v) => `주둔지 세수 +${pct(v)}` },
   인덕: { cat: 'civ', scope: 'region', val: [1, 2, 3], desc: (v) => `주둔지 민심 +${v}/턴, 포로 등용 +${v * 5}%` },
@@ -36,6 +47,11 @@ export const TRAITS = {
   의술: { cat: 'civ', scope: 'nation', val: [0.3, 0.6, 0.9], desc: (v) => `역병 피해 -${pct(v)}` },
   학문: { cat: 'civ', scope: 'nation', val: [0.1, 0.2, 0.3], desc: (v) => `장수 경험치 +${pct(v)}` },
   병참: { cat: 'civ', scope: 'nation', val: [0.08, 0.14, 0.2], desc: (v) => `병력 유지비 -${pct(v)}` },
+  치수: { cat: 'civ', scope: 'region', val: [0.1, 0.2, 0.3], desc: (v) => `강 유역 주둔지 세수 +${pct(v)}, 홍수 피해 없음` },
+  교역: { cat: 'civ', scope: 'region', val: [0.15, 0.3, 0.45], desc: (v) => `항구 있는 주둔지 세수 +${pct(v)}` },
+  설득: { cat: 'civ', scope: 'nation', val: [10, 15, 20], desc: (v) => `포로 등용 +${v}%p` },
+  모병: { cat: 'civ', scope: 'region', val: [0.5, 1, 1.5], desc: (v) => `주둔지 자원병 +${pct(v)}` },
+  명망: { cat: 'civ', scope: 'nation', val: [1, 1, 2], desc: (v) => `평판 +${v}/턴(최대 80)` },
 };
 
 export const MIL = Object.keys(TRAITS).filter((k) => TRAITS[k].cat === 'mil');

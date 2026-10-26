@@ -495,16 +495,27 @@ function buildSeaZones(scn, g) {
   const link = (a, b, type) => {
     if (!all[a].neighbors.some((x) => x.id === b)) all[a].neighbors.push({ id: b, type });
   };
+  // 해안 접촉 칸 중 험산·구릉·고산이 많으면 절벽 해안(상륙 페널티 큼)
+  const contact = new Map();
   for (const zr of seas) {
     for (const c of zr.cells) for (let d = 0; d < 6; d++) {
       const nb = neighborIndex(cols, rows, c, d);
       if (nb < 0) continue;
       if (seaOf[nb] >= 0 && seaOf[nb] !== zr.id) link(zr.id, seaOf[nb], 'sea');
       else if (region[nb] >= 0) {
-        link(zr.id, region[nb], 'landing');
-        link(region[nb], zr.id, 'coast');
+        const key = zr.id * 100000 + region[nb];
+        const v = contact.get(key) || { n: 0, rough: 0 };
+        v.n++;
+        if (terrain[nb] === T.MOUNTAIN || terrain[nb] === T.HILLS) v.rough++;
+        contact.set(key, v);
       }
     }
+  }
+  for (const [key, v] of contact) {
+    const z = Math.floor(key / 100000), r = key % 100000;
+    const cliff = v.rough / v.n > 0.5 || rng() < 0.12;
+    link(z, r, cliff ? 'cliff' : 'landing');
+    link(r, z, 'coast');
   }
   g.landCount = L;
   g.regions = all;

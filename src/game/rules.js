@@ -1,3 +1,6 @@
+// 금 단위: 병사 1명 유지비 = 1금/턴이 되도록 맞춘 배율
+export const G = 2500;
+
 // 지형 코드
 export const T = { SEA: 0, PLAINS: 1, FOREST: 2, HILLS: 3, DESERT: 4, TUNDRA: 5, MOUNTAIN: 6, PEAK: 7 };
 
@@ -17,15 +20,16 @@ export const EDGE = {
   river: { name: '도강', mult: 0.8, desc: '강 건너 공격 -20%' },
   coast: { name: '승선', mult: 1, desc: '항구 또는 수군 장수 필요' },
   sea: { name: '해전', mult: 1, desc: '함대끼리 교전' },
-  landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군 장수는 무시)' },
+  landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군·상륙 장수가 경감)' },
+  cliff: { name: '절벽 상륙', mult: 0.45, desc: '깎아지른 해안: 공격 -55%, 행동력 +1 (상륙 장수가 경감)' },
 };
 
 
 export const BUILDINGS = {
-  market: { name: '시장', icon: '💰', cost: 60, ap: 2, desc: '세수 +50%, 인구 상한 증가' },
-  walls: { name: '성벽', icon: '🏰', cost: 80, ap: 2, desc: '방어 +50%, 내구 3: 0이 되기 전엔 함락 불가' },
-  port: { name: '항구', icon: '⚓', cost: 70, ap: 2, desc: '해상 이동 가능, 턴 수입 +3', coastal: true },
-  barracks: { name: '병영', icon: '⚔️', cost: 60, ap: 2, desc: '징병 +50%' },
+  market: { name: '시장', icon: '💰', cost: 150000, ap: 2, desc: '세수 +50%, 인구 상한 증가' },
+  walls: { name: '성벽', icon: '🏰', cost: 200000, ap: 2, desc: '방어 +50%, 내구 3: 0이 되기 전엔 함락 불가' },
+  port: { name: '항구', icon: '⚓', cost: 175000, ap: 2, desc: '승선 가능, 턴 수입 +7,500', coastal: true },
+  barracks: { name: '병영', icon: '⚔️', cost: 150000, ap: 2, desc: '징병 +50%' },
 };
 
 export const COST = {
@@ -35,7 +39,7 @@ export const COST = {
   recruit: 1,
   relocate: 1,
   poach: 1,
-  poachGold: 80,
+  poachGold: 200000,
 };
 
 export const TREATY = {

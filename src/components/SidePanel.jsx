@@ -1,6 +1,7 @@
 import { TERRAIN, BUILDINGS, COST, EDGE, TAX } from '../game/rules.js';
 import { traitLabel, traitDesc } from '../game/traits.js';
-import { fmtTroops } from '../game/format.js';
+import EditableName from './EditableName.jsx';
+import { fmtTroops, fmtGold } from '../game/format.js';
 import { CIVS } from '../game/civs.js';
 import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
@@ -56,7 +57,7 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, moveMode, setMoveMode, act, openGenerals, openConscript }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -71,7 +72,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
   const wr = r ? world.regions[selected] : null;
   const view = r ? viewOf(game, vis, selected) : 'hidden';
   const showT = r && troopsShown(game, view);
-  const mine = r && r.owner === pid;
+  const mine = r && r.owner === pid && !spectator;
   const owner = r && r.owner !== null ? game.nations[r.owner] : null;
   const gens = r && view === 'visible' ? gensIn(game, selected) : [];
   const w = r ? WEATHER[game.weather?.[selected] || 'clear'] : null;
@@ -88,7 +89,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
       <div className="card">
         <h3>
           <span className="chip" style={{ background: me.color }} />
-          {me.name}
+          {spectator ? `👁️ 관전 중 (기준: ${me.name})` : <EditableName value={me.name} onSave={(t) => act((s) => ((s.nations[pid].name = t), { ok: true, msg: `국호를 ${t}(으)로 바꿨습니다.` }))} />}
         </h3>
         <div className="kv">
           <span>군주</span>
@@ -102,7 +103,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
           <span>{fmtTroops(inc.troops)}</span>
           <span>수입</span>
           <span>
-            세금 +{inc.gross} − 병력 유지비 {inc.army} − 장수 녹봉 {inc.salary}{inc.admin ? ` − 통치비 ${inc.admin}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{inc.net}</b>금/턴
+            세금 +{fmtGold(inc.gross)} − 병력 유지비 {fmtGold(inc.army)} − 장수 녹봉 {fmtGold(inc.salary)}{inc.admin ? ` − 통치비 ${fmtGold(inc.admin)}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{fmtGold(inc.net)}</b>금/턴
           </span>
           <span>세율 일괄</span>
           <span>
@@ -217,7 +218,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                 </span>
                 <span>세수</span>
                 <span>
-                  {regionTax(game, selected).toFixed(1)}금/턴 <small className="muted">세율 {TAX[effTax(game, selected)].name}</small>
+                  {fmtGold(regionTax(game, selected))}금/턴 <small className="muted">세율 {TAX[effTax(game, selected)].name}</small>
                 </span>
               </>
             )}
@@ -271,10 +272,10 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                   disabled={me.ap < 1 || me.gold < reliefCost(game, selected) || (r.reliefTurn !== undefined && game.turn - r.reliefTurn < RELIEF_COOLDOWN)}
                   title={`민심 40 미만이면 +14, 아니면 +7. 지역마다 ${RELIEF_COOLDOWN}턴에 한 번`}
                 >
-                  🍚 진휼 ({reliefCost(game, selected)}금·1AP)
+                  🍚 진휼 ({fmtGold(reliefCost(game, selected))}금·1AP)
                 </button>
                 <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
-                  🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({engineCost(game, selected)}금·1AP)
+                  🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({fmtGold(engineCost(game, selected))}금·1AP)
                 </button>
               </div>
               <h4 style={{ marginTop: 10 }}>건설</h4>
@@ -286,7 +287,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                   const done = r.buildings[k] && !repair;
                   return (
                     <button key={k} title={b.desc} disabled={done || me.gold < cost || me.ap < b.ap} onClick={() => act((s) => doBuild(s, world, pid, selected, k))}>
-                      {b.icon} {repair ? '성벽 보수' : b.name} {done ? '✓' : `${cost}금·${b.ap}AP`}
+                      {b.icon} {repair ? '성벽 보수' : b.name} {done ? '✓' : `${fmtGold(cost)}금·${b.ap}AP`}
                     </button>
                   );
                 })}
@@ -304,7 +305,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                   extra={
                     g.nation !== pid && (
                       <button className="sm" style={{ marginTop: 4 }} onClick={() => act((s) => doPoach(s, pid, g.id))} disabled={me.ap < COST.poach || me.gold < COST.poachGold || poachChance(game, pid, g) === 0}>
-                        회유 ({COST.poachGold}금·{COST.poach}AP · {poachChance(game, pid, g)}%)
+                        회유 ({fmtGold(COST.poachGold)}금·{COST.poach}AP · {poachChance(game, pid, g)}%)
                       </button>
                     )
                   }

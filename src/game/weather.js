@@ -1,18 +1,23 @@
 import { T } from './rules.js';
 
 export const SEASONS = ['봄', '여름', '가을', '겨울'];
-export const TURNS_PER_SEASON = 4;
-export const seasonOf = (turn) => Math.floor((turn - 1) / TURNS_PER_SEASON) % 4;
-export const yearOf = (turn, start = 1) => start + Math.floor((turn - 1) / (TURNS_PER_SEASON * 4));
+// 계절 길이(턴)는 판마다 옵션 (기본 2턴 = 한 계절, 8턴 = 1년)
+export const seasonOf = (turn, tps = 2) => Math.floor((turn - 1) / tps) % 4;
+export const yearOf = (turn, start = 1, tps = 2) => start + Math.floor((turn - 1) / (tps * 4));
 
 // 날씨 효과: att=공격력 배율(전장 기준), ap=진입 행동력 추가, tax=세수 배율, loyalty=민심 변화, noSea=항해 불가
 export const WEATHER = {
   clear: { name: '맑음', icon: '', att: 1, ap: 0, tax: 1, loyalty: 0 },
   rain: { name: '비', icon: '🌧️', att: 0.9, river: 0.85, ap: 0, tax: 1, loyalty: 0, desc: '공격 -10%, 도강 추가 -15%' },
-  storm: { name: '폭풍', icon: '🌀', att: 0.85, ap: 0, tax: 0.9, loyalty: 0, noSea: true, desc: '공격 -15%, 항해 불가, 세수 -10%' },
+  storm: { name: '폭풍', icon: '🌀', att: 0.85, ap: 0, tax: 0.9, loyalty: 0, noSea: true, seaLoss: 0.1, desc: '공격 -15%, 항해 불가, 세수 -10%, 함대 손실 10%' },
   snow: { name: '눈', icon: '❄️', att: 0.75, ap: 1, tax: 0.75, loyalty: -1, noGrowth: true, desc: '공격 -25%, 진입 행동력 +1, 세수 -25%, 인구 정체, 민심 -1' },
   drought: { name: '가뭄', icon: '☀️', att: 1, ap: 0, tax: 0.65, loyalty: -2, noGrowth: true, desc: '세수 -35%, 인구 정체, 민심 -2' },
   harvest: { name: '풍년', icon: '🌾', att: 1, ap: 0, tax: 1.35, loyalty: 2, desc: '세수 +35%, 민심 +2' },
+  // 바다 날씨
+  rough: { name: '풍랑', icon: '🌊', att: 0.8, ap: 0, tax: 1, loyalty: 0, seaLoss: 0.05, desc: '해전·상륙 -20%, 함대 손실 5%' },
+  tailwind: { name: '순풍', icon: '⛵', att: 1.15, ap: 0, tax: 1, loyalty: 0, seaLoss: 0, desc: '해전·상륙 +15%, 함대 손실 없음' },
+  waterspout: { name: '용오름', icon: '🌪️', att: 0.8, ap: 0, tax: 1, loyalty: 0, noSea: true, seaLoss: 0.15, desc: '항해 불가, 함대 손실 15%' },
+  seafog: { name: '해무', icon: '🌫️', att: 1.15, ap: 0, tax: 1, loyalty: 0, seaLoss: 0.02, desc: '짙은 안개로 기습: 상륙·해전 +15%' },
 };
 
 function hash(a, b, c) {
@@ -45,10 +50,10 @@ const CLIMATE = {
     [['rain', 0.25], ['drought', 0.05]],
   ],
   sea: [
-    [['rain', 0.2], ['storm', 0.05]],
-    [['storm', 0.15], ['rain', 0.1]],
-    [['storm', 0.2], ['rain', 0.1]],
-    [['storm', 0.1], ['rain', 0.15]],
+    [['seafog', 0.15], ['tailwind', 0.15], ['rough', 0.1], ['storm', 0.05]],
+    [['tailwind', 0.2], ['storm', 0.12], ['waterspout', 0.05], ['seafog', 0.05]],
+    [['storm', 0.15], ['rough', 0.15], ['tailwind', 0.1], ['waterspout', 0.03]],
+    [['rough', 0.25], ['storm', 0.1], ['seafog', 0.1]],
   ],
 };
 
@@ -60,8 +65,8 @@ export function climateOf(r) {
   return 'temperate';
 }
 
-export function rollWeather(world, turn, seedNum) {
-  const season = seasonOf(turn);
+export function rollWeather(world, turn, seedNum, tps = 2) {
+  const season = seasonOf(turn, tps);
   const zone = world.unit * 9;
   return world.regions.map((r) => {
     const zx = Math.floor(r.cx / zone), zy = Math.floor(r.cy / zone);

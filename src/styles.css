@@ -155,3 +155,7 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
 @media (prefers-reduced-motion: reduce) { .arena * { animation: none !important; } .arena .mv, .arena .dmg { opacity: 1; } }
 .event-card { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; background: #2b2619; }
 .event-card h4 { margin: 0 0 4px; }
+.btnlike { cursor: pointer; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; align-items: center; }
+.btnlike:hover { border-color: var(--accent); }
+button.ghost { background: transparent; border-color: transparent; padding: 0 4px; }
+.spectate { display: flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--accent); border-radius: 8px; background: #3a3426; }

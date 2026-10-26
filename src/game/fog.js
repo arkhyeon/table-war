@@ -2,6 +2,7 @@ import { getRel, isVassalOf } from './engine.js';
 
 // 플레이어 시야: 내 땅·동맹·속국/종주국 땅과 그 인접 지역 (항구가 있으면 바닷길 너머도)
 export function visibleSet(s, world, nid) {
+  if (s.spectator) return new Set(s.regions.map((_, i) => i));
   const vis = new Set();
   const friendly = (o) => o === nid || (o !== null && o !== undefined && (getRel(s, nid, o).type === 'alliance' || isVassalOf(s, o, nid) || isVassalOf(s, nid, o)));
   s.regions.forEach((r, i) => {

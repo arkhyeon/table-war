@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
+import EditableName from './EditableName.jsx';
 import { SCENARIOS } from '../game/scenarios.js';
 import { generateWorld } from '../game/mapgen.js';
 import { createGame } from '../game/setup.js';
@@ -15,7 +16,8 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [nationCount, setNationCount] = useState(8);
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
-  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true });
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, turnsPerSeason: 2 });
+  const [names, setNames] = useState({});
   const scn = SCENARIOS.find((s) => s.id === scnId);
   const opts = useMemo(() => (scn.procedural ? { nationCount } : {}), [scn, nationCount]);
 
@@ -31,10 +33,11 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const preview = useMemo(() => (world ? createGame(world, scn, seed, 0, opts) : null), [world, scn, seed, opts]);
   const pid = preview && player < preview.nations.length ? player : 0;
 
-  const start = () => {
-    const state = createGame(world, scn, seed, pid, { ...opts, ...rules }, loadHistory());
+  const start = (spectator = false) => {
+    const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator }, loadHistory());
     onStart(world, scn, state);
   };
+  const nameOf = (n) => names[n.id] || n.name;
 
   return (
     <div className="setup">
@@ -65,6 +68,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
               onClick={() => {
                 setScnId(s.id);
                 setPlayer(0);
+                setNames({});
               }}
             >
               <b>{s.name}</b>
@@ -101,15 +105,24 @@ export default function Setup({ onStart, onResume, hasSave }) {
               <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
             </label>
           ))}
+          <label title="한 계절이 몇 턴인지. 짧을수록 날씨·계절이 빨리 바뀜">
+            🗓️ 계절 길이{' '}
+            <select value={rules.turnsPerSeason} onChange={(e) => setRules({ ...rules, turnsPerSeason: +e.target.value })}>
+              <option value={1}>1턴 (1년 = 4턴)</option>
+              <option value={2}>2턴 (1년 = 8턴)</option>
+              <option value={4}>4턴 (1년 = 16턴)</option>
+            </select>
+          </label>
         </div>
         <h3>3. 국가 선택</h3>
+        <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>나라 이름은 ✏️로 바꿀 수 있습니다. 장수 이름은 게임 중 장수 목록에서 바꿉니다.</p>
         <div className="setup-body">
           <div className="preview">
             {world && preview ? (
               <MapView
                 world={world}
                 regions={preview.regions}
-                nations={preview.nations}
+                nations={preview.nations.map((n) => ({ ...n, name: nameOf(n) }))}
                 selected={preview.nations[pid]?.capital}
                 compact
                 onClick={(rid) => {
@@ -125,25 +138,28 @@ export default function Setup({ onStart, onResume, hasSave }) {
             {preview?.nations.map((n) => {
               const ruler = preview.generals[n.ruler];
               return (
-                <button key={n.id} className={'nation-item' + (n.id === pid ? ' sel' : '')} onClick={() => setPlayer(n.id)}>
+                <div key={n.id} role="button" tabIndex={0} className={'nation-item btnlike' + (n.id === pid ? ' sel' : '')} onClick={() => setPlayer(n.id)}>
                   <span>
                     <span className="chip" style={{ background: n.color }} />
-                    {n.name}
+                    <EditableName value={nameOf(n)} onSave={(t) => setNames({ ...names, [n.id]: t })} />
                     <small className="muted"> · {ruler?.name}</small>
                   </span>
                   <small className="muted">
                     {CIVS[n.civ]?.name} · {nationRegions(preview, n.id).length}지역
                   </small>
-                </button>
+                </div>
               );
             })}
           </div>
         </div>
         <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
           <span className="muted">
-            {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview?.nations[pid]?.name}</b>
+            {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
-          <button className="primary" disabled={!world} onClick={start}>
+          <button disabled={!world} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행하고, 원할 때 아무 나라로 난입">
+            👁️ 관전으로 시작
+          </button>
+          <button className="primary" disabled={!world} onClick={() => start(false)}>
             게임 시작 ▶
           </button>
         </div>

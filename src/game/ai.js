@@ -1,5 +1,5 @@
 import { stateRng } from './rng.js';
-import { COST } from './rules.js';
+import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
@@ -21,10 +21,43 @@ const hostile = (s, a, b) => {
 // 바다 구역은 적 함대가 있을 때만 위협/전선으로 본다
 const isEnemyFleet = (s, nid, rid) => s.regions[rid].sea && s.regions[rid].owner !== null && s.regions[rid].owner !== nid && s.regions[rid].troops > 0;
 
+// 전략 목표: 6턴마다 가장 만만하거나 미운 이웃 국가를 정하고 병력을 그쪽 국경으로 모은다
+function updateGoal(s, world, nid) {
+  const n = s.nations[nid];
+  if (n.goal !== undefined && n.goal !== null && s.nations[n.goal]?.alive && s.turn - (n.goalSince || 0) < 6) return;
+  const myP = nationPower(s, nid);
+  const cand = new Map();
+  for (const r of nationRegions(s, nid)) {
+    for (const nb of world.regions[r].neighbors) {
+      let o = s.regions[nb.id].owner;
+      if (s.regions[nb.id].sea) {
+        // 바다 건너 해안국도 후보 (승선 가능할 때)
+        for (const x of world.regions[nb.id].neighbors) {
+          const oo = s.regions[x.id].owner;
+          if (!s.regions[x.id].sea && oo !== null && oo !== nid) cand.set(oo, (cand.get(oo) || 0) - 10);
+        }
+        continue;
+      }
+      if (o === null || o === nid) continue;
+      cand.set(o, cand.get(o) || 0);
+    }
+  }
+  let best = null, bv = -Infinity;
+  for (const [o, base] of cand) {
+    if (!hostile(s, nid, o) || getRel(s, nid, o).type !== 'none') continue;
+    const v = base + (myP / Math.max(1, nationPower(s, o))) * 30 - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0);
+    if (v > bv) { bv = v; best = o; }
+  }
+  n.goal = best;
+  n.goalSince = s.turn;
+}
+
 function frontierInfo(s, world, nid) {
   const mine = nationRegions(s, nid);
+  const goal = s.nations[nid].goal;
   const threat = {}, dist = {};
   const queue = [];
+  const stage = [];
   for (const r of mine) {
     let th = 0, front = false;
     for (const nb of world.regions[r].neighbors) {
@@ -37,10 +70,15 @@ function frontierInfo(s, world, nid) {
       if (o !== null) th += (t.troops / 1000) * (t.sea ? 0.6 : 1); // 단위: 천 명
     }
     threat[r] = th;
-    if (front) {
-      dist[r] = 0;
-      queue.push(r);
-    }
+    if (front) queue.push(r);
+    if (goal !== null && goal !== undefined && world.regions[r].neighbors.some((x) => s.regions[x.id].owner === goal && !s.regions[x.id].sea)) stage.push(r);
+  }
+  // 목표국 국경이 있으면 그쪽으로, 없으면 모든 전선으로 병력을 보냄
+  const seeds = stage.length ? [...new Set([...stage, ...queue.filter((r) => threat[r] > s.regions[r].troops / 1000)])] : queue;
+  queue.length = 0;
+  for (const r of seeds) {
+    dist[r] = 0;
+    queue.push(r);
   }
   for (let q = 0; q < queue.length; q++) {
     const r = queue[q];
@@ -60,6 +98,7 @@ function targetBonus(s, nid, owner) {
   let b = 0;
   if (s.joint.some((j) => (j.a === nid || j.b === nid) && j.target === owner)) b += 30;
   if (s.coalition?.target === owner) b += 20;
+  if (s.nations[nid].goal === owner) b += 20;
   const op = s.opinion[nid][owner];
   if (op < -20) b += Math.min(25, -op / 3);
   if (s.nations[nid].grudge === owner) b += 15;
@@ -82,6 +121,9 @@ function attackOption(s, world, nid, from, to, count, gens, need) {
 
 export function aiActions(s, world, nid) {
   const n = s.nations[nid];
+  updateGoal(s, world, nid);
+  // 섬나라: 육로로 맞닿은 적이나 중립지가 없으면 해군 중심
+  const island = !nationRegions(s, nid).some((r) => world.regions[r].neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== nid && hostile(s, nid, s.regions[x.id].owner)));
   let guard = 0;
   while (n.alive && n.ap > 0 && guard++ < 40) {
     const { mine, threat, dist } = frontierInfo(s, world, nid);
@@ -115,7 +157,7 @@ export function aiActions(s, world, nid) {
     if (n.ap >= 2 && s.turn > 3) {
       for (const r of mine) {
         const reg = s.regions[r];
-        if (reg.troops < 8000) continue;
+        if (reg.troops < (island ? 4000 : 8000)) continue;
         const gens = gensIn(s, r, nid).map((g) => g.id);
         if (!canSail(s, nid, r, gens)) continue;
         for (const z of world.regions[r].neighbors) {
@@ -123,20 +165,20 @@ export function aiActions(s, world, nid) {
           const zr = s.regions[z.id];
           if (zr.owner !== null && zr.owner !== nid && zr.troops > 0) continue;
           const count = reg.troops - 1000 - (threat[r] > 0 ? Math.ceil(threat[r] * 400) : 0);
-          if (count < 6000) continue;
+          if (count < (island ? 3000 : 6000)) continue;
           const target = world.regions[z.id].neighbors.find((x) => {
-            if (x.type !== 'landing') return false;
+            if (x.type !== 'landing' && x.type !== 'cliff') return false;
             const t = s.regions[x.id];
-            return t.owner !== nid && hostile(s, nid, t.owner) && !(t.owner !== null && s.turn <= 3) && t.troops * 1.6 < count * 0.75;
+            return t.owner !== nid && hostile(s, nid, t.owner) && !(t.owner !== null && s.turn <= 3) && t.troops * 1.6 < count * (x.type === 'cliff' ? 0.45 : 0.75);
           });
           if (!target || moveCheck(s, world, nid, r, z.id, count, gens)) continue;
-          opts.push({ score: 30 + s.regions[target.id].pop * 0.4, run: () => doMove(s, world, nid, r, z.id, count, gens) });
+          opts.push({ score: 30 + s.regions[target.id].pop * 0.4 + (island ? 15 : 0) + (s.regions[target.id].owner === n.goal ? 10 : 0), run: () => doMove(s, world, nid, r, z.id, count, gens) });
         }
       }
     }
     // 바다에 남은 함대는 가까운 아군 해안으로 귀환
     for (const z of fleets) {
-      const back = world.regions[z].neighbors.find((x) => x.type === 'landing' && s.regions[x.id].owner === nid);
+      const back = world.regions[z].neighbors.find((x) => (x.type === 'landing' || x.type === 'cliff') && s.regions[x.id].owner === nid);
       if (back && !moveCheck(s, world, nid, z, back.id, s.regions[z].troops, [])) {
         const gens = gensIn(s, z, nid).map((g) => g.id);
         opts.push({ score: 12, run: () => doMove(s, world, nid, z, back.id, s.regions[z].troops, gens) });
@@ -147,30 +189,36 @@ export function aiActions(s, world, nid) {
     const net = income(s, nid).net;
     if (c !== undefined && net > 8) {
       const r = s.regions[c];
-      let amount = conscriptMax(s, c, nid);
-      while (amount > 1000 && (conscriptCost(s, c, amount).loyalty > (r.loyalty ?? 100) - 45 || conscriptCost(s, c, amount).gold > n.gold - 20 || amount / 2500 > net * 0.5)) amount -= 500;
-      if (amount >= 1000 && conscriptCost(s, c, amount).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 ? 12 : 0) + (dist[c] === 0 ? 6 : 0), run: () => doConscript(s, world, nid, c, amount) });
+      // 돈이 넘치면 민심을 해치지 않는 모병, 아니면 징집
+      const mode = n.gold > 300 * G ? 'hire' : 'draft';
+      let amount = conscriptMax(s, c, nid, mode);
+      const bad = (a) => {
+        const k = conscriptCost(s, c, a, mode);
+        return k.loyalty > (r.loyalty ?? 100) - 45 || k.gold > n.gold - 20 * G || a > net * 0.5;
+      };
+      while (amount > 1000 && bad(amount)) amount -= 500;
+      if (amount >= 1000 && conscriptCost(s, c, amount, mode).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 * G ? 12 : 0) + (dist[c] === 0 ? 6 : 0), run: () => doConscript(s, world, nid, c, amount, mode) });
     }
     // 진휼: 반란 위험 지역
     const sad = mine.filter((r) => (s.regions[r].loyalty ?? 100) < 28 && (s.regions[r].reliefTurn === undefined || s.turn - s.regions[r].reliefTurn >= RELIEF_COOLDOWN)).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty)[0];
-    if (sad !== undefined && n.gold >= reliefCost(s, sad) + 40) opts.push({ score: 27, run: () => doRelief(s, nid, sad) });
-    if (n.ap >= 2 && n.gold >= 110) {
+    if (sad !== undefined && n.gold >= reliefCost(s, sad) + 40 * G) opts.push({ score: 27, run: () => doRelief(s, nid, sad) });
+    if (n.ap >= 2 && n.gold >= 110 * G) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
-      if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
+      if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
       const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
-      if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30) opts.push({ score: 19 + s.regions[mk].pop * 0.2, run: () => doBuild(s, world, nid, mk, 'market') });
+      if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2, run: () => doBuild(s, world, nid, mk, 'market') });
       const br = mine.filter((r) => !s.regions[r].buildings.barracks && dist[r] <= 1).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
-      if (br !== undefined && n.gold >= 200) opts.push({ score: 15, run: () => doBuild(s, world, nid, br, 'barracks') });
-      const pt = mine.find((r) => world.regions[r].coastal && !s.regions[r].buildings.port);
-      if (pt !== undefined && n.gold >= 220) opts.push({ score: 13, run: () => doBuild(s, world, nid, pt, 'port') });
+      if (br !== undefined && n.gold >= 200 * G) opts.push({ score: 15, run: () => doBuild(s, world, nid, br, 'barracks') });
+      const pt = mine.filter((r) => world.regions[r].coastal && !s.regions[r].buildings.port).sort((a, b) => s.regions[b].troops - s.regions[a].troops)[0];
+      if (pt !== undefined && n.gold >= (island ? 160 : 220) * G) opts.push({ score: island ? 32 : 13, run: () => doBuild(s, world, nid, pt, 'port') });
     }
     // 공성병기: 성벽 있는 적지와 맞닿은 전선
-    if (n.gold >= 130) {
+    if (n.gold >= 130 * G) {
       const eg = mine.find((r) => (s.regions[r].engines || 0) < ENGINE_MAX && s.regions[r].troops >= 8000 && world.regions[r].neighbors.some((x) => {
         const t = s.regions[x.id];
         return !t.sea && t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner) && (t.buildings.walls || 0) >= 2;
       }));
-      if (eg !== undefined && n.gold >= engineCost(s, eg) + 60) opts.push({ score: 21, run: () => doBuildEngine(s, nid, eg) });
+      if (eg !== undefined && n.gold >= engineCost(s, eg) + 60 * G) opts.push({ score: 21, run: () => doBuildEngine(s, nid, eg) });
     }
     for (const r of mine) {
       const reg = s.regions[r];
@@ -211,9 +259,9 @@ export function aiDiplomacy(s, world, nid) {
   else if (rel.type === 'none' && theirP > myP * 2.2 && neighbors.has(o.id) && rng.chance(0.4)) deal.treaty = 'vassal_me';
   else if (rel.type === 'none' && theirP > myP * 1.3 && neighbors.has(o.id)) {
     deal.treaty = 'nap';
-    deal.give.gold = Math.min(n.gold, Math.round(theirP * 0.15));
-  } else if (rel.type === 'none' && myP > theirP * 2 && neighbors.has(o.id) && o.gold > 30) {
-    deal.get.gold = Math.min(o.gold, Math.round(20 + o.gold * 0.3));
+    deal.give.gold = Math.min(n.gold, Math.round(theirP * 0.15) * G);
+  } else if (rel.type === 'none' && myP > theirP * 2 && neighbors.has(o.id) && o.gold > 30 * G) {
+    deal.get.gold = Math.min(o.gold, Math.round(20 * G + o.gold * 0.3));
   } else if (rel.type === 'alliance') {
     const enemy = others.filter((x) => x.id !== o.id && s.opinion[nid][x.id] < -25 && getRel(s, o.id, x.id).type !== 'alliance').sort((a, b) => s.opinion[nid][a.id] - s.opinion[nid][b.id])[0];
     if (!enemy || s.joint.some((j) => j.a === nid && j.target === enemy.id)) return;
@@ -259,7 +307,7 @@ export function aiTaxPolicy(s, nid) {
   const mine = nationRegions(s, nid);
   const avgLoy = mine.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, mine.length);
   if (avgLoy < 45) n.taxRate = 'low';
-  else if (n.gold < 60 && avgLoy > 60) n.taxRate = 'high';
-  else if (n.gold > 350) n.taxRate = 'low';
+  else if (n.gold < 60 * G && avgLoy > 60) n.taxRate = 'high';
+  else if (n.gold > 350 * G) n.taxRate = 'low';
   else n.taxRate = 'normal';
 }

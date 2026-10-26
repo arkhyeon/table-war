@@ -8,14 +8,16 @@ import { TRAITS, TIER, traitDesc, traitLabel } from '../game/traits.js';
 import { CIVS } from '../game/civs.js';
 import {
   estimateBattle, moveCheck, moveCost, doMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
-  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript,
+  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT,
 } from '../game/engine.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
-import { fmtTroops } from '../game/format.js';
+import { fmtTroops, fmtGold } from '../game/format.js';
 import { relTag, GenLine, TraitTags } from './SidePanel.jsx';
+import EditableName from './EditableName.jsx';
+import { G } from '../game/rules.js';
 
 function Modal({ title, onClose, wide, children }) {
   return (
@@ -57,8 +59,8 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const defGens = isAttack && tr.owner !== null ? gensIn(game, to, tr.owner) : [];
   const canDuel = isAttack && sel.length > 0 && defGens.length > 0;
   const [wantDuel, setWantDuel] = useState(true);
-  const verb = edge.type === 'coast' ? '승선' : edge.type === 'landing' ? '상륙' : edge.type === 'sea' ? '항해' : '이동';
-  const title = isAttack ? (tr.sea ? `⚓ ${tr.name} 해전` : edge.type === 'landing' ? `⚔️ ${tr.name} 상륙 공격` : `⚔️ ${tr.name} 공격`) : `🚩 ${tr.name} ${verb}`;
+  const verb = edge.type === 'coast' ? '승선' : edge.type === 'landing' ? '상륙' : edge.type === 'cliff' ? '절벽 상륙' : edge.type === 'sea' ? '항해' : '이동';
+  const title = isAttack ? (tr.sea ? `⚓ ${tr.name} 해전` : edge.type === 'landing' || edge.type === 'cliff' ? `⚔️ ${tr.name} ${edge.type === 'cliff' ? '절벽 ' : ''}상륙 공격` : `⚔️ ${tr.name} 공격`) : `🚩 ${tr.name} ${verb}`;
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -163,46 +165,59 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
 export function ConscriptModal({ world, game, rid, act, onClose }) {
   const pid = game.playerId;
   const r = game.regions[rid];
-  const max = conscriptMax(game, rid, pid);
-  const [amount, setAmount] = useState(Math.min(max, Math.max(1000, Math.round(max / 2 / 100) * 100)));
-  const c = conscriptCost(game, rid, amount);
+  const [mode, setMode] = useState('draft');
+  const max = conscriptMax(game, rid, pid, mode);
+  const [amount, setAmount] = useState(Math.min(max, Math.max(100, Math.round(max / 2 / 100) * 100)));
+  const amt = Math.min(amount, max);
+  const c = conscriptCost(game, rid, amt, mode);
   const me = game.nations[pid];
+  const free = Math.floor((r.pop * 1000 * 0.05) / 100) * 100;
   return (
     <Modal title={`🪖 ${r.name} 징병`} onClose={onClose}>
       <div className="col">
+        <div className="row">
+          {Object.entries(CONSCRIPT).map(([k, m]) => (
+            <button key={k} className={'sm' + (mode === k ? ' primary' : '')} onClick={() => setMode(k)} title={m.desc}>
+              {m.name}
+            </button>
+          ))}
+          <small className="muted">{CONSCRIPT[mode].desc}</small>
+        </div>
         <label>
-          징병 인원 <b>{amount.toLocaleString('ko-KR')}명</b> / 최대 {max.toLocaleString('ko-KR')}
-          <input type="range" min={100} max={max} step={100} value={amount} onChange={(e) => setAmount(+e.target.value)} style={{ width: '100%' }} />
+          인원 <b>{amt.toLocaleString('ko-KR')}명</b> / 최대 {max.toLocaleString('ko-KR')}
+          <input type="range" min={100} max={max} step={100} value={amt} onChange={(e) => setAmount(+e.target.value)} style={{ width: '100%' }} />
         </label>
         <div className="kv">
           <span>금</span>
           <span style={{ color: c.gold > me.gold ? 'var(--danger)' : undefined }}>
-            -{c.gold} (1천 명당 3금) · 보유 {Math.floor(me.gold)}
+            -{fmtGold(c.gold)} (1명당 {CONSCRIPT[mode].gold}금) · 보유 {fmtGold(me.gold)}
           </span>
           <span>민심</span>
           <span style={{ color: (r.loyalty ?? 100) - c.loyalty < 25 ? 'var(--danger)' : undefined }}>
-            {Math.round(r.loyalty ?? 100)} → {Math.round((r.loyalty ?? 100) - c.loyalty)} (인구 대비 징병 비율에 비례)
+            {Math.round(r.loyalty ?? 100)} → {Math.round((r.loyalty ?? 100) - c.loyalty)}
+            {mode === 'draft' && <small className="muted"> ({free.toLocaleString('ko-KR')}명까지는 영향 없음)</small>}
           </span>
           <span>인구</span>
           <span>
             {Math.round(r.pop)}천 → {Math.round(r.pop - c.pop)}천
           </span>
           <span>유지비</span>
-          <span>+{(amount / 2500).toFixed(1)}금/턴</span>
+          <span>+{fmtGold(amt)}금/턴 (1명당 1금)</span>
           <span>행동력</span>
           <span>{COST.conscript} AP</span>
         </div>
+        <div className="muted" style={{ fontSize: 12 }}>민심 60 이상인 지역에서는 매 턴 자원병이 저절로 들어오고, 나라가 위태로우면(영토 상실·수도 위협) 민심 40 이상에서 4배로 늘어납니다.</div>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button onClick={onClose}>취소</button>
           <button
             className="primary"
             disabled={c.gold > me.gold || me.ap < COST.conscript}
             onClick={() => {
-              const res = act((s) => doConscript(s, world, pid, rid, amount));
+              const res = act((s) => doConscript(s, world, pid, rid, amt, mode));
               if (res?.ok) onClose();
             }}
           >
-            징병
+            {CONSCRIPT[mode].name}
           </button>
         </div>
       </div>
@@ -313,7 +328,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
             <div className="card col">
               <b>내가 주는 것</b>
               <label className="row">
-                금 <input type="number" min={0} max={me.gold} value={deal.give.gold} onChange={(e) => set((d) => ((d.give.gold = Math.max(0, Math.min(me.gold, +e.target.value || 0))), d))} style={{ width: 90 }} /> / {Math.floor(me.gold)}
+                금 <input type="number" min={0} max={me.gold} value={deal.give.gold} onChange={(e) => set((d) => ((d.give.gold = Math.max(0, Math.min(me.gold, +e.target.value || 0))), d))} step={10000} style={{ width: 120 }} /> / {fmtGold(me.gold)}
               </label>
               <div className="pick-list">
                 {myRegs
@@ -329,7 +344,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
             <div className="card col">
               <b>내가 받는 것</b>
               <label className="row">
-                금 <input type="number" min={0} max={t.gold} value={deal.get.gold} onChange={(e) => set((d) => ((d.get.gold = Math.max(0, Math.min(t.gold, +e.target.value || 0))), d))} style={{ width: 90 }} /> / {Math.floor(t.gold)}
+                금 <input type="number" min={0} max={t.gold} value={deal.get.gold} onChange={(e) => set((d) => ((d.get.gold = Math.max(0, Math.min(t.gold, +e.target.value || 0))), d))} step={10000} style={{ width: 120 }} /> / {fmtGold(t.gold)}
               </label>
               <div className="pick-list">
                 {theirRegs
@@ -437,7 +452,7 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
               <tr key={g.id}>
                 <td>
                   {me.ruler === g.id && '👑 '}
-                  {g.name}
+                  <EditableName value={g.name} max={12} onSave={(t) => act((st) => ((st.generals[g.id].name = t), { ok: true, msg: `장수 이름을 ${t}(으)로 바꿨습니다.` }))} />
                   {g.title && <div className="tag ally">{g.title}</div>}
                 </td>
                 <td>
@@ -681,21 +696,23 @@ export function HelpModal({ onClose }) {
         <ul>
           <li><b>목표</b>: 전체 육지의 60%를 차지하거나 다른 모든 나라를 멸망·속국화하세요.</li>
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
-          <li><b>시간</b>: 4턴이 한 계절, 16턴이 1년. 날씨는 매 턴 바뀝니다.</li>
+          <li><b>시간</b>: 계절 길이는 판마다 옵션(기본 2턴 = 한 계절, 8턴 = 1년). 날씨는 매 턴 바뀝니다.</li>
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +5) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
           <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(우클릭으로 바로 열기). 육지는 최소 1명을 남겨야 합니다.</li>
-          <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%, 수군 장수는 무시). 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
+          <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%.</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드에서 세율 일괄 설정, 지역마다 개별 설정 가능(높음=세수↑ 민심↓ 인구 정체).</li>
-          <li><b>지출</b>: 병력 1명 단위 유지비(2,500명당 1금), 장수 녹봉 1금, 영토 15곳 초과분 1곳당 통치비 0.5금. 국고가 바닥나면 탈영.</li>
-          <li><b>징병</b>: 인원을 직접 정합니다. 1천 명당 3금, 민심은 인구 대비 징병 비율만큼, 인구도 줄어듭니다. 병영 +50%.</li>
+          <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
+          <li><b>징병</b>: 인원을 직접 정합니다. 징집은 1명당 5금이고 인구의 5%를 넘게 뽑으면 넘은 만큼 민심 하락, 모병은 1명당 12금에 민심 영향 없음(최대치 절반). 병영 +50%.</li>
+          <li><b>자원병</b>: 민심 60 이상인 지역은 매 턴 백성이 스스로 입대합니다. 영토를 잃거나 수도가 위협받으면 민심 40 이상 지역에서 4배로 늘어납니다.</li>
           <li><b>민심</b>: 점령 직후 15(중립지는 35)에서 매 턴 회복. 주둔군 3천↑·수도·낮은 세율·인덕 장수로 빨라지고, 영토 10곳마다 통치 부담 -1. 25 미만이면 반란. 대책: 🍚진휼(비싸고 6턴에 한 번, +7/+14), 계엄(인구 대비 대군 주둔 시 반란 불가, 대신 회복 -1), 치안 장수.</li>
           <li><b>보급</b>: 수도와 끊긴 지역은 ✂ 표시, 병력이 매 턴 1~10% 무작위 감소, 전투력 -20%(보급 특성으로 경감).</li>
           <li><b>공성</b>: 성벽(내구 3)이 있으면 공격 방식 선택. 포위=이겨도 성벽만 깎음(1, 압승 2, 🛠️공성병기·공성 장수 추가), 0이 되면 함락. 강습=이기면 바로 함락하지만 성벽 효과 2배·손실 1.5배. 포위당하지 않은 턴엔 성벽 복구.</li>
           <li><b>날씨</b>: 북쪽은 눈(공격 -25%, AP+1, 세수 -25%), 남쪽은 가뭄(세수 -35%)이 잦지만 남쪽은 풍년(+35%)도 잦아 연간 손익이 비슷합니다. 비는 도강을 어렵게, 폭풍은 항해를 막습니다.</li>
-          <li><b>사건</b>: 시나리오별 역사 사건과 무작위 사건이 턴 소식에 카드로 나옵니다.</li>
+          <li><b>사건</b>: 역병·홍수·지진·금광·교역 호황·해적·도적·용병단·장수 출분 등 어느 나라에나 일어나는 사건이 턴 소식에 카드로 나옵니다.</li>
           <li><b>세력 균형</b>: 국력이 평균의 2배를 넘으면 주변국 호감이 계속 떨어지고, 1위가 2.5배를 넘으면 대동맹이 결성됩니다. AI 회원국끼리는 싸우지 않고 패권국을 노리며, 패권국의 침공에 방어 +15%.</li>
-          <li><b>일기토</b>: 양쪽에 장수가 있으면 신청 가능. 공격 &gt; 강타, 강타 &gt; 방어·반격, 방어 &gt; 공격·반격, 반격 &gt; 공격. 체력은 무력·통솔, 위력은 무력으로 정해지고 맹장·무쌍 특성이 더해집니다. 이기면 전투력 +15%.</li>
+          <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 8 + 무력×0.2(맹장·무쌍 특성 가산). 이기면 전투력 +15%, 지면 -15%.</li>
+          <li><b>장수와 전투력</b>: 장수는 병사 수를 늘리지 않고 배율을 올립니다. 공격 시 동행 장수 중 최고 (무력+통솔)/2 ÷ 250(최대 약 +40%) + 특성, 방어 시 주둔 장수 최고 (통솔×0.6+지력×0.4) ÷ 250 + 특성.</li>
           <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유.</li>
           <li><b>외교</b>: 금·영토 거래, 동맹(상호 공격 불가), 불가침, 속국, 공동 공격. 불가침·종속 상대를 공격하면 배신 페널티.</li>
           <li><b>전황</b>: 시야 안의 전투만 다시보기·화살표로 보여줍니다. 📽️ 연대기로 영토 변화를 돌려볼 수 있습니다.</li>
@@ -704,7 +721,7 @@ export function HelpModal({ onClose }) {
         <ul>
           {Object.values(BUILDINGS).map((b) => (
             <li key={b.name}>
-              {b.icon} {b.name} ({b.cost}금·{b.ap}AP): {b.desc}
+              {b.icon} {b.name} ({fmtGold(b.cost)}금·{b.ap}AP): {b.desc}
             </li>
           ))}
         </ul>
@@ -804,7 +821,7 @@ export function DuelModal({ game, attId, defId, onFinish }) {
       </div>
       {!d.done || busy ? (
         <>
-          <div className="actions" style={{ marginTop: 10 }}>
+          <div className="actions" style={{ marginTop: 10, gridTemplateColumns: '1fr 1fr 1fr' }}>
             {Object.entries(MOVES).map(([k, m]) => (
               <button key={k} onClick={() => play(k)} title={m.desc} disabled={busy || d.done}>
                 {m.icon} {m.name}
@@ -812,7 +829,7 @@ export function DuelModal({ game, attId, defId, onFinish }) {
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            공격 &gt; 강타 · 강타 &gt; 방어·반격 · 방어 &gt; 공격·반격 · 반격 &gt; 공격. 최대 6합. 상대는 지력이 높을수록 내 수를 간파하고, 같은 수를 반복하면 버릇을 노립니다.
+            반격 &gt; 공격 &gt; 방어 &gt; 반격 (가위바위보). 같은 수끼리는 서로 절반 피해. 최대 6합. 상대는 지력이 높을수록 내 수를 간파하고, 같은 수를 반복하면 버릇을 노립니다.
           </div>
         </>
       ) : (
@@ -828,12 +845,12 @@ export function DuelModal({ game, attId, defId, onFinish }) {
 }
 
 // ───────── 전투 다시보기 ─────────
-export function BattleReplay({ game, battles, index, onNext, onSkip }) {
+export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 1200, onSpeed }) {
   const b = battles[index];
   useEffect(() => {
-    const t = setTimeout(onNext, 2200);
+    const t = setTimeout(onNext, delay);
     return () => clearTimeout(t);
-  }, [index, onNext]);
+  }, [index, onNext, delay]);
   const att = game.nations[b.attacker];
   const def = b.defender === null ? null : game.nations[b.defender];
   const res = b.result === 'win' ? '점령' : b.result === 'siege' ? '포위 공격' : '격퇴됨';
@@ -844,6 +861,9 @@ export function BattleReplay({ game, battles, index, onNext, onSkip }) {
           ⚔️ 전투 {index + 1}/{battles.length}
         </b>
         <span className="row" style={{ gap: 4 }}>
+          <button className="sm" onClick={onSpeed} title="다시보기 속도">
+            {delay < 1000 ? '⏩ 2배속' : '▶ 1배속'}
+          </button>
           <button className="sm" onClick={onNext}>
             다음 ⏭
           </button>
@@ -908,6 +928,54 @@ export function ChronicleModal({ world, game, onClose, view }) {
             {game.nations[nid].name} {c}
           </span>
         ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ───────── 관전 모드: 난입·지원 ─────────
+export function TakeoverModal({ game, onPick, onClose }) {
+  const alive = game.nations.filter((n) => n.alive).sort((a, b) => nationRegions(game, b.id).length - nationRegions(game, a.id).length);
+  return (
+    <Modal title="🎯 어느 나라로 난입할까요?" onClose={onClose}>
+      <div className="col">
+        {alive.map((n) => (
+          <button key={n.id} className="nation-item" onClick={() => onPick(n.id)}>
+            <span>
+              <span className="chip" style={{ background: n.color }} />
+              {n.name}
+            </span>
+            <small className="muted">
+              영토 {nationRegions(game, n.id).length} · 금 {fmtGold(n.gold)} · 장수 {nationGenerals(game, n.id).length}
+            </small>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+export function GodModal({ game, onGift, onClose }) {
+  const alive = game.nations.filter((n) => n.alive);
+  const [nid, setNid] = useState(alive[0]?.id ?? 0);
+  return (
+    <Modal title="🎁 지원 (관전 중 개입)" onClose={onClose}>
+      <div className="col">
+        <select value={nid} onChange={(e) => setNid(+e.target.value)}>
+          {alive.map((n) => (
+            <option key={n.id} value={n.id}>
+              {n.name}
+            </option>
+          ))}
+        </select>
+        <div className="actions">
+          <button onClick={() => onGift(nid, 'gold', 100 * G)}>💰 금 +{fmtGold(100 * G)}</button>
+          <button onClick={() => onGift(nid, 'gold', 500 * G)}>💰 금 +{fmtGold(500 * G)}</button>
+          <button onClick={() => onGift(nid, 'troops', 10000)}>🪖 수도 병력 +1만</button>
+          <button onClick={() => onGift(nid, 'troops', 50000)}>🪖 수도 병력 +5만</button>
+          <button onClick={() => onGift(nid, 'general')}>⭐ 장수 1명 출현</button>
+        </div>
+        <div className="muted" style={{ fontSize: 12 }}>판을 지켜보다 원하는 나라를 밀어줄 수 있습니다. 준 내역은 기록에 남습니다.</div>
       </div>
     </Modal>
   );

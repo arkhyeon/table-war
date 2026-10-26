@@ -1,5 +1,5 @@
 import { makeRng, hashString } from './rng.js';
-import { T } from './rules.js';
+import { T, G } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
 import { addGeneral, computeMaxAp } from './engine.js';
@@ -46,6 +46,7 @@ export function planNations(world, scn, seed, opts = {}) {
 export function createGame(world, scn, seed, playerId, opts = {}, appearHistory = {}) {
   const rng = makeRng(`game:${scn.id}:${seed}`);
   const plan = planNations(world, scn, seed, opts);
+  for (const [i, nm] of Object.entries(opts.names || {})) if (plan[i] && nm.trim()) plan[i].name = nm.trim().slice(0, 16);
   const R = world.regions.length;
   const owner = new Array(R).fill(null);
   plan.forEach((n) => (owner[n.region] = n.id));
@@ -77,6 +78,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   const namer = makeNamer(rng);
   const regions = world.regions.map((wr, i) => {
     if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {}, loyalty: 100 };
+    const river = !!wr.river;
     let civ;
     if (owner[i] !== null) civ = plan[owner[i]].civ;
     else {
@@ -97,17 +99,18 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       buildings: { market: 0, walls: 0, port: 0, barracks: 0 },
       conscripted: false,
       loyalty: owner[i] === null ? 50 : 80,
+      river,
     };
   });
   // 바다 이름: 가장 가까운 해안 지역 이름을 따서
   world.regions.forEach((wr, i) => {
     if (!wr.sea) return;
-    const coasts = wr.neighbors.filter((n) => n.type === 'landing').map((n) => world.regions[n.id]);
+    const coasts = wr.neighbors.filter((n) => n.type === 'landing' || n.type === 'cliff').map((n) => world.regions[n.id]);
     const near = coasts.sort((a, b) => Math.hypot(a.cx - wr.cx, a.cy - wr.cy) - Math.hypot(b.cx - wr.cx, b.cy - wr.cy))[0];
     regions[i].name = near ? `${regions[near.id].name} 앞바다` : '먼바다';
   });
   const s = {
-    version: 4,
+    version: 5,
     scenarioId: scn.id,
     seed,
     opts,
@@ -144,13 +147,13 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       civ: n.civ,
       pools: n.pools,
       capital: n.region,
-      gold: 100,
+      gold: 100 * G,
       ap: 0,
       maxAp: 0,
       reputation: 60,
       taxRate: 'normal',
       alive: true,
-      isPlayer: n.id === playerId,
+      isPlayer: n.id === playerId && !opts.spectator,
       aggression: Math.round(rng.range(0.35, 0.95) * 100) / 100,
       ruler: null,
     });
@@ -181,8 +184,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
   }
-  s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, ...opts };
-  s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
+  s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, turnsPerSeason: 2, ...opts };
+  delete s.opts.names;
+  if (opts.spectator) s.spectator = true;
+  s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff, s.opts.turnsPerSeason);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다. (시드: ${seed})`, nations: [playerId], kind: 'info' });

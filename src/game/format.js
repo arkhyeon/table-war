@@ -8,3 +8,12 @@ export function fmtTroops(n) {
 }
 
 export const fmtNum = (n) => Math.round(n).toLocaleString('ko-KR');
+
+// 금 표기: 1만 이상은 만 단위
+export function fmtGold(n) {
+  n = Math.round(n);
+  const a = Math.abs(n);
+  if (a >= 100000000) return `${(n / 100000000).toFixed(1).replace(/\.0$/, '')}억`;
+  if (a >= 10000) return `${(n / 10000).toFixed(a >= 1000000 ? 0 : 1).replace(/\.0$/, '')}만`;
+  return n.toLocaleString('ko-KR');
+}

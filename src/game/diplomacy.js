@@ -1,5 +1,6 @@
 import { getRel, setRel, log, nationPower, nationRegions, nationTrait, isVassalOf, gensIn } from './engine.js';
-import { COST } from './rules.js';
+import { COST, G } from './rules.js';
+import { fmtGold } from './format.js';
 
 // deal: { give:{gold, regions:[]}, get:{gold, regions:[]}, treaty: null|'alliance'|'nap'|'vassal_them'|'vassal_me'|'joint', target }
 // from이 to에게 제안. give = from이 주는 것, get = from이 받는 것.
@@ -19,9 +20,9 @@ export function describeDeal(s, from, to, deal) {
   const F = s.nations[from].name, To = s.nations[to].name;
   const parts = [];
   const rn = (ids) => ids.map((i) => s.regions[i].name).join(', ');
-  if (deal.give.gold) parts.push(`${F} → ${To}: ${deal.give.gold}금`);
+  if (deal.give.gold) parts.push(`${F} → ${To}: ${fmtGold(deal.give.gold)}금`);
   if (deal.give.regions.length) parts.push(`${F} → ${To}: 영토 ${rn(deal.give.regions)}`);
-  if (deal.get.gold) parts.push(`${To} → ${F}: ${deal.get.gold}금`);
+  if (deal.get.gold) parts.push(`${To} → ${F}: ${fmtGold(deal.get.gold)}금`);
   if (deal.get.regions.length) parts.push(`${To} → ${F}: 영토 ${rn(deal.get.regions)}`);
   if (deal.treaty === 'alliance') parts.push('동맹 체결');
   if (deal.treaty === 'nap') parts.push('10턴 불가침');
@@ -55,7 +56,7 @@ export function validateDeal(s, world, from, to, deal) {
   const F = s.nations[from], To = s.nations[to];
   if (!F.alive || !To.alive) return '멸망한 국가입니다.';
   if (deal.give.gold > F.gold) return '제안하는 금이 국고보다 많습니다.';
-  if (deal.get.gold > To.gold) return `상대 국고(${To.gold}금)보다 많은 금을 요구했습니다.`;
+  if (deal.get.gold > To.gold) return `상대 국고(${fmtGold(To.gold)}금)보다 많은 금을 요구했습니다.`;
   if (deal.give.regions.some((r) => s.regions[r].owner !== from)) return '내 영토가 아닌 지역이 포함되어 있습니다.';
   if (deal.get.regions.some((r) => s.regions[r].owner !== to)) return '상대 영토가 아닌 지역이 포함되어 있습니다.';
   if (deal.give.regions.length >= nationRegions(s, from).length) return '모든 영토를 넘길 수는 없습니다.';
@@ -80,7 +81,7 @@ export function evaluateDeal(s, world, from, to, deal) {
   const ratio = P / Math.max(1, Q);
   const op = s.opinion[to][from];
   let v = 0;
-  v += deal.give.gold - deal.get.gold * 1.2;
+  v += (deal.give.gold - deal.get.gold * 1.2) / G;
   for (const r of deal.give.regions) v += regionValue(s, world, r, to);
   for (const r of deal.get.regions) v -= regionValue(s, world, r, to) * 1.3;
   const adj = adjacentNations(s, world, to);
@@ -142,7 +143,7 @@ export function applyDeal(s, world, from, to, deal) {
   deal.give.regions.forEach((r) => move(r, to));
   deal.get.regions.forEach((r) => move(r, from));
   const gift = deal.give.gold - deal.get.gold;
-  if (gift > 0) s.opinion[to][from] += Math.min(40, gift / 3);
+  if (gift > 0) s.opinion[to][from] += Math.min(40, gift / (3 * G));
   if (deal.treaty === 'alliance') {
     setRel(s, from, to, { type: 'alliance', since: s.turn });
     s.opinion[to][from] += 15;

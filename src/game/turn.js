@@ -2,7 +2,7 @@ import { stateRng } from './rng.js';
 import { TERRAIN, TAX } from './rules.js';
 import { fmtTroops } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
@@ -71,13 +71,31 @@ function upkeep(s, world) {
       net -= tribute;
       lord.gold += tribute;
     }
-    n.gold = Math.round((n.gold + net) * 10) / 10;
+    n.gold = Math.round(n.gold + net);
     if (n.gold < 0) {
       n.gold = 0;
       for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.floor(r.troops * 0.009) * 100);
       log(s, `💸 ${n.name}의 국고가 바닥나 병사들이 탈영했습니다.`, [n.id], 'warn');
     }
   }
+  // 위기 판단: 영토를 잃었거나 수도 주변 적병이 수도 수비대보다 많으면 '나라가 위태로움'
+  const danger = {};
+  for (const n of s.nations) {
+    if (!n.alive) continue;
+    const count = nationRegions(s, n.id).length;
+    let d = n.lastCount !== undefined && count < n.lastCount;
+    if (n.capital !== null) {
+      let enemy = 0;
+      for (const nb of world.regions[n.capital].neighbors) {
+        const t = s.regions[nb.id];
+        if (t.owner !== null && t.owner !== n.id && getRel(s, n.id, t.owner).type === 'none') enemy += t.troops;
+      }
+      if (enemy > s.regions[n.capital].troops * 1.2) d = true;
+    }
+    danger[n.id] = d;
+    n.lastCount = count;
+  }
+  const volunteers = {};
   const supply = {};
   const sizes = {};
   for (const r of s.regions) if (r.owner !== null && !r.sea) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
@@ -88,7 +106,7 @@ function upkeep(s, world) {
     if (r.sea) {
       // 바다의 함대: 보급 손실과 폭풍 피해
       if (r.owner !== null && r.troops > 0) {
-        const loss = w.noSea ? 0.1 : 0.02;
+        const loss = (w.seaLoss ?? 0.02) * (1 - tv(gensIn(s, i, r.owner), '항해'));
         r.troops = Math.round((r.troops * (1 - loss)) / 100) * 100;
         if (r.troops <= 0) {
           r.troops = 0;
@@ -119,12 +137,25 @@ function upkeep(s, world) {
     const martial = r.troops >= r.pop * 250;
     r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
+    // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
+    const minLoy = danger[r.owner] ? 40 : 60;
+    if (r.loyalty >= minLoy && !cut) {
+      const rate = (r.loyalty >= 80 ? 0.004 : 0.0025) * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병'));
+      const v = Math.floor((r.pop * 1000 * rate) / 100) * 100;
+      if (v > 0) {
+        r.troops += v;
+        volunteers[r.owner] = (volunteers[r.owner] || 0) + v;
+      }
+    }
     // 문관은 다스리며 성장, 무관은 병영에서 훈련
     for (const g of gens) {
       const govern = Math.max(0, (g.pol - 40) / 6) * (g.role === 'civ' ? 1.5 : 1);
       const drill = r.buildings.barracks && g.role !== 'civ' ? 3 : 0;
       if (govern + drill >= 1) gainExp(s, g, govern + drill);
     }
+  }
+  for (const [nid, v] of Object.entries(volunteers)) {
+    if (+nid === s.playerId && !s.spectator) log(s, `🙋 ${s.nations[nid].name}${danger[nid] ? '이(가) 위기에 처하자 백성들이 앞다퉈' : '에'} 자원 입대했습니다. (총 +${fmtTroops(v)})`, [+nid], 'info');
   }
   for (const n of s.nations) if (n.alive) spawnGeneral(s, n.id, rng);
   balanceOfPower(s, world);
@@ -146,6 +177,8 @@ function upkeep(s, world) {
       s.opinion[a.id][b.id] = Math.max(-100, Math.min(100, o));
     }
     if (a.reputation < 60) a.reputation += 1;
+    const fame = nationTrait(s, a.id, '명망');
+    if (fame && a.reputation < 80) a.reputation = Math.min(80, a.reputation + fame);
     a.maxAp = computeMaxAp(s, a.id);
     a.ap = Math.max(1, a.maxAp - (a.apPenalty || 0));
     a.apPenalty = 0;
@@ -179,9 +212,9 @@ export function endTurn(s, world) {
   upkeep(s, world);
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
-  s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
+  s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff, s.opts?.turnsPerSeason || 2);
   runEvents(s, world, stateRng(s));
   updateExplored(s, world);
-  s.gameOver = s.sandbox && s.nations[s.playerId].alive ? null : checkGameOver(s);
+  s.gameOver = s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
   return s;
 }

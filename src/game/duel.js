@@ -1,32 +1,30 @@
 import { tv } from './traits.js';
 
-// 일기토: 공격·강타·방어·반격
-// 원안(공격·카운터·방어)만으로는 방어가 지는 경우가 없어, 방어를 깨는 '강타'를 넣고
-// 각 수가 이기는 상대·지는 상대를 갖도록 피해 배수를 조정했다(균형점: 공격28%·강타27%·방어22%·반격22%).
+// 일기토: 반격 > 공격 > 방어 > 반격 의 가위바위보
+// 이긴 쪽만 피해를 주고, 같은 수끼리 맞붙으면 서로 절반씩 피해(마창 맞부딪침)
 export const MOVES = {
-  attack: { name: '공격', icon: '🗡️', desc: '빠른 찌르기. 강타를 끊음(큰 피해). 방어·반격에 당함' },
-  smash: { name: '강타', icon: '🪓', desc: '내려찍기. 방어를 부수고 반격 자세를 무너뜨림. 공격에 끊김' },
-  defend: { name: '방어', icon: '🛡️', desc: '막고 밀쳐냄. 공격을 받아치고 반격을 무력화. 강타에 뚫림' },
-  counter: { name: '반격', icon: '🔄', desc: '받아치기. 공격을 크게 되받아침. 강타·방어엔 빈틈' },
+  attack: { name: '공격', icon: '🗡️', desc: '내리베기. 방어를 뚫지만 반격에 걸림' },
+  defend: { name: '방어', icon: '🛡️', desc: '창대로 막기. 반격을 무력화하지만 공격에 뚫림' },
+  counter: { name: '반격', icon: '🔄', desc: '흘리고 찌르기. 공격을 받아치지만 방어에 막힘' },
 };
 
-// OUT[a][b] = [a가 받는 피해, b가 받는 피해] (상대 위력 배수)
-const OUT = {
-  attack: { attack: [1, 1], smash: [0, 1.6], defend: [0.8, 0], counter: [1.2, 0] },
-  smash: { attack: [1.6, 0], smash: [1.5, 1.5], defend: [0, 1.2], counter: [0, 0.8] },
-  defend: { attack: [0, 0.8], smash: [1.2, 0], defend: [0, 0], counter: [0, 0.5] },
-  counter: { attack: [0, 1.2], smash: [0.8, 0], defend: [0.5, 0], counter: [0, 0] },
-};
+const BEATS = { counter: 'attack', attack: 'defend', defend: 'counter' };
+
+// [a가 받는 피해, b가 받는 피해] (상대 위력 배수)
+function outcome(a, b) {
+  if (a === b) return [0.5, 0.5];
+  return BEATS[a] === b ? [0, 1] : [1, 0];
+}
 
 export const duelHp = (g) => Math.round((60 + g.war * 0.7 + g.lead * 0.2) * (1 + tv([g], '무쌍')));
 export const duelPow = (g) => (8 + g.war * 0.2) * (1 + tv([g], '맹장') * 3);
 
-const BASE_MIX = { attack: 0.28, smash: 0.27, defend: 0.225, counter: 0.225 };
+const BASE_MIX = { attack: 1 / 3, defend: 1 / 3, counter: 1 / 3 };
 
 export function bestResponse(opp) {
   let best = null, bv = -Infinity;
   for (const m of Object.keys(MOVES)) {
-    const [mine, theirs] = OUT[m][opp];
+    const [mine, theirs] = outcome(m, opp);
     const v = theirs - mine;
     if (v > bv) { bv = v; best = m; }
   }
@@ -53,7 +51,7 @@ export function newDuel(g1, g2) {
 }
 
 export function duelRound(d, g1, g2, m1, m2, rng) {
-  const [toA, toB] = OUT[m1][m2];
+  const [toA, toB] = outcome(m1, m2);
   const dA = Math.round(toA * duelPow(g2) * rng.range(0.85, 1.15));
   const dB = Math.round(toB * duelPow(g1) * rng.range(0.85, 1.15));
   d.hpA = Math.max(0, d.hpA - dA);
