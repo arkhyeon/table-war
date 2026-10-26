@@ -56,3 +56,14 @@ export const TAX = {
   normal: { name: '보통', mult: 1, loyalty: 0, growth: 1, desc: '세수 100%' },
   high: { name: '높음', mult: 1.45, loyalty: -4, growth: 0.3, desc: '세수 145% · 민심 -4/턴 · 인구 정체' },
 };
+
+// 전투 종류 (다시보기·기록 표시용)
+export const BATTLE_KIND = {
+  field: '⚔️ 야전',
+  siege: '🏰 공성전',
+  river: '🌊 도하전',
+  strait: '⛵ 해협 도하',
+  naval: '⚓ 해전',
+  landing: '🚣 상륙전',
+  cliff: '🧗 절벽 상륙전',
+};

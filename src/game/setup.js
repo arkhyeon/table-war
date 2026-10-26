@@ -26,8 +26,16 @@ export function planNations(world, scn, seed, opts = {}) {
       for (let k = 0; k < q.length; k++) for (const nb of world.regions[q[k]].neighbors) if (!world.regions[nb.id].sea && mass[nb.id] < 0) { mass[nb.id] = mass[r.id]; q.push(nb.id); }
       massSize.push(q.length);
     }
-    const regs = world.regions.filter((r) => !r.sea && r.cells.length >= 4 && massSize[mass[r.id]] >= 5);
-    for (let i = 0; i < count && regs.length; i++) {
+    const regs = world.regions.filter((r) => !r.sea && r.cells.length >= 4 && massSize[mass[r.id]] >= 4);
+    // 섬나라 보장: 본토 다음으로 큰 섬에 한 나라를 먼저 둔다
+    const main = massSize.indexOf(Math.max(...massSize));
+    const isles = regs.filter((r) => mass[r.id] !== main);
+    if (isles.length && count > 2) {
+      const big = isles.reduce((a, b) => (massSize[mass[b.id]] > massSize[mass[a.id]] ? b : a));
+      const on = isles.filter((r) => mass[r.id] === mass[big.id]);
+      caps.push(on.reduce((a, b) => (b.cells.length > a.cells.length ? b : a)));
+    }
+    for (let i = caps.length; i < count && regs.length; i++) {
       let best = null, bd = -1;
       for (let k = 0; k < 60; k++) {
         const r = rng.pick(regs);

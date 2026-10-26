@@ -394,3 +394,11 @@ export function parseGeneral(str, pool = 'ruler') {
 export function rating(g) {
   return (g.war + g.lead + g.intel + g.pol) / 4;
 }
+
+// 등급: 잘하는 두 능력 위주(70%) + 전체 평균(30%)
+const GRADES = [[94, 'SSR'], [92, 'SR'], [89.5, 'S'], [86, 'A'], [81, 'B'], [75, 'C'], [68, 'D'], [60, 'E'], [-1, 'F']];
+export function gradeScore(g) {
+  const s = [g.war, g.lead, g.intel, g.pol].sort((a, b) => b - a);
+  return ((s[0] + s[1]) / 2) * 0.7 + ((s[0] + s[1] + s[2] + s[3]) / 4) * 0.3;
+}
+export const gradeOf = (g) => GRADES.find(([t]) => gradeScore(g) >= t)[1];

@@ -493,7 +493,9 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const mode = hasWalls ? opts.mode || 'siege' : 'field';
   const f = battleFactors(s, world, nid, from, to, gens.map((g) => g.id), { mode, engines, count });
   const defName = defender === null ? '중립 세력' : s.nations[defender].name;
-  const battle = { from, to, attacker: nid, defender, count, defTroops: tr.troops, turn: s.turn, naval: !!tr.sea, mode };
+  const et = edgeBetween(world, from, to)?.type;
+  const kind = tr.sea ? 'naval' : fr.sea ? (et === 'cliff' ? 'cliff' : 'landing') : et === 'strait' ? 'strait' : et === 'river' ? 'river' : mode !== 'field' ? 'siege' : 'field';
+  const battle = { from, to, attacker: nid, defender, count, defTroops: tr.troops, turn: s.turn, naval: !!tr.sea, mode, kind };
   const lines = [];
 
   // 일기토: 플레이어가 직접 치른 결과(opts.duel) 또는 자동 진행

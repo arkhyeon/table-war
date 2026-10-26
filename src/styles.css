@@ -129,6 +129,14 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
 .tag.trait.t1 { border-color: #8a8f99; }
 .tag.trait.t2 { border-color: #7fb2e8; color: #9cc6f0; }
 .tag.trait.t3 { border-color: var(--accent); color: var(--accent); }
+.tag.grade { font-weight: 700; font-size: 10px; padding: 0 5px; }
+.tag.g-F, .tag.g-E { color: #8a8f99; }
+.tag.g-D, .tag.g-C { color: #9bd28a; border-color: #5c8a4f; }
+.tag.g-B { color: #7fb2e8; border-color: #4f7fae; }
+.tag.g-A { color: #c79bf0; border-color: #8a5cb8; }
+.tag.g-S { color: #f0c060; border-color: #b8902f; }
+.tag.g-SR { color: #ff9a5a; border-color: #d0672a; }
+.tag.g-SSR { color: #fff; background: linear-gradient(90deg, #e0465a, #e8a33a, #5ab0e8); border-color: transparent; }
 .arena { position: relative; height: 150px; margin-top: 10px; border-radius: 10px; overflow: hidden; background: linear-gradient(#3d5466, #6b7d5a 62%, #4f5b38); }
 .arena .ground { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; background: #5a4a30; border-top: 2px solid #3c311f; }
 .arena .rider { position: absolute; bottom: 22px; font-size: 54px; line-height: 1; }

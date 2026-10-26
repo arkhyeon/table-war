@@ -133,36 +133,149 @@ function buildHistorical(scn, g) {
   }
 }
 
+// 랜덤 지도 유형: 땅덩어리 배치 방식
+export const MAP_STYLES = {
+  pangaea: { name: '대륙', land: 0.5, blobs: [[1, 0.34, 0.42]], islands: [2, 3] },
+  continents: { name: '양대륙', land: 0.46, blobs: [[2, 0.22, 0.3], [1, 0.16, 0.22]], islands: [1, 2] },
+  archipelago: { name: '군도', land: 0.4, blobs: [[5, 0.11, 0.17]], islands: [2, 3] },
+};
+
+function landComponents(g, isLand) {
+  const { N, cols, rows } = g;
+  const comp = new Int32Array(N).fill(-1);
+  const list = [];
+  for (let i = 0; i < N; i++) {
+    if (!isLand(i) || comp[i] >= 0) continue;
+    const q = [i];
+    comp[i] = list.length;
+    for (let k = 0; k < q.length; k++) for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, q[k], d);
+      if (nb >= 0 && isLand(nb) && comp[nb] < 0) { comp[nb] = comp[i]; q.push(nb); }
+    }
+    list.push(q);
+  }
+  return { comp, list };
+}
+
 function buildProcedural(scn, g) {
   const { N, size, W, H, terrain, river, rng, center, cols, rows } = g;
+  const S = scn.regionSize;
   const nh = makeNoise(rng), nr = makeNoise(rng), nm = makeNoise(rng);
+  const styleKey = rng.weighted(Object.keys(MAP_STYLES), (k) => ({ pangaea: 0.35, continents: 0.35, archipelago: 0.3 })[k]);
+  const style = MAP_STYLES[styleKey];
+  g.style = styleKey;
+  // 땅덩어리 씨앗: 서로 떨어지게 배치
+  const blobs = [];
+  const place = (r) => {
+    let best = null, bd = -1;
+    for (let k = 0; k < 40; k++) {
+      const c = [rng.range(0.15 + r * 0.5, 0.85 - r * 0.5), rng.range(0.18 + r * 0.6, 0.82 - r * 0.6)];
+      const d = blobs.length ? Math.min(...blobs.map((b) => Math.hypot(b[0] - c[0], b[1] - c[1]) - b[2] - r)) : rng();
+      if (d > bd) { bd = d; best = c; }
+    }
+    blobs.push([best[0], best[1], r]);
+  };
+  for (const [n, r0, r1] of style.blobs) for (let k = 0; k < n; k++) place(rng.range(r0, r1));
   const height = new Float32Array(N);
-  const blobs = Array.from({ length: rng.int(3, 5) }, () => [rng.range(0.15, 0.85), rng.range(0.2, 0.8), rng.range(0.18, 0.32)]);
   for (let i = 0; i < N; i++) {
     const [x, y] = center(i);
     const nx = x / W, ny = y / H;
     let e = nh.fbm(nx * 5, ny * 5 * (H / W) * 1.6, 5);
     let blob = 0;
-    for (const [bx, by, br] of blobs) blob = Math.max(blob, 1 - Math.hypot((nx - bx) * 1.2, ny - by) / (br * 1.8));
-    e = e * 0.65 + Math.max(0, blob) * 0.55;
+    for (const [bx, by, br] of blobs) blob = Math.max(blob, 1 - Math.hypot((nx - bx) * 1.2, ny - by) / (br * 1.6));
+    e = e * 0.5 + Math.max(0, blob) * 0.7;
     const edge = Math.max(Math.abs(nx - 0.5) * 2, Math.abs(ny - 0.5) * 2);
-    e -= Math.pow(edge, 4) * 0.5;
+    e -= Math.pow(edge, 4) * 0.6;
     height[i] = e;
   }
   const sorted = Array.from(height).sort((a, b) => a - b);
-  const sea = sorted[Math.floor(N * 0.55)];
+  const seaLevel = sorted[Math.floor(N * (1 - style.land))];
+  const isLandH = new Uint8Array(N);
+  for (let i = 0; i < N; i++) isLandH[i] = height[i] > seaLevel ? 1 : 0;
+  // 땅덩어리 정리: 지역 1곳도 안 되는 부스러기는 바다로, 지역 3곳 이하 크기의 섬은 4곳 크기까지 키움
+  let { comp, list } = landComponents(g, (i) => isLandH[i]);
+  const grow = (cells, target) => {
+    const own = new Set(cells);
+    const frontier = [];
+    const pushNb = (c) => {
+      for (let d = 0; d < 6; d++) {
+        const nb = neighborIndex(cols, rows, c, d);
+        if (nb >= 0 && !isLandH[nb] && !own.has(nb)) frontier.push(nb);
+      }
+    };
+    cells.forEach(pushNb);
+    let n = cells.length;
+    while (n < target && frontier.length) {
+      const k = Math.floor(rng() * frontier.length);
+      const c = frontier[k];
+      frontier[k] = frontier[frontier.length - 1];
+      frontier.pop();
+      if (isLandH[c] || own.has(c)) continue;
+      const [x, y] = center(c);
+      if (x < size * 4 || y < size * 4 || x > W - size * 4 || y > H - size * 4) continue;
+      // 다른 땅덩어리와 붙지 않게
+      let touches = false;
+      for (let d = 0; d < 6; d++) {
+        const nb = neighborIndex(cols, rows, c, d);
+        if (nb >= 0 && isLandH[nb] && !own.has(nb)) touches = true;
+      }
+      if (touches) continue;
+      own.add(c);
+      isLandH[c] = 1;
+      height[c] = seaLevel + 0.01;
+      n++;
+      pushNb(c);
+    }
+  };
+  for (const cells of list) {
+    if (cells.length < S * 0.6) for (const c of cells) isLandH[c] = 0;
+    else if (cells.length < S * 3.5) grow(cells, S * 4);
+  }
+  ({ comp, list } = landComponents(g, (i) => isLandH[i]));
+  // 섬 보장: 가장 큰 땅 말고 지역 4곳 이상 섬이 하나도 없으면 먼 바다에 섬을 만든다
+  list.sort((a, b) => b.length - a.length);
+  const islands = list.slice(1).filter((c) => c.length >= S * 4).length;
+  const want = rng.int(style.islands[0], style.islands[1]);
+  for (let k = islands; k < want; k++) {
+    const dist = new Int32Array(N).fill(-1);
+    const q = [];
+    for (let i = 0; i < N; i++) if (isLandH[i]) { dist[i] = 0; q.push(i); }
+    for (let j = 0; j < q.length; j++) for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, q[j], d);
+      if (nb >= 0 && dist[nb] < 0) { dist[nb] = dist[q[j]] + 1; q.push(nb); }
+    }
+    let best = -1, bd = 0;
+    for (let i = 0; i < N; i++) {
+      const [x, y] = center(i);
+      if (x < W * 0.08 || x > W * 0.92 || y < H * 0.1 || y > H * 0.9) continue;
+      const v = dist[i] + rng() * 2;
+      if (v > bd) { bd = v; best = i; }
+    }
+    if (best < 0 || bd < 5) break;
+    isLandH[best] = 1;
+    height[best] = seaLevel + 0.02;
+    grow([best], Math.round(S * rng.range(4.5, 7)));
+  }
   const land = [];
-  for (let i = 0; i < N; i++) if (height[i] > sea) land.push(i);
+  for (let i = 0; i < N; i++) if (isLandH[i]) land.push(i);
+  // 산은 육지의 12~18%, 고산은 3% 정도로 고정 (산맥만 가득한 지도 방지)
+  const ridge = new Float32Array(N);
+  for (const i of land) {
+    const [x, y] = center(i);
+    ridge[i] = 1 - Math.abs(nr.fbm((x / W) * 6, (y / H) * 6 * (H / W) * 1.6, 4) * 2 - 1);
+  }
+  const rs = land.map((i) => ridge[i]).sort((a, b) => a - b);
+  const mtnT = rs[Math.floor(rs.length * (1 - rng.range(0.12, 0.18)))];
+  const peakT = rs[Math.floor(rs.length * 0.97)];
   const lh = land.map((i) => height[i]).sort((a, b) => a - b);
-  const hillsT = lh[Math.floor(lh.length * 0.72)];
+  const hillsT = lh[Math.floor(lh.length * 0.8)];
   for (let i = 0; i < N; i++) {
-    if (height[i] <= sea) {
+    if (!isLandH[i]) {
       terrain[i] = T.SEA;
       continue;
     }
     const [x, y] = center(i);
     const ny = y / H;
-    const ridge = 1 - Math.abs(nr.fbm((x / W) * 6, ny * 6 * (H / W) * 1.6, 4) * 2 - 1);
     const moist = nm.fbm((x / W) * 4, ny * 4, 3);
     const temp = 1 - Math.abs(ny - 0.5) * 2;
     let t = T.PLAINS;
@@ -170,8 +283,8 @@ function buildProcedural(scn, g) {
     else if (moist < 0.36 && temp > 0.45) t = T.DESERT;
     else if (moist > 0.6) t = T.FOREST;
     if (height[i] > hillsT && t !== T.DESERT) t = T.HILLS;
-    if (ridge > 0.9 && height[i] > sea + 0.03) t = T.MOUNTAIN;
-    if (ridge > 0.965 && height[i] > hillsT) t = T.PEAK;
+    if (ridge[i] >= mtnT) t = T.MOUNTAIN;
+    if (ridge[i] >= peakT && height[i] > hillsT) t = T.PEAK;
     terrain[i] = t;
   }
   // 강: 산에서 시작해 낮은 곳으로 흐름
@@ -521,11 +634,21 @@ function buildSeaZones(scn, g) {
       }
     }
   }
-  for (const [key, v] of contact) {
-    const z = Math.floor(key / 100000), r = key % 100000;
-    const cliff = v.rough / v.n > 0.5 || rng() < 0.12;
-    link(z, r, cliff ? 'cliff' : 'landing');
-    link(r, z, 'coast');
+  // 절벽은 해안 접점의 18%까지만, 해안 지역마다 상륙 가능한 바다는 하나 이상 남김
+  const cands = [...contact].map(([key, v]) => ({ z: Math.floor(key / 100000), r: key % 100000, score: v.rough / v.n + rng() * 0.35 }));
+  cands.sort((a, b) => b.score - a.score);
+  const coastsOf = new Map();
+  for (const c of cands) coastsOf.set(c.r, (coastsOf.get(c.r) || 0) + 1);
+  const maxCliff = Math.floor(cands.length * 0.18);
+  let cliffs = 0;
+  for (const c of cands) {
+    const left = coastsOf.get(c.r);
+    c.cliff = cliffs < maxCliff && c.score > 0.55 && left > 1;
+    if (c.cliff) { cliffs++; coastsOf.set(c.r, left - 1); }
+  }
+  for (const c of cands) {
+    link(c.z, c.r, c.cliff ? 'cliff' : 'landing');
+    link(c.r, c.z, 'coast');
   }
   g.landCount = L;
   g.regions = all;

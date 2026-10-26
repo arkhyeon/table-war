@@ -93,7 +93,12 @@ function frontierInfo(s, world, nid) {
     if (goal !== null && goal !== undefined && world.regions[r].neighbors.some((x) => s.regions[x.id].owner === goal && !s.regions[x.id].sea)) stage.push(r);
   }
   // 목표국 국경이 있으면 그쪽으로, 없으면 모든 전선으로 병력을 보냄
-  const seeds = stage.length ? [...new Set([...stage, ...queue.filter((r) => threat[r] > s.regions[r].troops / 1000)])] : queue;
+  let seeds = stage.length ? [...new Set([...stage, ...queue.filter((r) => threat[r] > s.regions[r].troops / 1000)])] : queue;
+  // 육지 전선이 없는 섬나라: 바다 건너편을 마주한 항구로 병력을 모음
+  if (!seeds.length) {
+    const ports = mine.filter((r) => s.regions[r].buildings.port && overseas(s, world, nid, r).length);
+    seeds = ports.length ? ports : mine.filter((r) => s.regions[r].buildings.port);
+  }
   queue.length = 0;
   for (const r of seeds) {
     dist[r] = 0;
@@ -138,6 +143,40 @@ function attackOption(s, world, nid, from, to, count, gens, need) {
   return { est: estimateBattle(s, world, nid, from, to, count, gens, opts), opts };
 }
 
+// 바다 건너 칠 만한 해안: 해안 r에서 바다 1~2칸 안에 닿는 남의 땅 상륙 지점 → [{zone, via, target, type}]
+function overseas(s, world, nid, r) {
+  const out = [];
+  for (const z of world.regions[r].neighbors) {
+    if (z.type !== 'coast') continue;
+    const scan = (zone, via) => {
+      for (const x of world.regions[zone].neighbors) {
+        if (x.type !== 'landing' && x.type !== 'cliff') continue;
+        const o = s.regions[x.id].owner;
+        if (o !== nid && hostile(s, nid, o)) out.push({ zone: z.id, via, target: x.id, type: x.type });
+      }
+    };
+    scan(z.id, null);
+    for (const y of world.regions[z.id].neighbors) if (y.type === 'sea') scan(y.id, y.id);
+  }
+  return out;
+}
+
+// 땅덩어리 번호(바다로 나뉜 육지 묶음)와 본토 번호
+function massInfo(world) {
+  if (world._mass) return world._mass;
+  const of = new Array(world.regions.length).fill(-1);
+  const size = [];
+  for (const r of world.regions) {
+    if (r.sea || of[r.id] >= 0) continue;
+    const q = [r.id];
+    of[r.id] = size.length;
+    for (let k = 0; k < q.length; k++) for (const nb of world.regions[q[k]].neighbors) if (!world.regions[nb.id].sea && of[nb.id] < 0) { of[nb.id] = of[r.id]; q.push(nb.id); }
+    size.push(q.length);
+  }
+  world._mass = { of, main: size.indexOf(Math.max(...size)), size };
+  return world._mass;
+}
+
 export function aiActions(s, world, nid) {
   const n = s.nations[nid];
   updateGoal(s, world, nid);
@@ -145,6 +184,10 @@ export function aiActions(s, world, nid) {
   const building = n.posture === 'build';
   // 섬나라: 육로로 맞닿은 적이나 중립지가 없으면 해군 중심
   const island = !nationRegions(s, nid).some((r) => world.regions[r].neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== nid && hostile(s, nid, s.regions[x.id].owner)));
+  // 섬에서 시작한 나라: 섬 통일을 서두름
+  const M = massInfo(world);
+  const home = n.capital !== null ? M.of[n.capital] : -1;
+  const insular = home >= 0 && home !== M.main && M.size[home] <= 30;
   let guard = 0;
   while (n.alive && n.ap > 0 && guard++ < 40) {
     const { mine, threat, dist } = frontierInfo(s, world, nid);
@@ -168,11 +211,13 @@ export function aiActions(s, world, nid) {
         if (count < 2000 && !reg.sea) continue;
         if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;
         let need = t.owner === null ? 1.25 : s.coalition?.target === t.owner && inCoalition(s, nid) ? 1.05 : 1.15 + (1 - n.aggression) * 0.45;
-        if (building && t.owner !== null) need += 0.4; // 내실 중엔 확실한 기회만
+        const sameIsle = insular && !t.sea && M.of[nb.id] === home;
+        if (building && t.owner !== null && !sameIsle) need += 0.4; // 내실 중엔 확실한 기회만
+        if (sameIsle) need -= 0.15;
         const { est, opts: mo } = attackOption(s, world, nid, r, nb.id, count, gens, need);
         if (est.ratio < need) continue;
         const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0);
-        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? 15 : 0) - (building && t.owner !== null ? 20 : 0), run: () => doMove(s, world, nid, r, nb.id, count, gens, mo) });
+        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? (island ? 25 : 15) : 0) + (sameIsle ? 15 : 0) - (building && t.owner !== null && !sameIsle ? 20 : 0), run: () => doMove(s, world, nid, r, nb.id, count, gens, mo) });
       }
     }
     // 승선: 바다 건너 약한 해안이 있으면 함대를 띄움
@@ -188,19 +233,37 @@ export function aiActions(s, world, nid) {
           if (zr.owner !== null && zr.owner !== nid && zr.troops > 0) continue;
           const count = reg.troops - 1000 - (threat[r] > 0 ? Math.ceil(threat[r] * 400) : 0);
           if (count < (island ? 3000 : 6000)) continue;
-          const target = world.regions[z.id].neighbors.find((x) => {
-            if (x.type !== 'landing' && x.type !== 'cliff') return false;
-            const t = s.regions[x.id];
-            return t.owner !== nid && hostile(s, nid, t.owner) && !(t.owner !== null && s.turn <= 3) && t.troops * 1.6 < count * (x.type === 'cliff' ? 0.45 : 0.75);
+          // 바로 앞바다 또는 (섬나라는) 한 칸 더 건너 상륙할 곳
+          const reach = overseas(s, world, nid, r).filter((o) => o.zone === z.id && (island || o.via === null) && (o.via === null || !s.regions[o.via].troops || s.regions[o.via].owner === nid));
+          const target = reach.find((o) => {
+            const t = s.regions[o.target];
+            return !(t.owner !== null && s.turn <= 3) && t.troops * 1.6 < count * (o.type === 'cliff' ? 0.45 : 0.75);
           });
           if (!target || moveCheck(s, world, nid, r, z.id, count, gens)) continue;
-          opts.push({ score: 30 + s.regions[target.id].pop * 0.4 + (island ? 15 : 0) + (s.regions[target.id].owner === n.goal ? 10 : 0), run: () => doMove(s, world, nid, r, z.id, count, gens) });
+          opts.push({
+            score: 30 + s.regions[target.target].pop * 0.4 + (island ? 25 : 0) + (s.regions[target.target].owner === n.goal ? 10 : 0) - (target.via !== null ? 5 : 0),
+            run: () => {
+              const res = doMove(s, world, nid, r, z.id, count, gens);
+              if (res.ok && target.via !== null) n.voyage = { at: z.id, to: target.via, turn: s.turn };
+              return res;
+            },
+          });
         }
       }
     }
+    // 원정 함대: 계획한 다음 바다로 항해
+    const vy = n.voyage;
+    if (vy && s.turn - vy.turn <= 2 && fleets.includes(vy.at)) {
+      const gens = gensIn(s, vy.at, nid).map((g) => g.id);
+      const cnt = s.regions[vy.at].troops;
+      const blocked = s.regions[vy.to].owner !== null && s.regions[vy.to].owner !== nid && s.regions[vy.to].troops > 0;
+      if (!blocked && moveCost(world, vy.at, vy.to, s) <= n.ap && !moveCheck(s, world, nid, vy.at, vy.to, cnt, gens))
+        opts.push({ score: 45, run: () => { const res = doMove(s, world, nid, vy.at, vy.to, cnt, gens); n.voyage = null; return res; } });
+    } else if (vy) n.voyage = null;
     // 바다에 남은 함대는 가까운 아군 해안으로 귀환
     for (const z of fleets) {
       if (s.regions[z].guard === nid && s.regions[z].troops >= 3000) continue;
+      if (n.voyage && n.voyage.at === z) continue;
       const back = world.regions[z].neighbors.find((x) => (x.type === 'landing' || x.type === 'cliff') && s.regions[x.id].owner === nid);
       if (back && !moveCheck(s, world, nid, z, back.id, s.regions[z].troops, [])) {
         const gens = gensIn(s, z, nid).map((g) => g.id);
@@ -248,7 +311,7 @@ export function aiActions(s, world, nid) {
       if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2 + (building ? 6 : 0), run: () => doBuild(s, world, nid, mk, 'market') });
       const br = mine.filter((r) => !s.regions[r].buildings.barracks && dist[r] <= 1).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
       if (br !== undefined && n.gold >= 200 * G) opts.push({ score: 15, run: () => doBuild(s, world, nid, br, 'barracks') });
-      const pt = mine.filter((r) => world.regions[r].coastal && !s.regions[r].buildings.port).sort((a, b) => s.regions[b].troops - s.regions[a].troops)[0];
+      const pt = mine.filter((r) => world.regions[r].coastal && !s.regions[r].buildings.port).map((r) => [r, s.regions[r].troops / 1000 + (overseas(s, world, nid, r).length ? 60 : 0)]).sort((a, b) => b[1] - a[1])[0]?.[0];
       if (pt !== undefined && n.gold >= (island ? 160 : 220) * G) opts.push({ score: island ? 32 : 13, run: () => doBuild(s, world, nid, pt, 'port') });
     }
     // 공성병기: 성벽 있는 적지와 맞닿은 전선

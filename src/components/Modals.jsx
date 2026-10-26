@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
-import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp } from '../game/duel.js';
+import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp, readChance, bestResponse } from '../game/duel.js';
 import { decodeOwners } from '../game/fog.js';
 import { makeRng } from '../game/rng.js';
-import { TERRAIN, EDGE, COST, BUILDINGS } from '../game/rules.js';
+import { TERRAIN, EDGE, COST, BUILDINGS, BATTLE_KIND } from '../game/rules.js';
 import { TRAITS, TIER, traitDesc, traitLabel } from '../game/traits.js';
 import { CIVS } from '../game/civs.js';
 import {
@@ -758,15 +758,25 @@ export function DuelModal({ game, attId, defId, onFinish }) {
   const [d, setD] = useState(() => newDuel(ag, dg));
   const [busy, setBusy] = useState(false);
   const history = game.duelMoves || [];
+  // 매 합마다 상대가 먼저 수를 정하고, 내 장수 지력으로 그 의도를 간파할 수 있음
+  const intent = () => {
+    const plan = aiMove(rng, dg, ag, null, [...history, ...d.rounds.map((r) => r.m1)]);
+    return { plan, seen: rng() < readChance(ag, dg) };
+  };
+  const [it, setIt] = useState(intent);
   const play = (m) => {
     if (busy) return;
     const next = structuredClone(d);
-    const mine = [...history, ...d.rounds.map((r) => r.m1)];
-    const am = aiMove(rng, dg, ag, m, mine);
+    // 상대도 지력으로 내 수를 읽으면 수를 바꿈
+    const am = rng() < readChance(dg, ag) ? bestResponse(m) : it.plan;
     duelRound(next, ag, dg, m, am, rng);
     setD(next);
     setBusy(true);
-    setTimeout(() => setBusy(false), 1150);
+    setTimeout(() => {
+      setBusy(false);
+      const plan = aiMove(rng, dg, ag, null, [...history, ...next.rounds.map((r) => r.m1)]);
+      setIt({ plan, seen: rng() < readChance(ag, dg) });
+    }, 1150);
   };
   const bar = (hp, max, color) => (
     <div className="odds" style={{ background: '#444' }}>
@@ -823,6 +833,16 @@ export function DuelModal({ game, attId, defId, onFinish }) {
       </div>
       {!d.done || busy ? (
         <>
+          <div className="card" style={{ marginTop: 8, fontSize: 13 }}>
+            {busy ? '…' : it.seen ? (
+              <>
+                👁️ 간파! {fixJosa(`${dg.name}은(는)`)} <b>{MOVES[it.plan].icon} {fixJosa(`${MOVES[it.plan].name}을(를)`)}</b> 노리는 듯하다. <small className="muted">(상대도 내 수를 읽으면 바꿀 수 있음)</small>
+              </>
+            ) : (
+              <span className="muted">🌫️ {dg.name}의 의도를 읽지 못했다.</span>
+            )}{' '}
+            <small className="muted">간파 확률 {Math.round(readChance(ag, dg) * 100)}% · 상대 간파 {Math.round(readChance(dg, ag) * 100)}%</small>
+          </div>
           <div className="actions" style={{ marginTop: 10, gridTemplateColumns: '1fr 1fr 1fr' }}>
             {Object.entries(MOVES).map(([k, m]) => (
               <button key={k} onClick={() => play(k)} title={m.desc} disabled={busy || d.done}>
@@ -831,7 +851,7 @@ export function DuelModal({ game, attId, defId, onFinish }) {
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            반격 &gt; 공격 &gt; 방어 &gt; 반격 (가위바위보). 같은 수끼리는 서로 절반 피해. 최대 6합. 상대는 지력이 높을수록 내 수를 간파하고, 같은 수를 반복하면 버릇을 노립니다.
+            반격 &gt; 공격 &gt; 방어 &gt; 반격 (가위바위보). 같은 수끼리는 서로 절반 피해. 최대 6합. 지력이 높을수록 상대 의도를 미리 간파하고, 같은 수를 반복하면 상대가 버릇을 노립니다.
           </div>
         </>
       ) : (
@@ -884,7 +904,7 @@ export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 120
         ) : (
           '중립 세력'
         )}{' '}
-        · {game.regions[b.to].name} · <b style={{ color: b.result === 'win' ? 'var(--accent)' : undefined }}>{res}</b>
+        · {game.regions[b.to].name} · {b.kind && <span className="tag">{BATTLE_KIND[b.kind]}</span>} <b style={{ color: b.result === 'win' ? 'var(--accent)' : undefined }}>{res}</b>
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         {b.msg}

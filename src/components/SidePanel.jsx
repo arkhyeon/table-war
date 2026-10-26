@@ -1,5 +1,6 @@
 import { TERRAIN, BUILDINGS, COST, EDGE, TAX } from '../game/rules.js';
 import { traitLabel, traitDesc } from '../game/traits.js';
+import { gradeOf, gradeScore } from '../game/generals.js';
 import EditableName from './EditableName.jsx';
 import { fmtTroops, fmtGold } from '../game/format.js';
 import { CIVS } from '../game/civs.js';
@@ -19,12 +20,17 @@ export function relTag(game, a, b) {
   return null;
 }
 
+export function GradeTag({ g }) {
+  const gr = gradeOf(g);
+  return <span className={'tag grade g-' + gr} title={`등급 ${gr} (점수 ${gradeScore(g).toFixed(1)})`}>{gr}</span>;
+}
+
 export function TraitTags({ g }) {
-  return (g.traits || []).map((tr) => (
+  return [<GradeTag key="_grade" g={g} />, ...(g.traits || []).map((tr) => (
     <span key={tr[0]} className={'tag trait t' + tr[1]} title={traitDesc(tr[0], tr[1])}>
       {traitLabel(tr)}
     </span>
-  ));
+  ))];
 }
 
 export function GenLine({ g, extra }) {
