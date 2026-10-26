@@ -44,7 +44,9 @@ export function isVassalOf(s, a, b) {
 export function computeMaxAp(s, nid) {
   const regions = nationRegions(s, nid).length;
   const fast = Math.min(2, nationTrait(s, nid, '신속'));
-  let ap = 3 + Math.min(7, Math.floor(regions / 6)) + fast;
+  // 큰 지도(지역이 잘게 나뉨)는 행동력 상한도 비례해서 늘림
+  const cap = Math.round(7 * Math.max(1, landCount(s) / 150));
+  let ap = 3 + Math.min(cap, Math.floor(regions / 6)) + fast;
   if (s.nations.some((o) => o.alive && o.id !== nid && isVassalOf(s, nid, o.id))) ap -= 1;
   return Math.max(2, ap);
 }
@@ -492,6 +494,13 @@ export function gainExp(s, g, amt) {
   }
 }
 
+// 지도 애니메이션용 이동 기록 (턴마다 초기화)
+function trackMove(s, from, to, nid, count, kind) {
+  s.moveSeq = (s.moveSeq || 0) + 1;
+  (s.moves = s.moves || []).push({ id: s.moveSeq, from, to, n: nid, c: count, k: kind });
+  if (s.moves.length > 200) s.moves.shift();
+}
+
 export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const err = moveCheck(s, world, nid, from, to, count, genIds);
   if (err) return fail(err);
@@ -508,6 +517,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     tr.troops += count;
     s.opinion[tr.owner][nid] += Math.min(20, count / 2000);
     log(s, `🤝 ${n.name}이(가) 동맹국 ${s.nations[tr.owner].name}의 ${tr.name}에 원군 ${fmtTroops(count)}을 보냈습니다.`, [nid, tr.owner], 'diplo');
+    trackMove(s, from, to, nid, count, 'aid');
     return { ok: true, msg: `${tr.name}에 원군 ${fmtTroops(count)} 파견.` };
   }
   const leaveSea = () => {
@@ -529,6 +539,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     }
     leaveSea();
     const verb = tr.sea && !fr.sea ? '승선' : fr.sea && !tr.sea ? '상륙' : '이동';
+    trackMove(s, from, to, nid, count, 'move');
     return { ok: true, msg: `${fr.name} → ${tr.name}: 병사 ${fmtTroops(count)} ${verb}.` };
   }
   const defender = tr.owner;
@@ -593,6 +604,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       s.opinion[defender][nid] -= 15;
       for (const o of s.nations) if (o.alive && isVassalOf(s, defender, o.id) && o.id !== nid) s.opinion[o.id][nid] -= 10;
     }
+    trackMove(s, from, to, nid, count, kind);
     return { ok: true, msg, report };
   };
   const assaultLoss = mode === 'assault' ? (tv(atkGens, '공성') && atkGens.some((g) => g.traits.some(([t, l]) => t === '공성' && l >= 2)) ? 1.05 : 1.5) : 1;

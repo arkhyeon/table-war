@@ -291,6 +291,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             cutSet={cutSet}
             focus={replay ? replay.list[replay.i].to : null}
             flash={flashSet}
+            moves={game.moves}
+            showArmy={game.opts?.showArmy !== false}
             onClick={onRegionClick}
             onContext={onRegionContext}
           />

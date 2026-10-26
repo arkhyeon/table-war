@@ -17,7 +17,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [nationCount, setNationCount] = useState(8);
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
-  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, histStats: false, difficulty: 'normal' });
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
   const scn = SCENARIOS.find((s) => s.id === scnId);
@@ -102,6 +102,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             ['revealTroops', '👁️ 병력 전체 공개', '끄면 시야 밖 지역의 병력은 ?로 표시'],
             ['rememberExplored', '🧭 탐색 지역 기억', '한 번 본 땅은 계속 지도에 표시 (지도 전체 공개를 껐을 때)'],
             ['showBattles', '⚔️ 턴마다 전투 다시보기', '시야 안에서 벌어진 전투만, 건너뛰기 가능'],
+            ['showArmy', '🪖 병력 그림·애니메이션', '병력 규모에 따라 병사 그림(1~4명, 대군은 군기)을 보여주고 이동을 애니메이션으로 표시'],
             ['histStats', '📜 역사 능력치 사용', '끄면(기본) 장수 성향만 살리고 능력치는 나라마다 공평하게 무작위'],
           ].map(([k, label, tip]) => (
             <label key={k} title={tip}>

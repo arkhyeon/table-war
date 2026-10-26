@@ -4,7 +4,125 @@ import { WEATHER } from '../game/weather.js';
 
 const NEUTRAL = '#b9b2a0';
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash }) {
+// 병력 규모 단계: 0(없음)~5(대군, 깃발)
+export const armyTier = (t) => (t <= 0 ? 0 : t < 3000 ? 1 : t < 10000 ? 2 : t < 30000 ? 3 : t < 80000 ? 4 : 5);
+
+// 병사 한 명 (발끝이 원점, 위로 그려짐)
+function Soldier({ u, color, x = 0, delay = 0 }) {
+  return (
+    <g transform={`translate(${x},0)`}>
+      <g className="soldier" style={{ animationDelay: `${delay}s` }}>
+        <line x1={u * 0.62} y1={u * 0.1} x2={u * 0.62} y2={-u * 2.35} stroke="#5a4630" strokeWidth={u * 0.13} />
+        <path d={`M${u * 0.47} ${-u * 2.2}L${u * 0.62} ${-u * 2.6}L${u * 0.77} ${-u * 2.2}Z`} fill="#cfd3d6" stroke="#222" strokeWidth={u * 0.05} />
+        <path d={`M${-u * 0.42} ${-u * 1.2}L${u * 0.42} ${-u * 1.2}L${u * 0.55} 0L${-u * 0.55} 0Z`} fill={color} stroke="#fffdf6" strokeWidth={u * 0.3} paintOrder="stroke" />
+        <path d={`M${-u * 0.42} ${-u * 1.2}L${u * 0.42} ${-u * 1.2}L${u * 0.55} 0L${-u * 0.55} 0Z`} fill="none" stroke="#1a1a1a" strokeWidth={u * 0.08} />
+        <circle cy={-u * 1.55} r={u * 0.33} fill="#f1d3a5" stroke="#1a1a1a" strokeWidth={u * 0.08} />
+        <path d={`M${-u * 0.36} ${-u * 1.6}A${u * 0.36} ${u * 0.36} 0 0 1 ${u * 0.36} ${-u * 1.6}Z`} fill="#555" />
+      </g>
+    </g>
+  );
+}
+
+// 병력 규모 그림: 1~4명, 5단계는 군기까지
+export function Army({ tier, color, u, y = 0 }) {
+  if (!tier) return null;
+  const n = Math.min(4, tier);
+  const gap = u * 1.05;
+  const x0 = -((n - 1) * gap) / 2;
+  return (
+    <g transform={`translate(0,${y})`} className="army">
+      <ellipse cy={-u * 0.05} rx={((n - 1) * gap) / 2 + u * (tier >= 5 ? 1.9 : 0.95)} cx={tier >= 5 ? -gap * 0.45 : 0} ry={u * 0.42} fill="#fffdf6" opacity={0.9} stroke={color} strokeWidth={u * 0.12} />
+      {tier >= 5 && (
+        <g transform={`translate(${x0 - gap * 0.9},0)`}>
+          <line y1={u * 0.1} y2={-u * 3.1} stroke="#3b2b1a" strokeWidth={u * 0.15} />
+          <path className="banner" d={`M0 ${-u * 3.1}L${u * 1.3} ${-u * 2.8}L0 ${-u * 2.3}Z`} fill={color} stroke="#1a1a1a" strokeWidth={u * 0.07} />
+        </g>
+      )}
+      {Array.from({ length: n }, (_, i) => (
+        <Soldier key={i} u={u} color={color} x={x0 + i * gap} delay={(i * 0.37) % 1.2} />
+      ))}
+    </g>
+  );
+}
+
+// 이동·공격 애니메이션 층: 지도 전체를 다시 그리지 않도록 자체 상태로 프레임 갱신
+function MoveLayer({ world, nations, moves, visible, outline, s }) {
+  const [tokens, setTokens] = useState([]);
+  const [now, setNow] = useState(0);
+  const last = useRef(null);
+  useEffect(() => {
+    if (!moves) return;
+    const maxId = moves.length ? moves[moves.length - 1].id : 0;
+    if (last.current === null || maxId < last.current) {
+      last.current = maxId; // 처음 열거나 새 게임: 지난 이동은 재생하지 않음
+      return;
+    }
+    const fresh = moves.filter((m) => m.id > last.current && (visible(m.from) || visible(m.to))).slice(-40);
+    last.current = maxId;
+    if (!fresh.length) return;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const t0 = performance.now();
+    setTokens((ts) => [...ts, ...fresh.map((m, i) => ({ ...m, start: t0 + i * 110 }))]);
+  }, [moves]); // eslint-disable-line react-hooks/exhaustive-deps
+  const active = tokens.length > 0;
+  useEffect(() => {
+    if (!active) return;
+    let raf;
+    const loop = (t) => {
+      setNow(t);
+      setTokens((ts) => {
+        const keep = ts.filter((x) => t - x.start < 1700);
+        return keep.length === ts.length ? ts : keep;
+      });
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [active]);
+  const u = s * 0.5;
+  return (
+    <g pointerEvents="none">
+      {tokens.map((m) => {
+        const t = (now - m.start) / 1000;
+        if (t < 0) return null;
+        const a = world.regions[m.from], b = world.regions[m.to];
+        const col = nations[m.n]?.color || '#c00';
+        const p = Math.min(1, t / 0.85);
+        const e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+        const x = a.cx + (b.cx - a.cx) * e, y = a.cy + (b.cy - a.cy) * e;
+        const hop = Math.abs(Math.sin(p * Math.PI * 5)) * u * 0.35;
+        const fight = m.k === 'win' || m.k === 'lose' || m.k === 'siege';
+        const after = t - 0.85;
+        return (
+          <g key={m.id}>
+            {p < 1 && (
+              <>
+                <line x1={a.cx} y1={a.cy} x2={x} y2={y} stroke={col} strokeWidth={s * 0.18} strokeDasharray={`${s * 0.3} ${s * 0.3}`} opacity={0.7} />
+                <g transform={`translate(${x},${y - hop})`}>
+                  <ellipse rx={u * 1.6} ry={u * 0.45} fill="#000" opacity={0.25} transform={`translate(0,${hop})`} />
+                  <Army tier={Math.min(3, armyTier(m.c))} color={col} u={u} />
+                  {m.k === 'aid' && <text y={-u * 3} fontSize={s * 0.8} textAnchor="middle">🤝</text>}
+                </g>
+              </>
+            )}
+            {p >= 1 && fight && after < 0.8 && (
+              <g transform={`translate(${b.cx},${b.cy}) scale(${0.6 + after * 1.4})`} opacity={1 - after / 0.8}>
+                <text fontSize={s * 1.8} textAnchor="middle" dy={s * 0.6}>
+                  {m.k === 'lose' ? '🛡️' : '💥'}
+                </text>
+              </g>
+            )}
+            {p >= 1 && m.k === 'win' && outline[m.to] && after < 0.85 && (
+              <path d={outline[m.to]} fill={col} fillOpacity={0.45 * (1 - after / 0.85)} fillRule="evenodd" stroke={col} strokeWidth={3} opacity={1 - after / 0.85} />
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -137,7 +255,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
   }
 
   return (
-    <div className="mapwrap" style={{ height: '100%' }}>
+    <div className={'mapwrap' + (zoomed || world.landCount < 170 ? ' live' : '')} style={{ height: '100%' }}>
       <svg
         ref={svgRef}
         viewBox={vb.join(' ')}
@@ -236,6 +354,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
           {selected !== null && selected !== undefined && world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
           {seaLines}
           {arrows}
+          {!compact && moves && showArmy && <MoveLayer world={world} nations={nations} moves={moves} visible={(rid) => viewOf(rid) === 'visible'} outline={statics.outline} s={s} />}
           {!compact &&
             world.regions.map((r) => {
               const reg = regions[r.id];
@@ -273,6 +392,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const icons = (b.walls ? `🏰${b.walls < 3 ? b.walls : ''}` : '') + (b.market ? '💰' : '') + (b.port ? '⚓' : '') + (b.barracks ? '⚔️' : '');
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
+                  {showArmy && own !== null && t !== '?' && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.5} y={-s * 0.78} />}
                   <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill="#fffdf6" stroke={col} strokeWidth={s * 0.22} />
                   {wx && wx.icon && (
                     <text x={-bw / 2 - s * 0.1} dy={-s * 0.75} fontSize={s * 0.75} textAnchor="middle">
@@ -304,7 +424,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                     </text>
                   )}
                   {zoomed && (
-                    <text dy={-s * 1.25} fontSize={s * 0.62} textAnchor="middle" fill="#111" stroke="#fffdf6" strokeWidth={s * 0.18} paintOrder="stroke">
+                    <text dy={showArmy && own !== null && reg.troops > 0 ? -s * 2.4 : -s * 1.25} fontSize={s * 0.62} textAnchor="middle" fill="#111" stroke="#fffdf6" strokeWidth={s * 0.18} paintOrder="stroke">
                       {reg.name}
                     </text>
                   )}

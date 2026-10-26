@@ -183,3 +183,10 @@ button.ghost { background: transparent; border-color: transparent; padding: 0 4p
 
 .flash { animation: flash 0.9s ease-in-out 6 alternate; pointer-events: none; }
 @keyframes flash { from { opacity: 1; } to { opacity: 0.15; } }
+
+/* 병사 그림: 제자리에서 살짝 들썩임, 군기는 펄럭임 */
+.live .soldier { animation: bob 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
+@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
+.live .banner { animation: wave 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
+@keyframes wave { 0%, 100% { transform: skewY(0deg) scaleX(1); } 50% { transform: skewY(8deg) scaleX(0.85); } }
+@media (prefers-reduced-motion: reduce) { .live .soldier, .live .banner, .flash { animation: none; } }

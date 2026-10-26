@@ -57,7 +57,7 @@ function balanceOfPower(s, world) {
   if ((s.coalitionCooldown || 0) > s.turn) return;
   // 나라가 많은 지도에서 작은 1위에게까지 대동맹이 생기지 않도록 영토 비율 문턱(통일선의 40%)도 둠
   const topShare = nationRegions(s, top.id).length / landCount(s);
-  if (threat(top.id) > (s.turn >= 30 ? 2.1 : 2.5) && topShare >= (s.winShare || 0.6) * 0.4) {
+  if (threat(top.id) > (s.turn >= 30 ? 2.1 : 2.5) && topShare >= Math.max(0.2, (s.winShare || 0.6) * 0.4)) {
     if (prev !== top.id) {
       s.coalition = { target: top.id, since: s.turn };
       log(s, `⚔️ ${top.name}의 패권에 맞서 대동맹이 결성되었습니다! 각국이 ${top.name}을(를) 공동의 적으로 삼습니다.`, s.nations.map((x) => x.id), 'diplo');
@@ -228,6 +228,7 @@ export function endTurn(s, world) {
   s.turnNews = [];
   s.turnEvents = [];
   s.battles = [];
+  s.moves = [];
   const rng = stateRng(s);
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {

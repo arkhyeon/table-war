@@ -57,7 +57,7 @@ export const SCENARIOS = [
   },
   {
     id: 'eastasia650',
-    winShare: 0.5,
+    winShare: 0.45,
     startYear: 650,
     name: '동아시아 650년',
     era: '삼국 통일 전쟁기',

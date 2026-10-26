@@ -97,6 +97,9 @@ export function evaluateDeal(s, world, from, to, deal) {
       const nbTo = adjacentNations(s, world, to), nbFrom = adjacentNations(s, world, from);
       const big = s.nations.some((o) => o.alive && o.id !== to && o.id !== from && nbTo.has(o.id) && nbFrom.has(o.id) && nationPower(s, o.id) > Math.max(P, Q) * 1.3);
       if (big) v += 30;
+      // 이미 동맹이 많으면 더 묶이기 싫다(칠 곳이 사라짐)
+      const allies = s.nations.filter((o) => o.alive && o.id !== to && getRel(s, to, o.id).type === 'alliance').length;
+      v -= allies * 12;
       break;
     }
     case 'nap':

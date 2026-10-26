@@ -5,7 +5,7 @@ import {
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, governorOf, doRelocate,
 } from './engine.js';
-import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex } from './diplomacy.js';
+import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
 
@@ -425,9 +425,35 @@ function seekCoalition(s, world, nid, rng) {
   return true;
 }
 
+// 사방이 동맹·조약으로 막혀 칠 곳이 없으면, 가장 만만한 조약 이웃과 관계를 끊고 확장
+function breakOut(s, world, nid, rng) {
+  const n = s.nations[nid];
+  if (s.turn < 15 || n.isPlayer) return false;
+  const nbs = new Map();
+  let open = 0;
+  for (const r of nationRegions(s, nid)) for (const x of world.regions[r].neighbors) {
+    const t = s.regions[x.id];
+    if (t.sea || t.owner === nid) continue;
+    if (t.owner === null || hostile(s, nid, t.owner)) open++;
+    else nbs.set(t.owner, (nbs.get(t.owner) || 0) + 1);
+  }
+  if (open > 0 || !nbs.size || !rng.chance(0.35)) return false;
+  // 속국은 병합 대상이므로 제외, 국력이 가장 약한 조약국을 고름
+  const cands = [...nbs.keys()].filter((o) => !s.nations[o].isPlayer && getRel(s, nid, o).type !== 'vassal' && !(inCoalition(s, nid) && inCoalition(s, o)));
+  if (!cands.length) return false;
+  const o = cands.reduce((a, b) => (nationPower(s, b) < nationPower(s, a) ? b : a));
+  if (nationPower(s, o) > nationPower(s, nid) * 1.1) return false;
+  breakTreaty(s, nid, o);
+  s.opinion[nid][o] = Math.min(s.opinion[nid][o], -30);
+  n.goal = o;
+  n.goalSince = s.turn;
+  return true;
+}
+
 export function aiDiplomacy(s, world, nid) {
   const rng = stateRng(s);
   const n = s.nations[nid];
+  if (breakOut(s, world, nid, rng)) return;
   if (seekCoalition(s, world, nid, rng)) return;
   if (!rng.chance(0.18)) return;
   const others = s.nations.filter((o) => o.alive && o.id !== nid);
