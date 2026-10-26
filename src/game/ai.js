@@ -1,7 +1,7 @@
 import { stateRng } from './rng.js';
 import { COST, G } from './rules.js';
 import {
-  getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
+  getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
 } from './engine.js';
@@ -267,7 +267,7 @@ export function aiActions(s, world, nid) {
         const { est, opts: mo } = attackOption(s, world, nid, r, nb.id, count, gens, need);
         if (est.ratio < need) continue;
         const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0);
-        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? (island ? 25 : 15) : 0) + (sameIsle ? 15 : 0) + (drive && t.owner !== null ? drive * 20 : 0) - (building && t.owner !== null && !sameIsle ? 20 : 0), run: () => doMove(s, world, nid, r, nb.id, count, gens, mo) });
+        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? (island ? 25 : 15) : 0) + (sameIsle ? 15 : 0) + (drive && t.owner !== null ? drive * 20 : 0) - (building && t.owner !== null && !sameIsle ? 20 : 0), run: () => planMove(s, world, nid, r, nb.id, count, gens, mo) });
       }
     }
     // 승선: 바다 건너 약한 해안이 있으면 함대를 띄움
@@ -293,7 +293,7 @@ export function aiActions(s, world, nid) {
           opts.push({
             score: 30 + s.regions[target.target].pop * 0.4 + (island ? 25 : 0) + (s.regions[target.target].owner === n.goal ? 10 : 0) - (target.via !== null ? 5 : 0),
             run: () => {
-              const res = doMove(s, world, nid, r, z.id, count, gens);
+              const res = planMove(s, world, nid, r, z.id, count, gens);
               if (res.ok && target.via !== null) n.voyage = { at: z.id, to: target.via, turn: s.turn };
               return res;
             },
@@ -308,7 +308,7 @@ export function aiActions(s, world, nid) {
       const cnt = movable(s, vy.at);
       const blocked = s.regions[vy.to].owner !== null && s.regions[vy.to].owner !== nid && s.regions[vy.to].troops > 0;
       if (!blocked && moveCost(world, vy.at, vy.to, s) <= n.ap && !moveCheck(s, world, nid, vy.at, vy.to, cnt, gens))
-        opts.push({ score: 45, run: () => { const res = doMove(s, world, nid, vy.at, vy.to, cnt, gens); n.voyage = null; return res; } });
+        opts.push({ score: 45, run: () => { const res = planMove(s, world, nid, vy.at, vy.to, cnt, gens); n.voyage = null; return res; } });
     } else if (vy) n.voyage = null;
     // 바다에 남은 함대는 가까운 아군 해안으로 귀환
     for (const z of fleets) {
@@ -317,7 +317,7 @@ export function aiActions(s, world, nid) {
       const back = world.regions[z].neighbors.find((x) => (x.type === 'landing' || x.type === 'cliff') && s.regions[x.id].owner === nid);
       if (back && movable(s, z) > 0 && !moveCheck(s, world, nid, z, back.id, movable(s, z), [])) {
         const gens = gensIn(s, z, nid).map((g) => g.id);
-        opts.push({ score: 12, run: () => doMove(s, world, nid, z, back.id, movable(s, z), gens) });
+        opts.push({ score: 12, run: () => planMove(s, world, nid, z, back.id, movable(s, z), gens) });
       }
     }
     // 경비 함대: 적 해안과 맞닿은 바다에 함대를 띄워 바닷길을 막음 (해전 유도)
@@ -332,7 +332,7 @@ export function aiActions(s, world, nid) {
         if (!z) continue;
         const cnt = Math.round(Math.min(8000, reg.troops / 4, movable(s, r)) / 100) * 100;
         if (moveCheck(s, world, nid, r, z.id, cnt, [])) continue;
-        opts.push({ score: island ? 22 : 11, run: () => { const res = doMove(s, world, nid, r, z.id, cnt, []); if (res.ok) s.regions[z.id].guard = nid; return res; } });
+        opts.push({ score: island ? 22 : 11, run: () => { const res = planMove(s, world, nid, r, z.id, cnt, []); if (res.ok) s.regions[z.id].guard = nid; return res; } });
         break;
       }
     }
@@ -380,7 +380,7 @@ export function aiActions(s, world, nid) {
       const gens = gensIn(s, r, nid).map((g) => g.id);
       const mv = Math.min(movable(s, r), reg.troops - 1000);
       if (mv < 1000 || moveCheck(s, world, nid, r, nb.id, mv, gens)) continue;
-      opts.push({ score: 14 + (mv / 1000) * 0.4, run: () => doMove(s, world, nid, r, nb.id, mv, gens, { engines: reg.engines || 0 }) });
+      opts.push({ score: 14 + (mv / 1000) * 0.4, run: () => planMove(s, world, nid, r, nb.id, mv, gens, { engines: reg.engines || 0 }) });
     }
     // 원군: 위협받는 동맹국 땅에 여유 병력을 보냄
     for (const r of mine) {
@@ -397,7 +397,7 @@ export function aiActions(s, world, nid) {
         if (enemy < t.troops * 1.3 || enemy < 10000) continue;
         const cnt = Math.round(Math.min(reg.troops / 3, movable(s, r)) / 100) * 100;
         if (moveCheck(s, world, nid, r, x.id, cnt, [])) continue;
-        opts.push({ score: 16 + Math.min(20, (enemy - t.troops) / 3000), run: () => doMove(s, world, nid, r, x.id, cnt, []) });
+        opts.push({ score: 16 + Math.min(20, (enemy - t.troops) / 3000), run: () => planMove(s, world, nid, r, x.id, cnt, []) });
         break;
       }
     }

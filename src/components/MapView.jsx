@@ -122,7 +122,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -263,6 +263,28 @@ export default function MapView({ world, regions, nations, selected, targets, on
       </g>
     );
   });
+  // 이번 턴 이동 계획 화살표 (점선 + 병력 수)
+  const planArrows = (orders || []).map((o) => {
+    const a = world.regions[o.from], t = world.regions[o.to];
+    const dx = t.cx - a.cx, dy = t.cy - a.cy, L = Math.hypot(dx, dy) || 1;
+    const x1 = a.cx + (dx / L) * s * 0.9, y1 = a.cy + (dy / L) * s * 0.9, x2 = t.cx - (dx / L) * s * 1.1, y2 = t.cy - (dy / L) * s * 1.1;
+    const mx = (x1 + x2) / 2 - (dy / L) * L * 0.12, my = (y1 + y2) / 2 + (dx / L) * L * 0.12;
+    const col = nations[o.n]?.color || '#fff';
+    const d = `M${x1.toFixed(1)} ${y1.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    const lx = (x1 + 2 * mx + x2) / 4, ly = (y1 + 2 * my + y2) / 4;
+    const lab = fmt(o.count);
+    const w = String(lab).length * s * 0.5 + s * 0.8;
+    return (
+      <g key={'o' + o.id} className="plan-arrow">
+        <path d={d} fill="none" stroke="#15171b" strokeWidth={s * 0.5} strokeLinecap="round" opacity={0.7} />
+        <path d={d} fill="none" stroke={col} strokeWidth={s * 0.28} strokeLinecap="round" strokeDasharray={`${s * 0.55} ${s * 0.3}`} markerEnd={`url(#${clipId}-ah)`} />
+        <rect x={lx - w / 2} y={ly - s * 0.55} width={w} height={s * 1.1} rx={s * 0.5} fill="#15171b" stroke={col} strokeWidth={s * 0.12} />
+        <text x={lx} y={ly + s * 0.28} fontSize={s * 0.7} textAnchor="middle" fill="#fffdf6" fontWeight="700">
+          {lab}
+        </text>
+      </g>
+    );
+  });
   const zoomed = vb[2] < world.W * 0.55;
   const viewOf = (rid) => (view ? view(rid) : 'visible');
   const fogKey = view ? world.regions.map((r) => viewOf(r.id)[0]).join('') : '';
@@ -356,7 +378,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
             <path d={statics.glyph.desert} fill="none" stroke="#8a6a2a" strokeWidth={s * 0.18} strokeLinecap="round" opacity={0.6} />
             <path d={statics.glyph.mountain} fill="#7a634b" stroke="#2b1f14" strokeWidth={s * 0.08} strokeLinejoin="round" opacity={0.9} />
             {statics.glyph.mountainShade && <path d={statics.glyph.mountainShade} fill="#2b1f14" opacity={0.45} />}
-            <path d={statics.peaks} fill={TERRAIN[7].color} fillRule="evenodd" />
+            <path d={statics.peaks} fill={TERRAIN[7].color} fillRule="evenodd" opacity={0.55} />
             <path d={statics.glyph.peakCap} fill="#f4f1ea" stroke="#3a3a3a" strokeWidth={s * 0.08} strokeLinejoin="round" />
             <path d={statics.borders} fill="none" stroke="#00000045" strokeWidth={0.7} />
             <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
@@ -407,6 +429,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
             </g>
           ))}
           {arrows}
+          {planArrows}
           {!compact && moves && showArmy && <MoveLayer world={world} nations={nations} moves={moves} visible={(rid) => viewOf(rid) === 'visible'} outline={statics.outline} s={s} />}
           {!compact &&
             world.regions.map((r) => {
@@ -445,6 +468,8 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const gc = visible ? genCount?.[r.id] || 0 : 0;
               const b = reg.buildings;
               const icons = [b.walls && `🏰${b.walls < 3 ? b.walls : ''}`, b.market && '💰', b.port && '⚓', b.barracks && '⚔️'].filter(Boolean);
+              // 멀리서 볼 때 병력 모르는 지역은 이름표 대신 작은 점 (큰 지도에서 지도가 이름표로 덮이지 않게)
+              if (!known && !zoomed) return <circle key={r.id} cx={r.cx} cy={r.cy} r={s * 0.28} fill={own === null ? '#9b9584' : col} stroke="#fffdf6" strokeWidth={s * 0.08} opacity={0.85} />;
               const army = showArmy && own !== null && known && reg.troops > 0;
               const ib = s * 0.95; // 아이콘 배지 크기
               return (

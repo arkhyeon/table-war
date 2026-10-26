@@ -105,6 +105,8 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; gap: 4px; min-width: 170px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #000a; }
 .menu button { text-align: left; background: transparent; border-color: transparent; }
 .menu button:hover { background: var(--panel2); }
+.orders-box { position: absolute; right: 14px; bottom: 74px; z-index: 6; width: min(300px, calc(100% - 28px)); max-height: 40%; overflow: auto; display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; font-size: 13px; background: #15171bee; border: 1px solid var(--line); border-radius: 10px; }
+.plan-arrow { pointer-events: none; }
 .end-turn { position: absolute; right: 14px; bottom: 14px; z-index: 6; padding: 12px 20px; font-size: 16px; border-radius: 12px; box-shadow: 0 6px 18px #000a; }
 .log { position: absolute; left: 10px; bottom: 10px; width: min(460px, 60%); max-height: 34%; overflow: auto; background: #15171bdd; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; padding: 6px 8px; }
 .log div { padding: 2px 0; border-bottom: 1px solid #ffffff10; }
@@ -237,3 +239,8 @@ details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; 
 details.more > summary::before { content: '▸ '; }
 details.more[open] > summary::before { content: '▾ '; }
 details.more > .kv { margin-top: 6px; }
+
+.gen-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.gen-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 6px 8px; }
+.gen-pick.on { border-color: var(--accent); background: #3a3426; }
+.gen-pick small { color: var(--muted); font-size: 11px; }

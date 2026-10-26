@@ -17,7 +17,8 @@ export const setRel = (s, a, b, rel) => {
 // 육지 영토만 (바다 구역의 함대는 제외)
 export const nationRegions = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && !r.sea ? (acc.push(i), acc) : acc), []);
 export const nationFleets = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && r.sea ? (acc.push(i), acc) : acc), []);
-export const gensIn = (s, rid, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.region === rid && (nid === undefined || g.nation === nid));
+// 행군 중(이동 계획에 묶인) 장수는 그 지역에 없는 것으로 봄
+export const gensIn = (s, rid, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.region === rid && !g.order && (nid === undefined || g.nation === nid));
 export const nationGenerals = (s, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid);
 export const edgeBetween = (world, a, b) => world.regions[a].neighbors.find((n) => n.id === b) || null;
 export const nationTrait = (s, nid, id) => tv(nationGenerals(s, nid), id);
@@ -540,19 +541,128 @@ function trackMove(s, from, to, nid, count, kind) {
   if (s.moves.length > 200) s.moves.shift();
 }
 
-export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
+// ───────── 이동 계획: 계획만 세우고(병력은 출발), 턴 끝에 모든 나라의 계획을 함께 처리 ─────────
+export function planMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const err = moveCheck(s, world, nid, from, to, count, genIds);
   if (err) return fail(err);
+  const fr = s.regions[from], tr = s.regions[to];
+  const cost = moveCost(world, from, to, s);
+  const engines = Math.min(opts.engines || 0, fr.engines || 0);
+  const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from && !g.order);
+  s.orderSeq = (s.orderSeq || 0) + 1;
+  const o = { id: s.orderSeq, n: nid, from, to, count, gens: gens.map((g) => g.id), opts: { ...opts, engines }, cost, seaOwner: fr.sea ? fr.owner : undefined };
+  s.nations[nid].ap -= cost;
+  fr.troops -= count;
+  if (engines) fr.engines -= engines;
+  for (const g of gens) g.order = o.id;
+  if (fr.sea && fr.troops <= 0) {
+    fr.troops = 0;
+    fr.owner = null;
+  }
+  (s.orders = s.orders || []).push(o);
+  const hostile = tr.owner !== null && tr.owner !== nid && getRel(s, nid, tr.owner).type !== 'alliance';
+  return { ok: true, order: o, msg: `${fr.name} → ${tr.name}: ${fmtTroops(count)} ${hostile || (tr.owner === null && !tr.sea) ? '공격' : '이동'} 계획 (턴 종료 때 모든 나라가 함께 움직입니다)` };
+}
+
+export function cancelOrder(s, id) {
+  const k = (s.orders || []).findIndex((o) => o.id === id);
+  if (k < 0) return fail('없는 계획입니다.');
+  const o = s.orders[k];
+  const fr = s.regions[o.from];
+  s.nations[o.n].ap += o.cost;
+  fr.troops += o.count;
+  if (fr.sea && fr.owner === null) fr.owner = o.n;
+  if (o.opts.engines) fr.engines = (fr.engines || 0) + o.opts.engines;
+  for (const gid of o.gens) if (s.generals[gid]?.order === o.id) delete s.generals[gid].order;
+  s.orders.splice(k, 1);
+  return { ok: true, msg: `${fr.name} → ${s.regions[o.to].name} 계획을 취소했습니다.` };
+}
+
+// 처리 순서: 목적지별로 아군 증원 먼저 합류, 적대 부대는 병력이 큰 순으로 차례로 공격(승자가 다음 공격자를 맞음)
+export function buildResolveQueue(s) {
+  const rng = stateRng(s);
+  const byTo = new Map();
+  for (const o of s.orders || []) {
+    if (!byTo.has(o.to)) byTo.set(o.to, []);
+    byTo.get(o.to).push(o);
+  }
+  const q = [];
+  for (const d of rng.shuffle([...byTo.keys()])) {
+    const list = byTo.get(d);
+    const own = s.regions[d].owner;
+    const friendly = list.filter((o) => o.n === own || (own !== null && getRel(s, o.n, own).type === 'alliance'));
+    const hostile = list.filter((o) => !friendly.includes(o)).sort((a, b) => b.count - a.count);
+    q.push(...friendly.map((o) => o.id), ...hostile.map((o) => o.id));
+  }
+  s.resolveQueue = q;
+}
+
+// 계획 하나 처리. 플레이어가 일기토를 원하면 { needDuel } 를 돌려주고 멈춤 → duel 결과를 넣어 다시 호출
+export function resolveStep(s, world, duel) {
+  const q = s.resolveQueue || [];
+  if (!q.length) {
+    s.orders = [];
+    return { done: true };
+  }
+  const o = (s.orders || []).find((x) => x.id === q[0]);
+  if (!o) {
+    q.shift();
+    return { ok: false };
+  }
+  const tr = s.regions[o.to];
+  const gens = o.gens.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === o.n && g.order === o.id);
+  const n = s.nations[o.n];
+  const hostile = tr.owner !== o.n && tr.troops > 0 && (tr.owner === null || getRel(s, o.n, tr.owner).type !== 'alliance');
+  if (duel === undefined && n.alive && n.isPlayer && o.opts.wantDuel && hostile && tr.owner !== null) {
+    const ag = duelist(gens), dg = duelist(gensIn(s, o.to, tr.owner));
+    if (ag && dg) {
+      // 상대가 훨씬 약하면 일기토를 거절하고 성문을 잠글 수 있음
+      if (dg.war < ag.war - 15 && stateRng(s)() < 0.7) {
+        log(s, `🚪 ${dg.name}이(가) ${ag.name}의 일기토 신청을 거절하고 성문을 걸어 잠갔습니다.`, [o.n, tr.owner], 'battle');
+        duel = false;
+      } else return { needDuel: { orderId: o.id, attId: ag.id, defId: dg.id, from: o.from, to: o.to } };
+    }
+  }
+  q.shift();
+  let res = { ok: false };
+  if (n.alive) {
+    const dOpt = duel !== undefined ? duel : n.isPlayer && !o.opts.wantDuel ? false : undefined;
+    res = doMove(s, world, o.n, o.from, o.to, o.count, o.gens, { ...o.opts, transit: true, orderId: o.id, duel: dOpt });
+  }
+  for (const g of gens) {
+    delete g.order;
+    // 돌아갈 곳을 잃은 장수는 수도로
+    if (g.status === 'active' && s.regions[g.region]?.owner !== o.n) g.region = s.nations[o.n].capital ?? g.region;
+  }
+  return { ok: true, res, order: o };
+}
+
+export function resolveAll(s, world) {
+  for (let k = 0; k < 5000; k++) if (resolveStep(s, world).done) break;
+}
+
+export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
+  // transit: 이미 출발한(계획된) 부대가 도착하는 처리 — 출발지 확인·행동력·병력 차감을 하지 않음
+  const transit = !!opts.transit;
+  if (!transit) {
+    const err = moveCheck(s, world, nid, from, to, count, genIds);
+    if (err) return fail(err);
+  }
   const rng = stateRng(s);
   const n = s.nations[nid];
   const fr = s.regions[from], tr = s.regions[to];
-  const cost = moveCost(world, from, to, s);
-  const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from);
-  const engines = Math.min(opts.engines || 0, fr.engines || 0);
+  const cost = transit ? 0 : moveCost(world, from, to, s);
+  const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && (transit ? g.order === opts.orderId : g.region === from));
+  const engines = transit ? opts.engines || 0 : Math.min(opts.engines || 0, fr.engines || 0);
+  const take = () => {
+    if (transit) return;
+    fr.troops -= count;
+    if (engines) fr.engines -= engines;
+  };
   // 원군: 병사를 동맹국에 넘겨줌
   if (tr.owner !== null && tr.owner !== nid && getRel(s, nid, tr.owner).type === 'alliance') {
     n.ap -= cost;
-    fr.troops -= count;
+    if (!transit) fr.troops -= count;
     tr.troops += count;
     arrive(tr, count);
     s.opinion[tr.owner][nid] += Math.min(20, count / 2000);
@@ -569,13 +679,13 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   n.ap -= cost;
   // 아군 지역 또는 빈 바다로 이동
   if (tr.owner === nid || (tr.sea && (tr.owner === null || tr.troops <= 0))) {
-    fr.troops -= count;
+    if (!transit) fr.troops -= count;
     tr.owner = nid;
     tr.troops += count;
     arrive(tr, count);
     for (const g of gens) g.region = to;
     if (engines && !tr.sea && !fr.sea) {
-      fr.engines -= engines;
+      if (!transit) fr.engines -= engines;
       tr.engines = Math.min(ENGINE_MAX, (tr.engines || 0) + engines);
     }
     leaveSea();
@@ -622,8 +732,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const atkGens = gens.filter((g) => g.status === 'active');
   const A = count * f.attMult * duelMult * rng.range(0.85, 1.15);
   const D = tr.troops * f.defMult * rng.range(0.85, 1.15);
-  fr.troops -= count;
-  if (engines) fr.engines -= engines;
+  take();
   (s.battles = s.battles || []).push(battle);
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
   if (battle.duel?.killed) report.killed.push(battle.duel.killed);
@@ -718,7 +827,9 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     return finish('win', msg);
   }
   const ratio = D > 0 ? A / D : 1;
-  const back = fr.sea || tr.sea ? 0 : Math.round(count * (0.25 + tv(atkGens, '노련')) * rng());
+  // 패잔병은 출발지로 돌아감 (계획 처리 중 출발지를 잃었으면 돌아갈 곳이 없음)
+  const home = fr.owner === nid;
+  const back = fr.sea || tr.sea || !home ? 0 : Math.round(count * (0.25 + tv(atkGens, '노련')) * rng());
   report.win = false;
   report.attLoss = count - back;
   const archery = 1 + 2 * tv(defGens, '궁술');
@@ -726,7 +837,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   tr.troops -= report.defLoss;
   fr.troops += back;
   arrive(fr, back);
-  if (engines) fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + Math.floor(engines / 2));
+  if (engines && home) fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + Math.floor(engines / 2));
   for (const g of atkGens) {
     const r = rng();
     if (r < 0.05) {
@@ -736,8 +847,8 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       g.status = 'prisoner';
       g.captor = defender;
       report.captured.push(g.name);
-    } else if (fr.sea && fr.troops <= 0) {
-      // 바다에서 패한 장수는 가까운 아군 땅으로 귀환
+    } else if ((fr.sea && fr.troops <= 0) || !home) {
+      // 바다에서 패했거나 돌아갈 곳을 잃은 장수는 수도로
       const home = nationRegions(s, nid);
       g.region = s.nations[nid].capital ?? home[0];
     }

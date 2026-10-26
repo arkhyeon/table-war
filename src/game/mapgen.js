@@ -33,6 +33,28 @@ function makeGeo(bbox, W, H) {
   };
 }
 
+// 날짜변경선(경도 ±180°)을 넘는 외곽선: 경도를 이어 붙여(unwrap) 지도 끝에서 끝까지 가로지르는 선이 생기지 않게 하고,
+// 지도 밖으로 넘친 부분은 ±360° 옮긴 사본으로 반대편에 다시 그림
+function unwrapPoly(poly) {
+  let shifted = false;
+  const rings = poly.map((ring) => {
+    let off = 0, prev = null;
+    return ring.map(([lon, lat]) => {
+      if (prev !== null) {
+        if (lon + off - prev > 180) off -= 360;
+        else if (lon + off - prev < -180) off += 360;
+      }
+      const L = lon + off;
+      if (L > 180 || L < -180) shifted = true;
+      prev = L;
+      return [L, lat];
+    });
+  });
+  if (!shifted) return [rings];
+  const sh = (d) => rings.map((r) => r.map(([lo, la]) => [lo + d, la]));
+  return [rings, sh(360), sh(-360)];
+}
+
 // 실제 해안선(Natural Earth)을 캔버스에 그려 육지 판정
 function rasterLand(geo, W, H) {
   const cw = Math.ceil(W), ch = Math.ceil(H);
@@ -41,7 +63,7 @@ function rasterLand(geo, W, H) {
   canvas.height = ch;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
-  for (const poly of landPolygons()) {
+  for (const poly0 of landPolygons()) for (const poly of unwrapPoly(poly0)) {
     ctx.beginPath();
     for (const ring of poly) {
       ring.forEach(([lon, lat], i) => {
@@ -723,7 +745,7 @@ const f1 = (v) => Math.round(v * 10) / 10;
 // 실제 해안선 SVG 경로 (역사 지도)
 function realLandPath(geo, W, H) {
   let d = '';
-  for (const poly of landPolygons()) {
+  for (const poly0 of landPolygons()) for (const poly of unwrapPoly(poly0)) {
     let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
     const rings = poly.map((ring) => ring.map(([lo, la]) => {
       const [x, y] = geo.toPx(lo, la);
@@ -755,8 +777,21 @@ function buildGeometry(g) {
   const ext = new Int32Array(N);
   const queue = [];
   const depth = new Uint8Array(N);
+  // 고산(통행 불가) 칸도 가장 가까운 지역 색으로 칠해 국가 색에 빈틈이 없게
+  const pq = [];
   for (let i = 0; i < N; i++) {
-    ext[i] = terrain[i] === T.PEAK ? -2 : terrain[i] === T.SEA ? -1 : region[i];
+    ext[i] = terrain[i] === T.PEAK ? -3 : terrain[i] === T.SEA ? -1 : region[i];
+    if (ext[i] >= 0) pq.push(i);
+  }
+  for (let q = 0; q < pq.length; q++) for (let d = 0; d < 6; d++) {
+    const nb = neighborIndex(cols, rows, pq[q], d);
+    if (nb >= 0 && ext[nb] === -3) {
+      ext[nb] = ext[pq[q]];
+      pq.push(nb);
+    }
+  }
+  for (let i = 0; i < N; i++) {
+    if (ext[i] === -3) ext[i] = -2;
     if (ext[i] !== -1) queue.push(i);
   }
   for (let q = 0; q < queue.length; q++) {
@@ -772,7 +807,9 @@ function buildGeometry(g) {
   }
   const chains = traceChains(g, ext);
   const regionPath = regions.filter((r) => !r.sea).map((r) => areaPath(chains, r.id));
-  const peaks = areaPath(chains, -2);
+  const peakLab = new Int32Array(N);
+  for (let i = 0; i < N; i++) peakLab[i] = terrain[i] === T.PEAK ? 1 : 0;
+  const peaks = areaPath(traceChains(g, peakLab, 0.3), 1);
   const pairSegs = new Map();
   let borders = '';
   for (const c of chains) {

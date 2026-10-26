@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
-import { endTurn } from '../game/turn.js';
-import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck, getRel, movable } from '../game/engine.js';
+import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -62,13 +62,36 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     [game, setGame, toast, world],
   );
 
+  // 턴 종료: ① 컴퓨터 계획 ② 모든 계획을 하나씩 처리(플레이어 일기토는 창을 띄워 멈춤) ③ 마무리
+  const runResolve = (s, before, duel) => {
+    let first = duel;
+    for (let k = 0; k < 5000; k++) {
+      const r = resolveStep(s, world, first);
+      first = undefined;
+      if (r.needDuel) {
+        setGame(s);
+        setModal({ type: 'duel', ...r.needDuel, pending: s, before });
+        return;
+      }
+      if (r.done) break;
+    }
+    endTurnFinish(s, world);
+    afterTurn(s, before);
+  };
   const doEndTurn = () => {
     setMoveMode(false);
     const s = structuredClone(game);
     const before = visibleSet(game, world, pid);
-    endTurn(s, world);
+    if (s.spectator) {
+      endTurn(s, world);
+      setGame(s);
+      return;
+    }
+    endTurnPlan(s, world);
+    runResolve(s, before);
+  };
+  const afterTurn = (s, before) => {
     setGame(s);
-    if (s.spectator) return;
     for (const id of s.newAchieve || []) {
       const a = ACHIEVEMENTS.find((x) => x.id === id);
       if (a) toast(`🏅 업적 달성: ${a.icon} ${a.name}`);
@@ -148,7 +171,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
 
   const genCount = useMemo(() => {
     const c = {};
-    for (const g of Object.values(game.generals)) if (g.status === 'active') c[g.region] = (c[g.region] || 0) + 1;
+    for (const g of Object.values(game.generals)) if (g.status === 'active' && !g.order) c[g.region] = (c[g.region] || 0) + 1;
     return c;
   }, [game.generals]);
 
@@ -195,20 +218,10 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   }, [game, world, pid]);
   const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
   const year = yearOf(game.turn, scn.startYear ?? 1);
+  const myOrders = (game.orders || []).filter((o) => o.n === pid);
   const flashSet = useMemo(() => new Set((game.turnEvents || []).flatMap((e) => e.rids || [])), [game.turnEvents]);
   const myEvents = (game.turnEvents || []).filter((e) => e.global || e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
-  const startDuel = ({ from, to, count, sel, opts }) => {
-    const ag = duelist(sel.map((id) => game.generals[id]));
-    const dg = duelist(gensIn(game, to, game.regions[to].owner));
-    if (dg.war < ag.war - 15 && Math.random() < 0.7) {
-      toast(`${dg.name}이(가) 일기토를 거절하고 성문을 걸어 잠갔습니다.`);
-      const res = act((s) => doMove(s, world, pid, from, to, count, sel, { ...opts, duel: false }));
-      if (res?.ok) { setModal(null); setMoveMode(false); }
-      return;
-    }
-    setModal({ type: 'duel', from, to, count, sel, opts, attId: ag.id, defId: dg.id });
-  };
   const proposal = game.proposals[0];
   const showProposal = proposal && !modal && !replay && !game.gameOver;
 
@@ -299,6 +312,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             cutSet={cutSet}
             focus={replay ? replay.list[replay.i].to : null}
             flash={flashSet}
+            orders={myOrders}
             home={game.nations[pid]?.capital}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}
@@ -306,6 +320,22 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             onContext={onRegionContext}
           />
           {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} delay={replayDelay} onSpeed={toggleReplaySpeed} />}
+          {myOrders.length > 0 && (
+            <div className="orders-box">
+              <b>🧭 이동 계획 {myOrders.length}건</b>
+              {myOrders.map((o) => (
+                <div key={o.id} className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {game.regions[o.from].name || '바다'} → {game.regions[o.to].name || '바다'} {fmtTroops(o.count)}
+                    {o.gens.length > 0 && ` ★${o.gens.length}`}
+                  </span>
+                  <button className="sm ghost" title="계획 취소" onClick={() => act((s) => cancelOrder(s, o.id))}>
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
             턴 종료 ⏭
           </button>
@@ -346,20 +376,18 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           openConscript={() => setModal({ type: 'conscript', rid: selected })}
         />
       </div>
-      {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} onDuel={startDuel} />}
+      {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
       {modal?.type === 'duel' && (
         <DuelModal
-          game={game}
+          game={modal.pending}
           attId={modal.attId}
           defId={modal.defId}
           onFinish={(d) => {
             const m = modal;
-            act((s) => {
-              s.duelMoves = [...(s.duelMoves || []), ...d.rounds.map((r) => r.m1)].slice(-24);
-              return doMove(s, world, pid, m.from, m.to, m.count, m.sel, { ...m.opts, duel: d });
-            });
+            const s = structuredClone(m.pending);
+            s.duelMoves = [...(s.duelMoves || []), ...d.rounds.map((r) => r.m1)].slice(-24);
             setModal(null);
-            setMoveMode(false);
+            runResolve(s, m.before, d);
           }}
         />
       )}

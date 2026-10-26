@@ -2,7 +2,7 @@ import { stateRng } from './rng.js';
 import { TERRAIN, TAX, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus, buildResolveQueue, resolveAll } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
@@ -252,12 +252,22 @@ export function checkGameOver(s) {
   return null;
 }
 
-export function endTurn(s, world) {
+// 턴 종료 1단계: 컴퓨터들도 이동 계획을 세움 (플레이어 계획으로 빠져나간 병력은 모르는 채로)
+export function endTurnPlan(s, world) {
   s.turnNews = [];
   s.turnEvents = [];
   s.battles = [];
   s.moves = [];
   for (const r of s.regions) delete r.moved;
+  const mine = (s.orders || []).filter((o) => s.nations[o.n]?.isPlayer);
+  const hide = (sign) => {
+    for (const o of mine) {
+      const fr = s.regions[o.from];
+      fr.troops += sign * o.count;
+      if (fr.sea) fr.owner = fr.troops > 0 ? o.n : null;
+    }
+  };
+  hide(1);
   const rng = stateRng(s);
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {
@@ -267,6 +277,14 @@ export function endTurn(s, world) {
     aiPrisoners(s, id);
     aiActions(s, world, id);
   }
+  hide(-1);
+  buildResolveQueue(s);
+}
+
+// 턴 종료 3단계: 경제·사건·다음 턴 준비
+export function endTurnFinish(s, world) {
+  s.orders = [];
+  s.resolveQueue = [];
   upkeep(s, world);
   // 새 턴: 모든 부대가 다시 움직일 수 있음
   for (const r of s.regions) delete r.moved;
@@ -283,4 +301,11 @@ export function endTurn(s, world) {
     s.newAchieve = checkAchievements(s, !!s.gameOver?.win);
   }
   return s;
+}
+
+// 한 번에: 계획 → 동시 처리(일기토 자동) → 마무리 (관전·시뮬레이션용)
+export function endTurn(s, world) {
+  endTurnPlan(s, world);
+  resolveAll(s, world);
+  return endTurnFinish(s, world);
 }

@@ -7,7 +7,7 @@ import { TERRAIN, EDGE, COST, BUILDINGS, BATTLE_KIND } from '../game/rules.js';
 import { TRAITS, TIER, traitDesc, traitLabel } from '../game/traits.js';
 import { CIVS } from '../game/civs.js';
 import {
-  estimateBattle, moveCheck, moveCost, doMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
+  estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT, movable,
 } from '../game/engine.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
@@ -89,13 +89,21 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
           <Slider min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={setCount} style={{ width: '100%' }} />
         </label>
         {myGens.length > 0 && !aid && (
-          <div>
-            동행 장수
-            {myGens.map((g) => (
-              <label key={g.id} style={{ display: 'block', fontSize: 13 }}>
-                <input type="checkbox" checked={sel.includes(g.id)} onChange={(e) => setSel(e.target.checked ? [...sel, g.id] : sel.filter((x) => x !== g.id))} /> {g.name} (무{g.war}/통{g.lead}) <TraitTags g={g} />
-              </label>
-            ))}
+          <div className="card col" style={{ gap: 6 }}>
+            <b>⭐ 함께 갈 장수 <small className="muted">(누르면 넣고 빼기 · 장수는 군대와 함께 움직입니다)</small></b>
+            <div className="gen-picks">
+              {myGens.map((g) => {
+                const on = sel.includes(g.id);
+                return (
+                  <button key={g.id} className={'gen-pick' + (on ? ' on' : '')} onClick={() => setSel(on ? sel.filter((x) => x !== g.id) : [...sel, g.id])}>
+                    <span>{on ? '✅' : '⬜'} <b>{g.name}</b></span>
+                    <small>
+                      무{g.war} 통{g.lead} 지{g.intel} <TraitTags g={g} />
+                    </small>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
         {walls && isAttack && (
@@ -145,21 +153,18 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
         )}
         {betrayal && <div style={{ color: 'var(--danger)' }}>⚠️ {rel.type === 'nap' ? '불가침 조약' : '종속 관계'} 중인 상대입니다. 공격 시 조약 파기, 평판 -25, 모든 국가 호감도 하락, 다음 턴 행동력 -2.</div>}
         {err && <div style={{ color: 'var(--danger)' }}>{err}</div>}
+        <div className="muted" style={{ fontSize: 12 }}>계획은 바로 실행되지 않고, 턴 종료 때 모든 나라의 계획과 함께 처리됩니다. 같은 곳에 여러 군대가 몰리면 차례로 맞붙습니다.</div>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button onClick={onClose}>취소</button>
           <button
             className="primary"
             disabled={!!err}
             onClick={() => {
-              if (canDuel && wantDuel) {
-                onDuel({ from, to, count, sel, opts });
-                return;
-              }
-              const res = act((s) => doMove(s, world, pid, from, to, count, sel, { ...opts, duel: canDuel ? false : undefined }));
+              const res = act((s) => planMove(s, world, pid, from, to, count, sel, { ...opts, wantDuel: canDuel && wantDuel }));
               if (res?.ok) onDone();
             }}
           >
-            {isAttack ? '공격!' : verb}
+            {isAttack ? '⚔️ 공격 계획' : `🧭 ${verb} 계획`}
           </button>
         </div>
       </div>
@@ -793,7 +798,7 @@ export function HelpModal({ onClose }) {
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
           <li><b>시간</b>: 2턴이 한 계절, 8턴이 1년. 날씨는 매 턴 바뀝니다.</li>
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7, 큰 지도는 더 많음) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
-          <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(우클릭으로 바로 열기). 육지는 최소 1명을 남겨야 합니다. 한 번 이동·공격을 마친 병력은 그 턴에 다시 움직일 수 없습니다(예: A→B로 7,500 이동 시 B의 원래 병력 2,500만 계속 이동 가능).</li>
+          <li><b>이동·공격은 계획</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 → 병력·함께 갈 장수를 고르고 계획. 바로 실행되지 않고 화살표로 표시되며(오른쪽 아래 목록에서 취소 가능), 턴 종료 때 모든 나라의 계획이 함께 처리됩니다. 같은 곳에 여러 나라 군대가 몰리면 큰 군대부터 차례로 맞붙고, 아군 증원은 전투 전에 합류합니다. 출발한 병력은 그 턴에 다시 계획할 수 없습니다. 일기토를 신청했다면 그 전투 차례에 일기토 창이 뜹니다.</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드에서 세율 일괄 설정, 지역마다 개별 설정 가능(높음=세수↑ 민심↓ 인구 정체).</li>

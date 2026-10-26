@@ -382,11 +382,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               ))}
             </>
           )}
-          {mine && gens.length > 0 && (
-            <button className="sm" onClick={openGenerals} style={{ marginTop: 6 }}>
-              장수 재배치 →
-            </button>
-          )}
+          {mine && gens.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>장수는 🚩이동·공격 계획을 세울 때 함께 데려갈 수 있습니다.</div>}
           {!mine && owner && <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{CIVS[owner.civ]?.name} 문명 · 공격하려면 인접한 내 지역을 선택 후 이동하세요.</div>}
         </div>
       )}
