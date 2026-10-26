@@ -1,6 +1,6 @@
 import { stateRng } from './rng.js';
 import { TERRAIN, TAX } from './rules.js';
-import { fmtTroops } from './format.js';
+import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
 import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait } from './engine.js';
 import { tv } from './traits.js';
@@ -45,7 +45,15 @@ function balanceOfPower(s, world) {
   }
   const top = alive.reduce((a, b) => (power[b.id] > power[a.id] ? b : a));
   const prev = s.coalition?.target;
-  if (threat(top.id) > 2.5) {
+  // 대동맹은 20턴 넘게 버티면 내분으로 와해(위협이 압도적이면 유지), 이후 10턴은 재결성 불가
+  if (s.coalition && s.turn - s.coalition.since >= 20 && threat(s.coalition.target) < 3.5) {
+    log(s, `💢 오랜 전쟁에 지친 대동맹이 내분으로 와해되었습니다. ${s.nations[s.coalition.target].name}에게 기회가 왔습니다!`, s.nations.map((x) => x.id), 'diplo');
+    delete s.coalition;
+    s.coalitionCooldown = s.turn + 10;
+    return;
+  }
+  if ((s.coalitionCooldown || 0) > s.turn) return;
+  if (threat(top.id) > (s.turn >= 30 ? 2.1 : 2.5)) {
     if (prev !== top.id) {
       s.coalition = { target: top.id, since: s.turn };
       log(s, `⚔️ ${top.name}의 패권에 맞서 대동맹이 결성되었습니다! 각국이 ${top.name}을(를) 공동의 적으로 삼습니다.`, s.nations.map((x) => x.id), 'diplo');
@@ -53,6 +61,19 @@ function balanceOfPower(s, world) {
     const members = alive.filter((o) => o.id !== top.id && !isVassalOf(s, o.id, top.id) && getRel(s, o.id, top.id).type !== 'alliance');
     s.coalition.members = members.map((o) => o.id);
     for (const a of members) for (const b of members) if (a.id !== b.id) s.opinion[a.id][b.id] += 1;
+    // 군자금 지원: 패권국과 맞닿지 않은 AI 회원국이 최전선 회원국에 국고의 6%를 보냄
+    const front = members.filter((o) => nationRegions(s, o.id).some((r) => world.regions[r].neighbors.some((x) => s.regions[x.id].owner === top.id)));
+    const rear = members.filter((o) => !o.isPlayer && !front.includes(o) && o.gold > 0);
+    if (front.length && rear.length) {
+      const pot = rear.reduce((a, o) => a + Math.floor(o.gold * 0.06), 0);
+      for (const o of rear) o.gold -= Math.floor(o.gold * 0.06);
+      const share = Math.floor(pot / front.length);
+      for (const o of front) o.gold += share;
+      const me = front.find((o) => o.isPlayer);
+      if (me && share > 0) log(s, `💰 대동맹 후방국들이 ${me.name}에 군자금 ${fmtGold(share)}금을 보냈습니다.`, [me.id], 'diplo');
+    }
+    // 패권국의 민심 불안: 민심 60 미만 지역은 매 턴 1씩 더 흔들림(반란 유도)
+    for (const r of nationRegions(s, top.id)) if ((s.regions[r].loyalty ?? 100) < 60) s.regions[r].loyalty = Math.max(0, s.regions[r].loyalty - 1);
   } else if (prev !== undefined && threat(prev) < 2) {
     log(s, `🕊️ ${s.nations[prev].name}에 대한 대동맹이 해체되었습니다.`, s.nations.map((x) => x.id), 'diplo');
     delete s.coalition;

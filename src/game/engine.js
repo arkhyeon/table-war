@@ -172,7 +172,7 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   let attSupply = supplied(s, world, nid).has(from) ? 1 : 0.8;
   if (attSupply < 1) attSupply = 1 - 0.2 * (1 - tv(att, '보급'));
   if (attSupply < 1) mods.push(`보급 끊김 -${Math.round((1 - attSupply) * 100)}%`);
-  const buffA = nationBuff(s, nid, 'att');
+  let buffA = nationBuff(s, nid, 'att');
   if (buffA !== 1) mods.push(`특수 효과 ${buffA > 1 ? '+' : ''}${Math.round((buffA - 1) * 100)}%`);
 
   let d = 0; // 장수로 인한 방어 보정 합 (상한 적용 전)
@@ -194,6 +194,11 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   const capital = tr.owner !== null && !wr.sea && s.nations[tr.owner].capital === to ? 1.1 : 1;
   const defSupply = tr.owner === null || supplied(s, world, tr.owner).has(to) ? 1 : 0.8;
   let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
+  // 대동맹 연합군은 패권국을 칠 때 사기가 오름
+  if (s.coalition && s.coalition.target === tr.owner && s.coalition.members?.includes(nid)) {
+    buffA *= 1.1;
+    mods.push('대동맹 연합군 +10%');
+  }
   // 대동맹 회원국은 패권국의 침공에 결사항전
   if (s.coalition && s.coalition.target === nid && s.coalition.members?.includes(tr.owner)) buffD *= 1.15;
   return {

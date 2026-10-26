@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT,
 } from '../game/engine.js';
-import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL } from '../game/diplomacy.js';
+import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
@@ -322,6 +322,16 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
                   }}
                 >
                   {rel.type === 'alliance' ? '동맹 파기' : rel.type === 'nap' ? '불가침 파기' : rel.overlord === pid ? '속국 해방' : '독립 선언'}
+                </button>
+              )}
+              {rel.type === 'vassal' && rel.overlord === pid && (
+                <button
+                  className="sm"
+                  disabled={!!annexCheck(game, pid, t.id)}
+                  title={annexCheck(game, pid, t.id) || '속국의 영토·장수·국고를 흡수합니다. 행동력 2, 평판 -5, 주변국 경계'}
+                  onClick={() => confirmIt(fixJosa(`${t.name}을(를) 병합할까요? (행동력 2, 평판 -5)`), () => act((s) => doAnnex(s, world, pid, t.id)))}
+                >
+                  👑 병합
                 </button>
               )}
             </div>

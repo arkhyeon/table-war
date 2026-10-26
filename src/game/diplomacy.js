@@ -1,4 +1,4 @@
-import { getRel, setRel, log, nationPower, nationRegions, nationTrait, isVassalOf, gensIn } from './engine.js';
+import { getRel, setRel, log, nationPower, nationRegions, nationTrait, isVassalOf, gensIn, checkElimination } from './engine.js';
 import { COST, G } from './rules.js';
 import { fmtGold } from './format.js';
 
@@ -205,4 +205,41 @@ export function breakTreaty(s, a, b) {
   }
   setRel(s, a, b, null);
   return { ok: true, msg: '조약을 파기했습니다.' };
+}
+
+// 속국 병합: 10턴 이상 거느린 속국을 흡수 (종주국 국력이 속국의 2배 이상)
+export const ANNEX_TURNS = 10;
+export function annexCheck(s, lord, vassal) {
+  const rel = getRel(s, lord, vassal);
+  if (rel.type !== 'vassal' || rel.overlord !== lord) return '내 속국이 아닙니다.';
+  const left = (rel.since ?? s.turn) + ANNEX_TURNS - s.turn;
+  if (left > 0) return `속국이 된 지 ${ANNEX_TURNS}턴이 지나야 합니다. (${left}턴 남음)`;
+  if (nationPower(s, lord) < nationPower(s, vassal) * 2) return '국력이 속국의 2배 이상이어야 합니다.';
+  if (s.nations[lord].ap < COST.diplomacy * 2) return '행동력이 부족합니다.';
+  return null;
+}
+
+export function doAnnex(s, world, lord, vassal) {
+  const err = annexCheck(s, lord, vassal);
+  if (err) return { ok: false, msg: err };
+  const L = s.nations[lord], V = s.nations[vassal];
+  L.ap -= COST.diplomacy * 2;
+  for (const rid of nationRegions(s, vassal)) {
+    const r = s.regions[rid];
+    r.owner = lord;
+    r.loyalty = Math.min(r.loyalty ?? 100, 45);
+  }
+  // 속국 장수는 종주국에 귀순(충성 낮음)
+  for (const g of Object.values(s.generals)) {
+    if (g.nation !== vassal || g.status !== 'active') continue;
+    g.nation = lord;
+    g.loyalty = Math.min(g.loyalty ?? 60, 55);
+  }
+  L.gold += Math.max(0, V.gold);
+  V.gold = 0;
+  L.reputation = Math.max(0, L.reputation - 5);
+  for (const o of s.nations) if (o.alive && o.id !== lord && o.id !== vassal) s.opinion[o.id][lord] -= 10;
+  log(s, `👑 ${L.name}이(가) 속국 ${V.name}을(를) 병합했습니다! (평판 -5, 주변국 경계)`, [lord, vassal], 'diplo');
+  checkElimination(s, world, vassal);
+  return { ok: true, msg: `${V.name}을(를) 병합했습니다.` };
 }
