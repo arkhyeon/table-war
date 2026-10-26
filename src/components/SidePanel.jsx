@@ -181,7 +181,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               {wr.neighbors.map((n) => (
                 <span key={n.id} style={{ marginRight: 6, whiteSpace: 'nowrap' }}>
                   {game.regions[n.id].name}
-                  <small className="muted">({EDGE[n.type].name})</small>
+                  <small className="muted">({EDGE[n.type].name}{n.mtn ? '·험산' : ''})</small>
                 </span>
               ))}
             </span>
@@ -340,6 +340,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   <span key={n.id} style={{ marginRight: 6, whiteSpace: 'nowrap' }}>
                     {game.regions[n.id].name}
                     {n.type !== 'land' && <small className="muted">({EDGE[n.type].name})</small>}
+                    {n.mtn && <small className="muted">⛰️험산</small>}
                   </span>
                 ))}
               </span>

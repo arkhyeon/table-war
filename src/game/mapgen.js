@@ -5,6 +5,7 @@ import { neighborIndex, cellCenter, corner, mapSize, pixelToCell, hexDistance } 
 import { T, TERRAIN } from './rules.js';
 import { RANGES, ZONES, RIVERS } from './geodata.js';
 import { traceChains, areaPath, chainStroke } from './borders.js';
+import { PLACES } from './places.js';
 
 export const HEX = 10; // 화면 기준 단위
 const FINE = 2; // 내부 격자를 FINE배 촘촘하게 (자유곡선 경계용)
@@ -424,6 +425,52 @@ function waterBetween(g, a, b) {
   return false;
 }
 
+// 칸마다 씨앗 간격 배율 (역사 지도만): 주변 지명 밀도가 평균보다 높으면 작게
+function densityScale(scn, g, cells, minD) {
+  if (!g.geo) return null;
+  const { cols, rows, terrain } = g;
+  const B = Math.max(2, minD * 2);
+  const bc = Math.ceil(cols / B) + 1, br = Math.ceil(rows / B) + 1;
+  const cnt = new Float32Array(bc * br);
+  for (const p of PLACES) {
+    const [x, y] = g.geo.toPx(p.lon, p.lat);
+    const c = pixelToCell(g.size, cols, rows, x, y);
+    if (c < 0) continue;
+    cnt[Math.floor(Math.floor(c / cols) / B) * bc + Math.floor((c % cols) / B)]++;
+  }
+  const dens = (c) => {
+    const bx = Math.floor((c % cols) / B), by = Math.floor(Math.floor(c / cols) / B);
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const x = bx + dx, y = by + dy;
+      if (x >= 0 && y >= 0 && x < bc && y < br) n += cnt[y * bc + x] * (dx || dy ? 0.5 : 1);
+    }
+    return n;
+  };
+  const d = new Float32Array(g.N);
+  let sum = 0;
+  for (const c of cells) { d[c] = dens(c); sum += d[c]; }
+  const avg = sum / cells.length || 1;
+  const sc = new Float32Array(g.N).fill(1);
+  for (const c of cells) {
+    let k = Math.pow(avg / (d[c] + avg * 0.15), 0.4);
+    let coast = 0;
+    for (let dir = 0; dir < 6; dir++) {
+      const nb = neighborIndex(cols, rows, c, dir);
+      if (nb < 0 || terrain[nb] === T.SEA) coast++;
+    }
+    if (coast) k *= 0.85;
+    // 세계판 지역사: 무대가 된 지역은 훨씬 잘게
+    if (scn.focus) {
+      const [lon, lat] = g.geo.toLL(...g.center(c));
+      const [w, s, e, n] = scn.focus;
+      if (lon >= w && lon <= e && lat >= s && lat <= n) { sc[c] = 0.5; continue; }
+    }
+    sc[c] = Math.max(0.5, Math.min(1.35, k));
+  }
+  return sc;
+}
+
 function buildRegions(scn, g) {
   const { N, cols, rows, terrain, river, rng } = g;
   const passable = (i) => terrain[i] !== T.SEA && terrain[i] !== T.PEAK;
@@ -450,9 +497,20 @@ function buildRegions(scn, g) {
       if (c >= 0 && passable(c) && seeds.every((s) => hexDistance(cols, s, c) >= 2)) seeds.push(c);
     }
   }
-  for (const c of rng.shuffle(cells.slice())) {
-    if (seeds.length >= K) break;
-    if (seeds.every((s) => hexDistance(cols, s, c) >= minD)) seeds.push(c);
+  // 지명이 빽빽한 곳(일본·유럽 등)과 좁은 해안 땅은 더 잘게, 시베리아처럼 빈 곳은 크게
+  const scale = densityScale(scn, g, cells, minD);
+  const near = (a, b) => hexDistance(cols, a, b) < minD * Math.min(scale[a], scale[b]);
+  const maxK = scale ? Math.round(K * (scn.focus ? 1.8 : 1.3)) : K;
+  let order = rng.shuffle(cells.slice());
+  if (scale) {
+    // 빽빽한 곳부터 씨앗을 심어야 상한에 걸려도 일본·유럽이 먼저 잘게 나뉨
+    const key = new Float32Array(g.N);
+    for (const c of order) key[c] = scale[c] * (0.75 + rng() * 0.5);
+    order.sort((a, b) => key[a] - key[b]);
+  }
+  for (const c of order) {
+    if (seeds.length >= maxK) break;
+    if (scale ? !seeds.some((s) => near(s, c)) : seeds.every((s) => hexDistance(cols, s, c) >= minD)) seeds.push(c);
   }
   const heap = new Heap();
   seeds.forEach((c, k) => heap.push([0, c, k]));
@@ -500,7 +558,7 @@ function buildRegions(scn, g) {
   for (let i = 0; i < N; i++) if (region[i] >= 0) lists[region[i]].push(i);
   const minSize = Math.max(2, Math.round(S * 0.3));
   for (let r = 0; r < next; r++) {
-    if (!lists[r].length || lists[r].length >= minSize) continue;
+    if (!lists[r].length || lists[r].length >= (scale ? Math.max(2, Math.round(minSize * scale[lists[r][0]] ** 2)) : minSize)) continue;
     const adj = new Map();
     for (const c of lists[r]) {
       for (let d = 0; d < 6; d++) {
@@ -838,16 +896,20 @@ function buildGeometry(g) {
     if (dense ? r % 2 || (c + (r >> 1)) % 2 : r % 3 || (c + (r / 3) | 0) % 3) continue;
     const [x, y] = center(i);
     if (t === T.PEAK) glyph.peakCap += `M${f1(x - 0.6 * s)} ${f1(y + 0.45 * s)}L${f1(x)} ${f1(y - 0.6 * s)}L${f1(x + 0.6 * s)} ${f1(y + 0.45 * s)}Z`;
-    else if (t === T.MOUNTAIN) {
-      // 봉우리: 밝은 면 + 그늘진 면
-      glyph.mountain += `M${f1(x - 0.55 * s)} ${f1(y + 0.38 * s)}L${f1(x)} ${f1(y - 0.5 * s)}L${f1(x + 0.55 * s)} ${f1(y + 0.38 * s)}Z`;
-      glyph.mountainShade += `M${f1(x)} ${f1(y - 0.5 * s)}L${f1(x + 0.55 * s)} ${f1(y + 0.38 * s)}L${f1(x + 0.1 * s)} ${f1(y + 0.38 * s)}Z`;
-    }
+    else if (t === T.MOUNTAIN) continue; // 험산은 아래에서 경계선을 따라 그림
     else if (t === T.FOREST) glyph.forest += `M${f1(x - 0.25 * s)} ${f1(y)}a${f1(0.25 * s)} ${f1(0.25 * s)} 0 1 0 ${f1(0.5 * s)} 0a${f1(0.25 * s)} ${f1(0.25 * s)} 0 1 0 ${f1(-0.5 * s)} 0`;
     else if (t === T.HILLS) glyph.hills += `M${f1(x - 0.4 * s)} ${f1(y + 0.2 * s)}Q${f1(x)} ${f1(y - 0.4 * s)} ${f1(x + 0.4 * s)} ${f1(y + 0.2 * s)}`;
     else if (t === T.DESERT) glyph.desert += `M${f1(x - 0.3 * s)} ${f1(y)}h0.1M${f1(x + 0.25 * s)} ${f1(y + 0.25 * s)}h0.1M${f1(x + 0.05 * s)} ${f1(y - 0.3 * s)}h0.1`;
     else if (t === T.TUNDRA) glyph.tundra += `M${f1(x - 0.4 * s)} ${f1(y)}h${f1(0.8 * s)}M${f1(x - 0.2 * s)} ${f1(y + 0.25 * s)}h${f1(0.4 * s)}`;
   }
+  // 험산 경계: 경계선을 따라 작은 봉우리 (두 칸의 가운데에)
+  (g.mtnPairs || []).forEach(([a, b], k) => {
+    if (k % 2) return;
+    const [ax, ay] = center(a), [bx, by] = center(b);
+    const x = (ax + bx) / 2, y = (ay + by) / 2, m = 0.42;
+    glyph.mountain += `M${f1(x - m * s)} ${f1(y + 0.3 * s)}L${f1(x)} ${f1(y - 0.42 * s)}L${f1(x + m * s)} ${f1(y + 0.3 * s)}Z`;
+    glyph.mountainShade += `M${f1(x)} ${f1(y - 0.42 * s)}L${f1(x + m * s)} ${f1(y + 0.3 * s)}L${f1(x + 0.08 * s)} ${f1(y + 0.3 * s)}Z`;
+  });
   // 절벽 해안: 절벽으로 이어진 (바다 구역, 육지 지역) 접촉 칸에 톱니 표시
   const cliffPair = new Set();
   for (const r of regions) if (r.sea) for (const nb of r.neighbors) if (nb.type === 'cliff') cliffPair.add(r.id * 100000 + nb.id);
@@ -873,6 +935,44 @@ function buildGeometry(g) {
   for (const c of seaChains) if (c.a >= 0 && c.b >= 0) seaBorders += chainStroke(c);
   const outline = [...regionPath, ...seaPath];
   g.paths = { regionPath: outline, outline, pairSegs, borders, peaks, land, glyph, seaBorders };
+}
+
+// 험산 경계: 두 지역이 맞닿은 칸 쌍 중 험산(또는 고산 옆) 비율이 높으면 그 경계선 자체가 험산
+function markMountainBorders(g) {
+  const { N, cols, rows, terrain, region, regions } = g;
+  const rough = (c) => {
+    if (terrain[c] === T.MOUNTAIN) return true;
+    for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, c, d);
+      if (nb >= 0 && terrain[nb] === T.PEAK) return true;
+    }
+    return false;
+  };
+  const tot = new Map(), mtn = new Map();
+  g.mtnPairs = [];
+  for (let i = 0; i < N; i++) {
+    const a = region[i];
+    if (a < 0) continue;
+    for (let d = 0; d < 3; d++) {
+      const nb = neighborIndex(cols, rows, i, d);
+      if (nb < 0) continue;
+      const b = region[nb];
+      if (b < 0 || b === a) continue;
+      const key = Math.min(a, b) * 100000 + Math.max(a, b);
+      tot.set(key, (tot.get(key) || 0) + 1);
+      if (rough(i) || rough(nb)) {
+        mtn.set(key, (mtn.get(key) || 0) + 1);
+        g.mtnPairs.push([i, nb, key]);
+      }
+    }
+  }
+  const isMtn = new Set();
+  for (const [key, t] of tot) if ((mtn.get(key) || 0) / t >= 0.4) isMtn.add(key);
+  for (const r of regions) for (const e of r.neighbors) {
+    const key = Math.min(r.id, e.id) * 100000 + Math.max(r.id, e.id);
+    if ((e.type === 'land' || e.type === 'river') && isMtn.has(key)) e.mtn = true;
+  }
+  g.mtnPairs = g.mtnPairs.filter(([, , key]) => isMtn.has(key));
 }
 
 // 지도 세분화: grid = 격자 해상도 배율, region = 지역 하나의 칸 수 배율 → 지역 수 ≈ grid² / region 배
@@ -949,9 +1049,15 @@ export function generateWorld(scn0, seed, detail = 'normal') {
   else buildHistorical(scn, g);
   buildRegions(scn, g);
   finalizeRegions(scn, g);
+  markMountainBorders(g);
   buildSeaZones(scn, g);
   buildGeometry(g);
   g.toPx = g.geo ? g.geo.toPx : null;
+  // 세계판 지역사: 처음 화면을 무대 쪽으로
+  if (scn.focus && g.geo) {
+    const [x0, y0] = g.geo.toPx(scn.focus[0], scn.focus[3]), [x1, y1] = g.geo.toPx(scn.focus[2], scn.focus[1]);
+    g.focusBox = [x0, y0, x1 - x0, y1 - y0];
+  }
   // 기후 판정용 위도
   for (const r of g.regions) r.lat = g.geo ? g.geo.toLL(r.cx, r.cy)[1] : 62 - (r.cy / H) * 124;
   // 좌표가 들어 있는 육지 지역 (바다·고산이면 -1)

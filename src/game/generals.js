@@ -427,10 +427,10 @@ export function gradeScore(g) {
 }
 export const gradeOf = (g) => GRADES.find(([t]) => gradeScore(g) >= t)[1];
 
-// 공평한 무작위 능력치: 역사 장수의 '성향'(가장 높은 두 능력)만 살리고 수준은 목표 점수에 맞춰 새로 뽑음
+// 공평한 무작위 능력치: 어떤 능력이 뛰어날지(주특기 2개)도 무작위, 수준은 나라별 균형을 맞춘 목표 점수
 const STATS = ['war', 'lead', 'intel', 'pol'];
 export function randomStats(data, target, rng) {
-  const main = [...STATS].sort((a, b) => data[b] - data[a]).slice(0, 2);
+  const main = rng.shuffle([...STATS]).slice(0, 2);
   const g = {};
   for (const k of STATS) g[k] = main.includes(k) ? target + rng.int(-1, 4) : rng.int(target - 38, target - 8);
   for (let i = 0; i < 4; i++) {

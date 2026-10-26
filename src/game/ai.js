@@ -4,7 +4,7 @@ import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-} from './engine.js';
+  marchVia } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -375,8 +375,12 @@ export function aiActions(s, world, nid) {
     for (const r of mine) {
       const reg = s.regions[r];
       if (reg.troops < 5000 || dist[r] === undefined || dist[r] === 0) continue;
-      const nb = world.regions[r].neighbors.find((x) => !s.regions[x.id].sea && s.regions[x.id].owner === nid && dist[x.id] < dist[r]);
-      if (!nb || moveCost(world, r, nb.id, s) > n.ap) continue;
+      let nb = world.regions[r].neighbors.find((x) => !s.regions[x.id].sea && s.regions[x.id].owner === nid && dist[x.id] < dist[r]);
+      if (!nb) continue;
+      // 내 땅 안에서는 2칸 행군으로 더 빨리 전선에 닿음
+      const far = world.regions[nb.id].neighbors.find((x) => x.id !== r && dist[x.id] < dist[nb.id] && marchVia(world, s, r, x.id) !== null);
+      if (far) nb = far;
+      if (moveCost(world, r, nb.id, s) > n.ap) continue;
       const gens = gensIn(s, r, nid).map((g) => g.id);
       const mv = Math.min(movable(s, r), reg.troops - 1000);
       if (mv < 1000 || moveCheck(s, world, nid, r, nb.id, mv, gens)) continue;

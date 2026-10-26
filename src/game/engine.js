@@ -1,5 +1,5 @@
 import { stateRng } from './rng.js';
-import { T, TERRAIN, EDGE, BUILDINGS, COST, TAX, G } from './rules.js';
+import { T, TERRAIN, EDGE, MTN_EDGE, BUILDINGS, COST, TAX, G } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { POOLS, rating, randomStats, fairTarget, gradeScore } from './generals.js';
 import { fixJosa } from './josa.js';
@@ -102,11 +102,29 @@ export function income(s, nid) {
   return { gross: inc, upkeep: army + salary + admin, army, salary, admin, net: inc - army - salary - admin, troops };
 }
 
+// 내 땅 2칸 행군: 내 땅(육지)만 거쳐 닿는 두 칸 거리의 내 땅이면 중간 지역을 돌려줌
+export function marchVia(world, s, from, to) {
+  if (!s) return null;
+  const nid = s.regions[from].owner;
+  if (nid === null || s.regions[from].sea || s.regions[to].sea || s.regions[to].owner !== nid) return null;
+  for (const a of world.regions[from].neighbors) {
+    if (a.type !== 'land' && a.type !== 'river') continue;
+    const m = s.regions[a.id];
+    if (m.sea || m.owner !== nid) continue;
+    const b = world.regions[a.id].neighbors.find((x) => x.id === to && (x.type === 'land' || x.type === 'river'));
+    if (b) return a.id;
+  }
+  return null;
+}
+
 export function moveCost(world, from, to, s) {
   const e = edgeBetween(world, from, to);
-  if (!e) return Infinity;
+  if (!e) {
+    const mid = marchVia(world, s, from, to);
+    return mid === null ? Infinity : Math.max(moveCost(world, from, mid, s), moveCost(world, mid, to, s));
+  }
   let c = COST.move;
-  if (world.regions[to].terrain === T.MOUNTAIN) c += 1;
+  if (e.mtn) c += 1;
   if (e.type === 'cliff' || e.type === 'strait') c += 1;
   if (s) c += weatherOf(s, to).ap;
   return c;
@@ -143,7 +161,7 @@ export const capBonus = (x) => (x <= 0 ? x : GEN_CAP * (1 - Math.exp(-x / GEN_CA
 // opts.mode: 'siege'(포위: 성벽을 깎음) | 'assault'(강습: 이기면 즉시 함락, 성벽 효과·손실 증가)
 // opts.engines: 동행 공성병기 수
 export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
-  const e = edgeBetween(world, from, to);
+  const e = edgeBetween(world, from, to) || { type: 'march' };
   const tr = s.regions[to];
   const wr = world.regions[to];
   const terr = wr.terrain;
@@ -163,7 +181,7 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
     a += add('맹장', tv(att, '맹장'));
     a += add('책략', tv(att, '책략'));
     if (e.type !== 'sea' && e.type !== 'landing' && [T.PLAINS, T.DESERT, T.TUNDRA].includes(terr)) a += add('기마', tv(att, '기마'));
-    if ([T.MOUNTAIN, T.HILLS].includes(terr)) a += add('산악', tv(att, '산악'));
+    if (e.mtn || [T.MOUNTAIN, T.HILLS].includes(terr)) a += add('산악', tv(att, '산악'));
     if (e.type === 'river') a += add('도하', tv(att, '도하'));
     if (e.type === 'sea' || e.type === 'landing' || e.type === 'cliff') a += add('수군', tv(att, '수군'));
     if (opts.count && opts.count < tr.troops) a += add('돌격', tv(att, '돌격'));
@@ -174,6 +192,12 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   if (e.type === 'landing' && tv(att, '수군')) edgeMult = 1;
   if (e.type === 'landing' || e.type === 'cliff' || e.type === 'strait') edgeMult = 1 - (1 - edgeMult) * (1 - Math.max(tv(att, '상륙'), e.type === 'strait' ? tv(att, '수군') : 0));
   if (edgeMult < 1) mods.push(`${EDGE[e.type].name} ${Math.round((edgeMult - 1) * 100)}%`);
+  // 험산 경계로 넘는 공격 (산악 장수는 경감)
+  if (e.mtn) {
+    const m = 1 - (1 - MTN_EDGE.mult) * (1 - Math.min(1, tv(att, '산악') * 2));
+    edgeMult *= m;
+    if (m < 1) mods.push(`${MTN_EDGE.name} ${Math.round((m - 1) * 100)}%`);
+  }
   if (terr === T.DESERT && !tv(att, '사막')) { edgeMult *= 0.9; mods.push('사막 소모 -10%'); }
   const rel = tr.owner === null ? { type: 'none' } : getRel(s, nid, tr.owner);
   if (rel.type === 'nap' || rel.type === 'vassal') { betrayal = 0.15; mods.push('배신 사기저하 -15%'); }
@@ -402,8 +426,8 @@ const arrive = (r, n) => (r.moved = Math.min(r.troops, (r.moved || 0) + n));
 export function moveCheck(s, world, nid, from, to, count, genIds = []) {
   const fr = s.regions[from], tr = s.regions[to];
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
-  const e = edgeBetween(world, from, to);
-  if (!e) return '인접하지 않은 지역입니다.';
+  const e = edgeBetween(world, from, to) || (marchVia(world, s, from, to) !== null ? { type: 'march' } : null);
+  if (!e) return '인접하지 않은 지역입니다. (내 땅 안에서는 2칸까지 행군 가능)';
   if (e.type === 'coast' && !canSail(s, nid, from, genIds)) return '배를 띄우려면 출발지에 항구가 있거나 수군 장수가 필요합니다.';
   const seaMove = e.type === 'coast' || e.type === 'sea' || e.type === 'landing' || e.type === 'cliff';
   const sailor = genIds.some((id) => (s.generals[id]?.traits || []).some(([t, l]) => t === '항해' && l >= 3));
@@ -721,7 +745,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     else if (duel.winner === 2) { duelMult = 1 / 1.15; gainExp(s, dg, 40); dg.duelWins = (dg.duelWins || 0) + 1; }
     if (duel.winner === 1 && nid === s.playerId) (s.stats = s.stats || {}).duels = (s.stats.duels || 0) + 1;
     const loser = duel.winner === 1 ? dg : duel.winner === 2 ? ag : null;
-    if (duel.ko && loser && rng() < 0.4) {
+    if (duel.ko && loser && rng() < 0.5) {
       loser.status = 'dead';
       battle.duel.killed = loser.name;
     }

@@ -11,7 +11,7 @@ export const TERRAIN = {
   [T.HILLS]: { name: '구릉', def: 1.25, pop: 22, color: '#cdb486', desc: '방어 +25%' },
   [T.DESERT]: { name: '사막', def: 1.0, pop: 9, color: '#ecd9a0', desc: '인구 적음, 공격측 소모 10%' },
   [T.TUNDRA]: { name: '동토', def: 1.05, pop: 8, color: '#e3e8e8', desc: '인구 적음' },
-  [T.MOUNTAIN]: { name: '험산', def: 1.5, pop: 11, color: '#a8927a', desc: '넘기 힘든 산: 방어 +50%, 진입 행동력 +1' },
+  [T.MOUNTAIN]: { name: '산지', def: 1.1, pop: 11, color: '#a8927a', desc: '방어 +10% (험산은 경계선에 걸림: 그 경계로 넘을 때만 페널티)' },
   [T.PEAK]: { name: '고산', color: '#6e645a', desc: '통행 불가' },
 };
 
@@ -23,7 +23,10 @@ export const EDGE = {
   sea: { name: '해전', mult: 1, desc: '함대끼리 교전' },
   landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군·상륙 장수가 경감)' },
   cliff: { name: '절벽 상륙', mult: 0.45, desc: '깎아지른 해안: 공격 -55%, 행동력 +1 (상륙 장수가 경감)' },
+  march: { name: '행군(내 땅 2칸)', mult: 1, desc: '내 땅으로만 이어진 길로 한 번에 2칸' },
 };
+// 험산 경계: 이 경계선으로 넘으면 공격 -35%, 행동력 +1 (다른 경계로 돌아가면 없음)
+export const MTN_EDGE = { name: '험산 경계', mult: 0.65 };
 
 
 export const BUILDINGS = {

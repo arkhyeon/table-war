@@ -4,6 +4,34 @@ import { WEATHER } from '../game/weather.js';
 
 const NEUTRAL = '#b9b2a0';
 
+// 강 다듬기: 구간을 잘게 나누고 옆으로 살짝 굽이치게 한 뒤 차이킨 곡선화 → 직선 느낌 제거
+function riverCurve(pts, amp, seed) {
+  if (pts.length < 2) return pts;
+  const dense = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    for (let k = 0; k < 3; k++) {
+      const t = k / 3;
+      const w = i === 0 && k === 0 ? 0 : Math.sin((i * 3 + k) * 1.3 + seed) * amp * (0.6 + 0.4 * Math.sin((i + k) * 0.7 + seed * 2));
+      dense.push([ax + dx * t + nx * w, ay + dy * t + ny * w]);
+    }
+  }
+  dense.push(pts[pts.length - 1]);
+  let cur = dense;
+  for (let it = 0; it < 2; it++) {
+    const nxt = [cur[0]];
+    for (let i = 0; i < cur.length - 1; i++) {
+      const [ax, ay] = cur[i], [bx, by] = cur[i + 1];
+      nxt.push([ax * 0.75 + bx * 0.25, ay * 0.75 + by * 0.25], [ax * 0.25 + bx * 0.75, ay * 0.25 + by * 0.75]);
+    }
+    nxt.push(cur[cur.length - 1]);
+    cur = nxt;
+  }
+  return cur;
+}
+
 // 병력 규모 단계: 0(없음)~5(대군, 깃발)
 export const armyTier = (t) => (t <= 0 ? 0 : t < 3000 ? 1 : t < 10000 ? 2 : t < 30000 ? 3 : t < 80000 ? 4 : 5);
 
@@ -62,7 +90,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
     if (!fresh.length) return;
     if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     const t0 = performance.now();
-    setTokens((ts) => [...ts, ...fresh.map((m, i) => ({ ...m, start: t0 + i * 110 }))]);
+    setTokens((ts) => [...ts, ...fresh.map((m, i) => ({ ...m, start: t0 + i * 160 }))]);
   }, [moves]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = tokens.length > 0;
   useEffect(() => {
@@ -71,7 +99,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
     const loop = (t) => {
       setNow(t);
       setTokens((ts) => {
-        const keep = ts.filter((x) => t - x.start < 1700);
+        const keep = ts.filter((x) => t - x.start < 2600);
         return keep.length === ts.length ? ts : keep;
       });
       raf = requestAnimationFrame(loop);
@@ -87,18 +115,25 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
         if (t < 0) return null;
         const a = world.regions[m.from], b = world.regions[m.to];
         const col = nations[m.n]?.color || '#c00';
-        const p = Math.min(1, t / 0.85);
+        const TRAVEL = 1.5; // 행군 시간(초)
+        const p = Math.min(1, t / TRAVEL);
         const e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
         const x = a.cx + (b.cx - a.cx) * e, y = a.cy + (b.cy - a.cy) * e;
-        const hop = Math.abs(Math.sin(p * Math.PI * 5)) * u * 0.35;
+        const hop = Math.abs(Math.sin(p * Math.PI * 9)) * u * 0.4; // 발맞춰 걷는 들썩임
+        const sway = Math.sin(p * Math.PI * 9) * 4; // 좌우 흔들림(도)
         const fight = m.k === 'win' || m.k === 'lose' || m.k === 'siege';
-        const after = t - 0.85;
+        const after = t - TRAVEL;
         return (
           <g key={m.id}>
             {p < 1 && (
               <>
                 <line x1={a.cx} y1={a.cy} x2={x} y2={y} stroke={col} strokeWidth={s * 0.18} strokeDasharray={`${s * 0.3} ${s * 0.3}`} opacity={0.7} />
-                <g transform={`translate(${x},${y - hop})`}>
+                {[0.12, 0.24, 0.36].map((k, j) => {
+                  const q = Math.max(0, p - k * 0.5);
+                  const ex = a.cx + (b.cx - a.cx) * q, ey = a.cy + (b.cy - a.cy) * q;
+                  return <circle key={j} cx={ex} cy={ey + u * 0.2} r={u * (0.5 + j * 0.25)} fill="#d8c8a0" opacity={0.35 - j * 0.1} />;
+                })}
+                <g transform={`translate(${x},${y - hop}) rotate(${sway})`}>
                   <ellipse rx={u * 1.6} ry={u * 0.45} fill="#000" opacity={0.25} transform={`translate(0,${hop})`} />
                   <Army tier={Math.min(3, armyTier(m.c))} color={col} u={u} />
                   {m.k === 'aid' && <text y={-u * 3} fontSize={s * 0.8} textAnchor="middle">🤝</text>}
@@ -132,6 +167,12 @@ export default function MapView({ world, regions, nations, selected, targets, on
   const fitView = () => {
     const el = svgRef.current;
     const rect = el?.getBoundingClientRect();
+    if (world.focusBox && rect?.width) {
+      const [fx, fy, fw, fh] = world.focusBox;
+      const ar = rect.height / rect.width;
+      const w = Math.min(world.W, Math.max(fw * 1.4, (fh * 1.4) / ar)), h = w * ar;
+      return [Math.max(0, Math.min(world.W - w, fx + fw / 2 - w / 2)), Math.max(0, Math.min(Math.max(0, world.H - h), fy + fh / 2 - h / 2)), w, h];
+    }
     if (!rect || !rect.width || rect.height / rect.width <= (world.H / world.W) * 1.15) return [0, 0, world.W, world.H];
     const w = world.H * (rect.width / rect.height);
     const cx = home !== null && home !== undefined && world.regions[home] ? world.regions[home].cx : world.W / 2;
@@ -151,7 +192,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
   // 정적 레이어
   const statics = useMemo(() => {
     const { paths, rivers } = world;
-    const riverD = rivers.map((r) => 'M' + r.pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')).join('');
+    const riverD = rivers.map((r, k) => 'M' + riverCurve(r.pts, world.unit * 0.22, k * 2.17).map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join('L')).join('');
     return { ...paths, riverD };
   }, [world]);
 
@@ -277,7 +318,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
     return (
       <g key={'o' + o.id} className="plan-arrow">
         <path d={d} fill="none" stroke="#15171b" strokeWidth={s * 0.5} strokeLinecap="round" opacity={0.7} />
-        <path d={d} fill="none" stroke={col} strokeWidth={s * 0.28} strokeLinecap="round" strokeDasharray={`${s * 0.55} ${s * 0.3}`} markerEnd={`url(#${clipId}-ah)`} />
+        <path className="march-dash" d={d} fill="none" stroke={col} strokeWidth={s * 0.28} strokeLinecap="round" strokeDasharray={`${s * 0.55} ${s * 0.3}`} markerEnd={`url(#${clipId}-ah)`} style={{ '--dash': `${s * 0.85}px` }} />
         <rect x={lx - w / 2} y={ly - s * 0.55} width={w} height={s * 1.1} rx={s * 0.5} fill="#15171b" stroke={col} strokeWidth={s * 0.12} />
         <text x={lx} y={ly + s * 0.28} fontSize={s * 0.7} textAnchor="middle" fill="#fffdf6" fontWeight="700">
           {lab}
@@ -289,14 +330,15 @@ export default function MapView({ world, regions, nations, selected, targets, on
   const viewOf = (rid) => (view ? view(rid) : 'visible');
   const fogKey = view ? world.regions.map((r) => viewOf(r.id)[0]).join('') : '';
   const fog = useMemo(() => {
-    let hidden = '', dim = '';
-    if (!view) return { hidden, dim };
+    let seen = '', dim = '', any = false;
+    if (!view) return { seen, dim, any };
     world.regions.forEach((r, i) => {
       const v = fogKey[i];
-      if (v === 'h') hidden += world.paths.regionPath[i];
-      else if (v === 'k') dim += world.paths.regionPath[i];
+      if (v === 'h') any = true;
+      else seen += world.paths.regionPath[i];
+      if (v === 'k') dim += world.paths.regionPath[i];
     });
-    return { hidden, dim };
+    return { seen, dim, any };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world, fogKey]);
   const color = (rid) => {
@@ -383,7 +425,6 @@ export default function MapView({ world, regions, nations, selected, targets, on
             <path d={statics.borders} fill="none" stroke="#00000045" strokeWidth={0.7} />
             <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
             <path d={fog.dim} fill="#1b1d22" opacity={0.22} fillRule="evenodd" />
-            <path d={fog.hidden} fill="#3a3c40" fillRule="evenodd" />
             {flash && [...flash].map((rid) => <path key={'f' + rid} className="flash" d={statics.outline[rid]} fill="#ffd34a33" fillRule="evenodd" stroke="#ffd34a" strokeWidth={3} />)}
             {focus !== null && focus !== undefined && <path d={statics.outline[focus]} fill="#ff334422" fillRule="evenodd" stroke="#ff3344" strokeWidth={3.2} />}
           {targets &&
@@ -431,6 +472,18 @@ export default function MapView({ world, regions, nations, selected, targets, on
           {arrows}
           {planArrows}
           {!compact && moves && showArmy && <MoveLayer world={world} nations={nations} moves={moves} visible={(rid) => viewOf(rid) === 'visible'} outline={statics.outline} s={s} />}
+          {/* 안개: 지도 전체(바다 포함)를 덮고 내가 아는 지역만 뚫음 */}
+          {fog.any && (
+            <>
+              <mask id={`${clipId}-fog`} maskUnits="userSpaceOnUse" x={-world.W} y={-world.H} width={world.W * 3} height={world.H * 3}>
+                <rect x={-world.W} y={-world.H} width={world.W * 3} height={world.H * 3} fill="#fff" />
+                <path d={fog.seen} fill="#000" fillRule="nonzero" />
+              </mask>
+              <rect x={-world.W} y={-world.H} width={world.W * 3} height={world.H * 3} fill="#2b2d32" mask={`url(#${clipId}-fog)`} pointerEvents="none" />
+            </>
+          )}
+          {/* 라벨은 클릭을 가로채지 않음 → 작은 지역도 그 위를 눌러 선택 가능 */}
+          <g pointerEvents="none">
           {!compact &&
             world.regions.map((r) => {
               const reg = regions[r.id];
@@ -530,6 +583,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 </g>
               );
             })}
+          </g>
           {compact &&
             nations
               .filter((n) => n.alive && n.capital !== null)

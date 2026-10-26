@@ -17,7 +17,8 @@ function outcome(a, b) {
 }
 
 export const duelHp = (g) => Math.round((60 + g.war * 0.7 + g.lead * 0.2) * (1 + tv([g], '무쌍')));
-export const duelPow = (g) => Math.max(4, 2 + (g.war - 40) * 0.42) * (1 + tv([g], '맹장') * 3);
+// 위력: 무력이 높을수록 크게 (무력 80이면 약 33 → 체력 130 안팎이라 4번쯤 이기면 낙마)
+export const duelPow = (g) => Math.max(8, 6 + (g.war - 30) * 0.55) * (1 + tv([g], '맹장') * 3);
 
 const BASE_MIX = { attack: 1 / 3, defend: 1 / 3, counter: 1 / 3 };
 

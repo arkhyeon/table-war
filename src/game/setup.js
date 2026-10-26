@@ -253,6 +253,6 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
-  s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다. (시드: ${seed})`, nations: [playerId], kind: 'info' });
+  s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다.${scn.procedural ? ` (시드: ${seed})` : ''}`, nations: [playerId], kind: 'info' });
   return s;
 }

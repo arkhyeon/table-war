@@ -3,7 +3,7 @@ import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -166,6 +166,12 @@ export default function Game({ world, scn, game, setGame, onExit }) {
       if (why && !why.startsWith('행동력') && !why.startsWith('이동 병력')) kind = 'blocked';
       m.set(nb.id, kind);
     }
+    // 내 땅 2칸 행군 목적지
+    if (!fr.sea) for (const nb of world.regions[selected].neighbors) for (const x of world.regions[nb.id].neighbors) {
+      if (x.id === selected || m.has(x.id) || marchVia(world, game, selected, x.id) === null) continue;
+      const why = moveCheck(game, world, pid, selected, x.id, Math.max(1, probe), gens);
+      m.set(x.id, why && !why.startsWith('행동력') && !why.startsWith('이동 병력') ? 'blocked' : 'move');
+    }
     return m;
   }, [moveMode, selected, game, world, pid]);
 
@@ -176,7 +182,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   }, [game.generals]);
 
   const openMove = (from, to) => {
-    if (!edgeBetween(world, from, to)) return;
+    if (!edgeBetween(world, from, to) && marchVia(world, game, from, to) === null) return;
     setModal({ type: 'move', from, to });
   };
 
@@ -196,7 +202,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   };
 
   const onRegionContext = (rid) => {
-    if (selected !== null && game.regions[selected].owner === game.playerId && edgeBetween(world, selected, rid)) openMove(selected, rid);
+    if (selected !== null && game.regions[selected].owner === game.playerId && (edgeBetween(world, selected, rid) || marchVia(world, game, selected, rid) !== null)) openMove(selected, rid);
   };
 
   const inc = income(game, game.playerId);
@@ -282,11 +288,19 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
         <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>
         <div className="menu-wrap">
-          <button onClick={() => setMenu((v) => !v)} title="메뉴" className={menu ? 'primary' : ''}>
+          <button
+            onClick={(e) => {
+              // 상단바가 줄바꿈돼 버튼이 왼쪽에 있어도 메뉴가 화면 안에 열리도록 버튼 위치 기준으로 배치
+              const b = e.currentTarget.getBoundingClientRect();
+              setMenu((v) => (v ? false : { top: b.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - 198, b.right - 190)) }));
+            }}
+            title="메뉴"
+            className={menu ? 'primary' : ''}
+          >
             ☰
           </button>
           {menu && (
-            <div className="menu" onClick={() => setMenu(false)}>
+            <div className="menu" style={{ top: menu.top, left: menu.left }} onClick={() => setMenu(false)}>
               <button onClick={() => setShowLog((v) => !v)}>📜 기록 {showLog ? '숨기기' : '보기'}</button>
               <button onClick={() => setModal({ type: 'chronicle' })}>📽️ 연대기</button>
               <button onClick={() => setModal({ type: 'help' })}>❓ 게임 방법</button>

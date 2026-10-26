@@ -43,7 +43,7 @@ function Modal({ title, onClose, wide, children }) {
 export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel }) {
   const pid = game.playerId;
   const fr = game.regions[from], tr = game.regions[to];
-  const edge = edgeBetween(world, from, to);
+  const edge = edgeBetween(world, from, to) || { type: 'march' };
   const myGens = gensIn(game, from, pid);
   const maxCount = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, from));
   const [count, setCount] = useState(fr.sea ? maxCount : Math.max(1, Math.min(maxCount, fr.troops - 1000)));
@@ -70,7 +70,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
       <div className="kv" style={{ marginBottom: 10 }}>
         <span>경로</span>
         <span>
-          {fr.name} → {tr.name} ({EDGE[edge.type].name})
+          {fr.name} → {tr.name} ({EDGE[edge.type].name}{edge.mtn ? ' · ⛰️험산 경계: 행동력 +1, 공격 -35%' : ''})
         </span>
         <span>대상</span>
         <span>
@@ -800,7 +800,8 @@ export function HelpModal({ onClose }) {
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7, 큰 지도는 더 많음) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
           <li><b>이동·공격은 계획</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 → 병력·함께 갈 장수를 고르고 계획. 바로 실행되지 않고 화살표로 표시되며(오른쪽 아래 목록에서 취소 가능), 턴 종료 때 모든 나라의 계획이 함께 처리됩니다. 같은 곳에 여러 나라 군대가 몰리면 큰 군대부터 차례로 맞붙고, 아군 증원은 전투 전에 합류합니다. 출발한 병력은 그 턴에 다시 계획할 수 없습니다. 일기토를 신청했다면 그 전투 차례에 일기토 창이 뜹니다.</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
-          <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
+          <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 산지 +10%. <b>험산 경계</b>(경계선 위 작은 봉우리)로 넘으면 공격 -35%·AP+1, 다른 경계로 돌아가면 없음. 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
+          <li><b>행군</b>: 내 땅으로만 이어지면 한 번에 <b>2칸</b>까지 이동 (계획 화면에서 2칸 너머 내 땅도 선택 가능).</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드에서 세율 일괄 설정, 지역마다 개별 설정 가능(높음=세수↑ 민심↓ 인구 정체).</li>
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
           <li><b>징병</b>: 인원을 직접 정합니다. 징집은 1명당 5금이고 인구의 5%를 넘게 뽑으면 넘은 만큼 민심 하락, 모병은 1명당 12금에 민심 영향 없음(최대치 절반). 병영 +50%.</li>
@@ -811,9 +812,9 @@ export function HelpModal({ onClose }) {
           <li><b>날씨</b>: 북쪽은 눈(공격 -25%, AP+1, 세수 -25%), 남쪽은 가뭄(세수 -35%)이 잦지만 남쪽은 풍년(+35%)도 잦아 연간 손익이 비슷합니다. 비는 도강을 어렵게, 폭풍은 항해를 막습니다.</li>
           <li><b>사건</b>: 역병·홍수·지진·금광·교역 호황·해적·도적·용병단·장수 출분 등 어느 나라에나 일어나는 사건이 턴 소식에 카드로 나옵니다.</li>
           <li><b>세력 균형</b>: 국력이 평균의 2배를 넘으면 주변국 호감이 계속 떨어지고, 1위가 2.5배를 넘으면 대동맹이 결성됩니다. AI 회원국끼리는 싸우지 않고 패권국을 노리며, 패권국의 침공에 방어 +15%.</li>
-          <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 2 + (무력-40)×0.42(맹장·무쌍 특성 가산). 상대 의도 간파는 무력 85%·지력 15%의 전장 감각 차이로 정해져 힌트로 보입니다. 이기면 전투력 +15%, 지면 -15%.</li>
+          <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 6 + (무력-30)×0.55(맹장·무쌍 특성 가산). 상대 의도 간파는 무력 85%·지력 15%의 전장 감각 차이로 정해져 힌트로 보입니다. 이기면 전투력 +15%, 지면 -15%. 낙마하면 절반 확률로 전사.</li>
           <li><b>장수와 전투력</b>: 장수는 병사 수를 늘리지 않고 배율을 올립니다. 공격 시 동행 장수 중 최고 (무력+통솔)/2 ÷ 250(최대 약 +40%) + 특성, 방어 시 주둔 장수 최고 (통솔×0.6+지력×0.4) ÷ 250 + 특성.</li>
-          <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 등급은 F~SSR. 기본은 공평한 무작위 능력치(장수 성향만 역사대로, 나라마다 장수 수준 합이 비슷 — 뛰어난 장수가 있으면 다음 장수는 약해짐). 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유. 멸망한 나라의 왕은 승자의 장수가 되고, 충성이 낮으면 옛 나라를 부흥시킬 수 있습니다.</li>
+          <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 등급은 F~SSR. 기본은 공평한 무작위 능력치(이름만 역사 인물이고 능력·주특기는 무작위, 나라마다 장수 수준 합이 비슷 — 뛰어난 장수가 있으면 다음 장수는 약해짐). 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유. 멸망한 나라의 왕은 승자의 장수가 되고, 충성이 낮으면 옛 나라를 부흥시킬 수 있습니다.</li>
           <li><b>천도</b>: 내 땅(수도와 길이 이어지고 민심 60 이상)을 골라 🏯천도 — 금·3AP, 12턴에 한 번. 새 수도 민심 +10, 옛 수도 -10. 컴퓨터도 수도가 위험하면 천도합니다.</li>
           <li><b>해협</b>: 간몬·쓰가루·도버·메시나·보스포루스·지브롤터 등 좁은 해협은 흰 점선으로 이어져 배 없이 건널 수 있습니다(-30%, AP+1).</li>
           <li><b>지도 보기</b>: 휠·＋－·두 손가락으로 확대, 끌어서 이동. 폰에서는 지역을 누르면 정보창이 아래에서 올라옵니다(📋 버튼으로 열고 닫기). 병력을 모르는 지역은 이름만 보입니다.</li>
@@ -879,7 +880,7 @@ export function DuelModal({ game, attId, defId, onFinish }) {
       setBusy(false);
       const plan = aiMove(rng, dg, ag, null, [...history, ...next.rounds.map((r) => r.m1)]);
       setIt({ plan, seen: rng() < readChance(ag, dg) });
-    }, 1150);
+    }, 2700);
   };
   const bar = (hp, max, color) => (
     <div className="odds" style={{ background: '#444' }}>
@@ -908,25 +909,38 @@ export function DuelModal({ game, attId, defId, onFinish }) {
           </small>
         </div>
       </div>
-      <div className="arena" key={n}>
-        <div className="ground" />
-        <div className={'rider L' + (n ? ' go' : '') + (downA ? ' down' : '')}>🏇</div>
-        <div className={'rider R' + (n ? ' go' : '') + (downB ? ' down' : '')}>🏇</div>
-        {last && (
-          <>
-            <div className="mv L">
-              {MOVES[last.m1].icon} {MOVES[last.m1].name}
-            </div>
-            <div className="mv R">
-              {MOVES[last.m2].icon} {MOVES[last.m2].name}
-            </div>
-            <div className="clash">💥</div>
-            {last.dA > 0 && <div className="dmg L">-{last.dA}</div>}
-            {last.dB > 0 && <div className="dmg R">-{last.dB}</div>}
-          </>
-        )}
-        {!n && <div className="arena-hint">두 장수가 말을 몰아 마주섰다…</div>}
-      </div>
+      {(() => {
+        // 이번 합의 승자: L(내 장수) / R(상대) / tie
+        const win = !last ? null : last.dB > 0 && last.dA === 0 ? 'L' : last.dA > 0 && last.dB === 0 ? 'R' : 'tie';
+        return (
+          <div className={'arena' + (win ? ' win-' + win : '')} key={n}>
+            <div className="ground" />
+            {n > 0 && (
+              <>
+                <div className="dust L" />
+                <div className="dust R" />
+              </>
+            )}
+            <div className={'rider L' + (n ? ' go' : '') + (downA ? ' down' : '') + (win === 'R' ? ' hit' : '')}>🏇</div>
+            <div className={'rider R' + (n ? ' go' : '') + (downB ? ' down' : '') + (win === 'L' ? ' hit' : '')}>🏇</div>
+            {last && (
+              <>
+                <div className={'mv L' + (win === 'L' ? ' won' : win === 'R' ? ' lost' : '')}>
+                  <span className="mv-ic">{MOVES[last.m1].icon}</span> {MOVES[last.m1].name}
+                </div>
+                <div className={'mv R' + (win === 'R' ? ' won' : win === 'L' ? ' lost' : '')}>
+                  <span className="mv-ic">{MOVES[last.m2].icon}</span> {MOVES[last.m2].name}
+                </div>
+                <div className="clash">💥</div>
+                <div className={'verdict ' + win}>{win === 'L' ? `${ag.name} 우세!` : win === 'R' ? `${dg.name} 우세!` : '맞부딪침 — 서로 상처'}</div>
+                {last.dA > 0 && <div className="dmg L">-{last.dA}</div>}
+                {last.dB > 0 && <div className="dmg R">-{last.dB}</div>}
+              </>
+            )}
+            {!n && <div className="arena-hint">두 장수가 말을 몰아 마주섰다…</div>}
+          </div>
+        );
+      })()}
       <div className="col" style={{ marginTop: 8, fontSize: 13, maxHeight: 120, overflow: 'auto' }}>
         {d.rounds.map((r, i) => (
           <div key={i}>

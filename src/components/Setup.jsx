@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
-import { SCENARIOS } from '../game/scenarios.js';
+import { SCENARIOS, canWorld, worldVariant } from '../game/scenarios.js';
 import { generateWorld, MAP_DETAIL } from '../game/mapgen.js';
 import { fmtYear } from '../game/weather.js';
 import { createGame } from '../game/setup.js';
@@ -17,12 +17,14 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [seed, setSeed] = useState(randomSeed);
   const [nationCount, setNationCount] = useState(8);
   const [detail, setDetail] = useState('normal');
+  const [scope, setScope] = useState('region');
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
   const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
-  const scn = SCENARIOS.find((s) => s.id === scnId);
+  const baseScn = SCENARIOS.find((s) => s.id === scnId);
+  const scn = scope === 'world' && canWorld(baseScn) ? worldVariant(baseScn) : baseScn;
   const opts = useMemo(() => ({ ...(scn.procedural ? { nationCount } : {}), histStats: rules.histStats, difficulty: rules.difficulty }), [scn, nationCount, rules.histStats, rules.difficulty]);
 
   const world = useMemo(() => {
@@ -99,10 +101,24 @@ export default function Setup({ onStart, onResume, hasSave }) {
               </button>
             ))}
         </div>
+        {baseScn.group === 'region' && (
+          <div className="row" style={{ marginBottom: 8 }}>
+            <span>무대</span>
+            <button className={scope !== 'world' || !canWorld(baseScn) ? 'primary' : ''} onClick={() => setScope('region')}>🗺️ 이 지역만</button>
+            <button className={scope === 'world' && canWorld(baseScn) ? 'primary' : ''} disabled={!canWorld(baseScn)} onClick={() => { setScope('world'); setPlayer(0); }}>🌍 전 세계</button>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {canWorld(baseScn) ? '전 세계: 무대는 잘게 나뉘고, 바깥은 같은 시대의 다른 나라들로 채워집니다(뒤가 비지 않음).' : '이 시나리오는 지역이 좁아 세계판이 없습니다.'}
+            </span>
+          </div>
+        )}
         <div className="row" style={{ marginBottom: 12 }}>
+          {scn.procedural && (
+            <>
           <span>시드</span>
           <input value={seed} onChange={(e) => setSeed(e.target.value || '0')} style={{ width: 120 }} />
           <button onClick={() => setSeed(randomSeed())}>🎲 랜덤</button>
+            </>
+          )}
           <span style={{ marginLeft: 12 }} title="지역을 얼마나 잘게 나눌지. 잘게 할수록 지역·나라 영토가 많아지고 한 판이 길어집니다.">🧩 지역 크기</span>
           <select value={detail} onChange={(e) => setDetail(e.target.value)}>
             {Object.entries(MAP_DETAIL).map(([k, v]) => (
@@ -118,7 +134,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             </>
           )}
           <span className="muted" style={{ fontSize: 12 }}>
-            같은 시드는 같은 지도를 만듭니다. {scn.procedural ? '' : '역사 시나리오는 실제 지형·국가 배치를 쓰고, 시드는 지역 구획과 세부를 바꿉니다.'}
+            {scn.procedural ? '같은 시드는 같은 지도를 만듭니다.' : '역사 시나리오는 그 시대의 정해진 지도·국가 배치로 시작합니다.'}
           </span>
         </div>
         <h3>2. 게임 옵션</h3>
@@ -129,7 +145,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             ['rememberExplored', '🧭 탐색 지역 기억', '한 번 본 땅은 계속 지도에 표시 (지도 전체 공개를 껐을 때)'],
             ['showBattles', '⚔️ 턴마다 전투 다시보기', '시야 안에서 벌어진 전투만, 건너뛰기 가능'],
             ['showArmy', '🪖 병력 그림·애니메이션', '병력 규모에 따라 병사 그림(1~4명, 대군은 군기)을 보여주고 이동을 애니메이션으로 표시'],
-            ['histStats', '📜 역사 능력치 사용', '끄면(기본) 장수 성향만 살리고 능력치는 나라마다 공평하게 무작위'],
+            ['histStats', '📜 역사 능력치 사용', '끄면(기본) 장수 능력치·특성은 무작위, 나라마다 총합만 공평하게'],
           ].map(([k, label, tip]) => (
             <label key={k} title={tip}>
               <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
