@@ -1,11 +1,12 @@
-import { TERRAIN, BUILDINGS, COST, TRAITS, EDGE, TAX } from '../game/rules.js';
+import { TERRAIN, BUILDINGS, COST, EDGE, TAX } from '../game/rules.js';
+import { traitLabel, traitDesc } from '../game/traits.js';
 import { fmtTroops } from '../game/format.js';
 import { CIVS } from '../game/civs.js';
 import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
-  doConscript, doBuild, regionTax, buildCost, conscriptAmount, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX,
+  doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
+  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX,
 } from '../game/engine.js';
 
 export function relTag(game, a, b) {
@@ -17,12 +18,19 @@ export function relTag(game, a, b) {
   return null;
 }
 
+export function TraitTags({ g }) {
+  return (g.traits || []).map((tr) => (
+    <span key={tr[0]} className={'tag trait t' + tr[1]} title={traitDesc(tr[0], tr[1])}>
+      {traitLabel(tr)}
+    </span>
+  ));
+}
+
 export function GenLine({ g, extra }) {
   const lv = g.level || 1;
   return (
     <div className="gen">
-      <b>{g.name}</b> <span className="tag" title={TRAITS[g.trait]}>{g.trait}</span> <span className="tag">Lv{lv}</span>
-      {g.title && <span className="tag ally"> {g.title}</span>}
+      <b>{g.name}</b> <span className="tag">{g.role === 'civ' ? '문관' : '무관'} Lv{lv}</span> {g.title && <span className="tag ally">{g.title}</span>} <TraitTags g={g} />
       <div className="stats4">
         무{g.war} 통{g.lead} 지{g.intel} 정{g.pol} · 충성 {g.loyalty} · 경험 {g.exp || 0}/{lv * 100}
       </div>
@@ -48,7 +56,7 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, moveMode, setMoveMode, act, openGenerals }) {
+export default function SidePanel({ world, game, selected, vis, moveMode, setMoveMode, act, openGenerals, openConscript }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -84,17 +92,17 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
         </h3>
         <div className="kv">
           <span>군주</span>
-          <span>{ruler ? `${ruler.name} (${ruler.trait})` : '없음'}</span>
+          <span>{ruler ? ruler.name : '없음'}</span>
           <span>영토</span>
           <span>
-            {myRegions.length}지역 / 전체 {game.regions.length}
+            {myRegions.length}지역 / 전체 {landCount(game)}
             {cut > 0 && <span style={{ color: 'var(--danger)' }}> · 보급 끊김 {cut}</span>}
           </span>
           <span>병력</span>
           <span>{fmtTroops(inc.troops)}</span>
           <span>수입</span>
           <span>
-            세금 +{inc.gross} − 병력 유지비 {inc.army} − 장수 녹봉 {inc.salary} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{inc.net}</b>금/턴
+            세금 +{inc.gross} − 병력 유지비 {inc.army} − 장수 녹봉 {inc.salary}{inc.admin ? ` − 통치비 ${inc.admin}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{inc.net}</b>금/턴
           </span>
           <span>세율 일괄</span>
           <span>
@@ -113,7 +121,8 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
           )}
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          징병은 금 {COST.conscriptGold}과 인구를 소모합니다. 승리: 전체 지역 60% 점령 또는 모든 국가 멸망·속국화.
+          {game.coalition && <div style={{ color: 'var(--danger)' }}>⚔️ 대동맹 결성: {game.nations[game.coalition.target].name}이(가) 공공의 적</div>}
+          승리: 전체 육지의 60% 점령 또는 모든 국가 멸망·속국화.
         </div>
       </div>
 
@@ -124,7 +133,50 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
         </div>
       )}
 
-      {r && view !== 'hidden' && (
+      {r && view !== 'hidden' && r.sea && (
+        <div className="card">
+          <h3>🌊 {r.name}</h3>
+          <div className="kv">
+            <span>함대</span>
+            <span>
+              {r.owner !== null && r.troops > 0 ? (
+                <>
+                  <span className="chip" style={{ background: game.nations[r.owner].color }} />
+                  {game.nations[r.owner].name} · {showT ? `${r.troops.toLocaleString('ko-KR')}명` : '?'}
+                </>
+              ) : (
+                '없음'
+              )}
+            </span>
+            <span>날씨</span>
+            <span>
+              {w.icon} {w.name} {w.desc && <small className="muted">{w.desc}</small>}
+            </span>
+            <span>연결</span>
+            <span style={{ fontSize: 12 }}>
+              {wr.neighbors.map((n) => (
+                <span key={n.id} style={{ marginRight: 6, whiteSpace: 'nowrap' }}>
+                  {game.regions[n.id].name}
+                  <small className="muted">({EDGE[n.type].name})</small>
+                </span>
+              ))}
+            </span>
+          </div>
+          {mine && (
+            <div className="actions" style={{ marginTop: 10 }}>
+              <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)}>
+                ⛵ 항해·상륙 (M)
+              </button>
+            </div>
+          )}
+          <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+            함대는 한 번에 바다 한 구역씩 움직이고, 적 함대가 있는 구역은 해전으로 뚫어야 합니다. 바다에서는 매 턴 2%(폭풍 시 10%)씩 병력이 줄어듭니다.
+          </div>
+          {view === 'visible' && gens.map((g) => <GenLine key={g.id} g={g} />)}
+        </div>
+      )}
+
+      {r && view !== 'hidden' && !r.sea && (
         <div className="card">
           <h3>
             {r.name}
@@ -179,6 +231,7 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                 .filter(([, v]) => v)
                 .map(([k, v]) => `${BUILDINGS[k].icon}${BUILDINGS[k].name}${k === 'walls' ? ` ${v}/${WALL_MAX}` : ''}`)
                 .join(' ') || '없음'}
+              {r.engines ? ` · 🛠️공성병기 ${r.engines}` : ''}
             </span>
             <span>인접</span>
             <span style={{ fontSize: 12 }}>
@@ -210,8 +263,18 @@ export default function SidePanel({ world, game, selected, vis, moveMode, setMov
                 <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)} disabled={r.troops < 2}>
                   🚩 이동·공격 (M)
                 </button>
-                <button onClick={() => act((s) => doConscript(s, world, pid, selected))} disabled={r.conscripted || me.ap < COST.conscript || me.gold < COST.conscriptGold} title="민심 -6, 인구 감소">
-                  🪖 징병 +{fmtTroops(conscriptAmount(game, selected, pid))} ({COST.conscript}AP·{COST.conscriptGold}금)
+                <button onClick={openConscript} disabled={r.conscripted || me.ap < COST.conscript}>
+                  🪖 징병 (최대 {fmtTroops(conscriptMax(game, selected, pid))})
+                </button>
+                <button
+                  onClick={() => act((s) => doRelief(s, pid, selected))}
+                  disabled={me.ap < 1 || me.gold < reliefCost(game, selected) || (r.reliefTurn !== undefined && game.turn - r.reliefTurn < RELIEF_COOLDOWN)}
+                  title={`민심 40 미만이면 +14, 아니면 +7. 지역마다 ${RELIEF_COOLDOWN}턴에 한 번`}
+                >
+                  🍚 진휼 ({reliefCost(game, selected)}금·1AP)
+                </button>
+                <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
+                  🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({engineCost(game, selected)}금·1AP)
                 </button>
               </div>
               <h4 style={{ marginTop: 10 }}>건설</h4>

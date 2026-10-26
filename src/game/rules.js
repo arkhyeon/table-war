@@ -15,25 +15,11 @@ export const TERRAIN = {
 export const EDGE = {
   land: { name: '육로', mult: 1, desc: '' },
   river: { name: '도강', mult: 0.8, desc: '강 건너 공격 -20%' },
-  sea: { name: '항해', mult: 0.7, desc: '해상 공격 -30%, 항구 필요, 행동력 +1' },
+  coast: { name: '승선', mult: 1, desc: '항구 또는 수군 장수 필요' },
+  sea: { name: '해전', mult: 1, desc: '함대끼리 교전' },
+  landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군 장수는 무시)' },
 };
 
-export const TRAITS = {
-  명장: '공격 +15%',
-  맹장: '공격 +10%, 전투에서 적장 처치 확률 증가',
-  수성: '방어 +25%',
-  기마: '평원·사막·동토 공격 +15%',
-  수군: '해상 페널티 무시, 항구 없이 항해 가능',
-  산악: '험산 방어 보정 무시',
-  도하: '도강 페널티 무시',
-  정치: '주둔 지역 세수 +30%',
-  징병: '주둔 지역 징병 +30%',
-  건축: '주둔 지역 건설비 -30%',
-  외교: '외교 수락률 증가',
-  신속: '국가 행동력 +1',
-  책략: '공격·방어 +10%',
-  인덕: '포로 등용 확률 +15%',
-};
 
 export const BUILDINGS = {
   market: { name: '시장', icon: '💰', cost: 60, ap: 2, desc: '세수 +50%, 인구 상한 증가' },
@@ -44,7 +30,6 @@ export const BUILDINGS = {
 
 export const COST = {
   conscript: 1,
-  conscriptGold: 20,
   move: 1,
   diplomacy: 1,
   recruit: 1,

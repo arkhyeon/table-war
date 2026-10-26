@@ -7,7 +7,7 @@ export function visibleSet(s, world, nid) {
   s.regions.forEach((r, i) => {
     if (!friendly(r.owner)) return;
     vis.add(i);
-    for (const nb of world.regions[i].neighbors) if (nb.type !== 'sea' || r.buildings.port) vis.add(nb.id);
+    for (const nb of world.regions[i].neighbors) vis.add(nb.id);
   });
   return vis;
 }

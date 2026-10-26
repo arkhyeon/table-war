@@ -141,7 +141,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
         </div>
         <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
           <span className="muted">
-            {world ? `${world.regions.length}개 지역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview?.nations[pid]?.name}</b>
+            {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview?.nations[pid]?.name}</b>
           </span>
           <button className="primary" disabled={!world} onClick={start}>
             게임 시작 ▶

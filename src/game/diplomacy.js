@@ -1,4 +1,4 @@
-import { getRel, setRel, log, nationPower, nationRegions, nationGenerals, hasTrait, isVassalOf, gensIn } from './engine.js';
+import { getRel, setRel, log, nationPower, nationRegions, nationTrait, isVassalOf, gensIn } from './engine.js';
 import { COST } from './rules.js';
 
 // deal: { give:{gold, regions:[]}, get:{gold, regions:[]}, treaty: null|'alliance'|'nap'|'vassal_them'|'vassal_me'|'joint', target }
@@ -114,8 +114,8 @@ export function evaluateDeal(s, world, from, to, deal) {
     v += ratio > 1.8 && adj.has(from) ? 40 + (ratio - 1.8) * 30 : -30;
   }
   v += op * 0.4 + (s.nations[from].reputation - 50) * 0.3;
-  if (hasTrait(nationGenerals(s, from), '외교')) v += 15;
-  if (hasTrait(nationGenerals(s, to), '외교')) v -= 5;
+  v += nationTrait(s, from, '외교');
+  v -= nationTrait(s, to, '외교') / 3;
   return Math.round(v);
 }
 

@@ -156,11 +156,31 @@ export default function MapView({ world, regions, nations, selected, targets, on
           </marker>
         </defs>
         <rect x={-world.W} y={-world.H} width={world.W * 3} height={world.H * 3} fill="#8fb8cc" />
+        {/* 바다 구역 (함대가 있으면 국가 색) */}
+        <g>
+          {world.regions.map((r) =>
+            r.sea ? (
+              <path
+                key={r.id}
+                data-rid={r.id}
+                d={statics.regionPath[r.id]}
+                fill={regions[r.id].owner !== null && regions[r.id].troops > 0 ? nations[regions[r.id].owner].color : '#ffffff'}
+                fillOpacity={regions[r.id].owner !== null && regions[r.id].troops > 0 ? 0.35 : 0.04}
+                fillRule="evenodd"
+                onClick={(e) => click(r.id, e)}
+                onContextMenu={(e) => context(r.id, e)}
+                style={{ cursor: 'pointer' }}
+              />
+            ) : null,
+          )}
+          <path d={statics.seaBorders} fill="none" stroke="#ffffff" strokeOpacity={0.35} strokeWidth={0.8} strokeDasharray="3 3" pointerEvents="none" />
+        </g>
         <path d={statics.land} fill={NEUTRAL} />
         <g clipPath={`url(#${clipId})`}>
-          {world.regions.map((r) => (
+          {world.regions.map((r) => r.sea ? null : (
             <path
               key={r.id}
+              data-rid={r.id}
               d={statics.regionPath[r.id]}
               fill={color(r.id)}
               fillRule="evenodd"
@@ -185,7 +205,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
             <path d={fog.hidden} fill="#3a3c40" fillRule="evenodd" />
             {focus !== null && focus !== undefined && <path d={statics.outline[focus]} fill="#ff334422" fillRule="evenodd" stroke="#ff3344" strokeWidth={3.2} />}
           {targets &&
-            [...targets.entries()].map(([rid, kind]) => (
+            [...targets.entries()].filter(([rid]) => !world.regions[rid].sea).map(([rid, kind]) => (
               <path
                 key={rid}
                 d={statics.outline[rid]}
@@ -196,10 +216,23 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
               />
             ))}
-          {selected !== null && selected !== undefined && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
+          {selected !== null && selected !== undefined && !world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
           </g>
           <path d={statics.riverD} fill="none" stroke="#3f86b4" strokeWidth={s * 0.28} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
           <path d={statics.land} fill="none" stroke="#2c5468" strokeWidth={1.1} />
+          {targets &&
+            [...targets.entries()].filter(([rid]) => world.regions[rid].sea).map(([rid, kind]) => (
+              <path
+                key={rid}
+                d={statics.outline[rid]}
+                fill={kind === 'attack' ? '#ff554433' : kind === 'move' ? '#ffe06622' : 'none'}
+                fillRule="evenodd"
+                stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
+                strokeWidth={2.4}
+                strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
+              />
+            ))}
+          {selected !== null && selected !== undefined && world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
           {seaLines}
           {arrows}
           {!compact &&
@@ -207,6 +240,24 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const reg = regions[r.id];
               const v = viewOf(r.id);
               if (v === 'hidden') return null;
+              if (r.sea) {
+                const wxs = weather ? WEATHER[weather[r.id]] : null;
+                if (!(reg.troops > 0 && reg.owner !== null)) return wxs?.noSea && v === 'visible' ? (
+                  <text key={r.id} x={r.cx} y={r.cy} fontSize={s * 0.9} textAnchor="middle" opacity={0.8}>
+                    🌀
+                  </text>
+                ) : null;
+                const ft = !showTroops || showTroops(r.id) ? fmt(reg.troops) : '?';
+                const fw = Math.max(s * 2.4, String(ft).length * s * 0.5 + s * 1.6);
+                return (
+                  <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
+                    <rect x={-fw / 2} y={-s * 0.8} width={fw} height={s * 1.6} rx={s * 0.3} fill="#1d3b4d" stroke={nations[reg.owner].color} strokeWidth={s * 0.25} />
+                    <text textAnchor="middle" dy={s * 0.3} fontSize={s * 0.8} fontWeight="700" fill="#fff">
+                      ⛵{ft}
+                    </text>
+                  </g>
+                );
+              }
               const visible = v === 'visible';
               const own = reg.owner;
               const col = own === null ? '#666' : nations[own].color;

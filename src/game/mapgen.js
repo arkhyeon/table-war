@@ -373,43 +373,142 @@ function finalizeRegions(scn, g) {
     regs[a].neighbors.push({ id: b, type });
     regs[b].neighbors.push({ id: a, type });
   }
-  // 바닷길: 해안 지역끼리 바다 칸을 통해 연결
-  const reach = scn.seaReach || 4;
-  for (const r of regs) {
-    if (!r.coastal) continue;
-    const dist = new Map();
-    const queue = [];
-    for (const c of r.cells) {
+  g.regions = regs;
+}
+
+
+// 바다 구역: 해안에서 일정 거리 이내의 바다를 구역으로 나눠 함대가 한 칸씩 이동
+function buildSeaZones(scn, g) {
+  const { N, cols, rows, terrain, region, rng, center, size } = g;
+  const reach = scn.seaReach;
+  const dist = new Int32Array(N).fill(-1);
+  const q = [];
+  for (let i = 0; i < N; i++) {
+    if (terrain[i] !== T.SEA) continue;
+    for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, i, d);
+      if (nb >= 0 && terrain[nb] !== T.SEA && terrain[nb] !== T.PEAK) {
+        dist[i] = 1;
+        q.push(i);
+        break;
+      }
+    }
+  }
+  for (let k = 0; k < q.length; k++) {
+    const c = q[k];
+    if (dist[c] >= reach) continue;
+    for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, c, d);
+      if (nb >= 0 && terrain[nb] === T.SEA && dist[nb] === -1) {
+        dist[nb] = dist[c] + 1;
+        q.push(nb);
+      }
+    }
+  }
+  const cells = q;
+  const S = Math.round(scn.regionSize * 2.2);
+  const K = Math.max(1, Math.round(cells.length / S));
+  const minD = Math.max(2, Math.floor(Math.sqrt(S) * 0.95));
+  const seeds = [];
+  for (const c of rng.shuffle(cells.slice())) {
+    if (seeds.length >= K) break;
+    if (seeds.every((x) => hexDistance(cols, x, c) >= minD)) seeds.push(c);
+  }
+  const zone = new Int32Array(N).fill(-1);
+  const heap = new Heap();
+  seeds.forEach((c, k) => heap.push([0, c, k]));
+  while (heap.size) {
+    const [cost, c, k] = heap.pop();
+    if (zone[c] !== -1) continue;
+    zone[c] = k;
+    for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, c, d);
+      if (nb < 0 || dist[nb] === -1 || zone[nb] !== -1) continue;
+      heap.push([cost + 1 + rng() * 0.8, nb, k]);
+    }
+  }
+  // 씨앗 없는 바다 조각
+  let next = seeds.length;
+  for (const c of cells) {
+    if (zone[c] !== -1) continue;
+    const comp = [c];
+    zone[c] = next;
+    for (let i = 0; i < comp.length; i++) {
       for (let d = 0; d < 6; d++) {
-        const nb = neighborIndex(cols, rows, c, d);
-        if (nb >= 0 && terrain[nb] === T.SEA && !dist.has(nb)) {
-          dist.set(nb, 1);
-          queue.push(nb);
+        const nb = neighborIndex(cols, rows, comp[i], d);
+        if (nb >= 0 && dist[nb] !== -1 && zone[nb] === -1) {
+          zone[nb] = next;
+          comp.push(nb);
         }
       }
     }
-    const found = new Set();
-    for (let q = 0; q < queue.length; q++) {
-      const s = queue[q];
-      const ds = dist.get(s);
+    next++;
+  }
+  const lists = Array.from({ length: next }, () => []);
+  for (const c of cells) lists[zone[c]].push(c);
+  const minSize = Math.max(3, Math.round(S * 0.25));
+  for (let z = 0; z < next; z++) {
+    if (!lists[z].length || lists[z].length >= minSize) continue;
+    const adj = new Map();
+    for (const c of lists[z]) for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, c, d);
+      if (nb >= 0 && zone[nb] >= 0 && zone[nb] !== z) adj.set(zone[nb], lists[zone[nb]].length);
+    }
+    if (!adj.size) continue;
+    const t = [...adj.entries()].sort((a, b) => a[1] - b[1])[0][0];
+    for (const c of lists[z]) zone[c] = t;
+    lists[t].push(...lists[z]);
+    lists[z] = [];
+  }
+  const L = g.regions.length;
+  const remap = new Int32Array(next).fill(-1);
+  let id = 0;
+  for (let z = 0; z < next; z++) if (lists[z].length) remap[z] = id++;
+  const seas = [];
+  for (let z = 0; z < next; z++) {
+    if (remap[z] < 0) continue;
+    const zc = lists[z];
+    let sx = 0, sy = 0;
+    for (const c of zc) {
+      const [x, y] = center(c);
+      sx += x;
+      sy += y;
+    }
+    const mx = sx / zc.length, my = sy / zc.length;
+    let best = zc[0], bd = Infinity;
+    for (const c of zc) {
+      const [x, y] = center(c);
+      let inner = 0;
       for (let d = 0; d < 6; d++) {
-        const nb = neighborIndex(cols, rows, s, d);
-        if (nb < 0) continue;
-        if (terrain[nb] === T.SEA) {
-          if (!dist.has(nb) && ds < reach) {
-            dist.set(nb, ds + 1);
-            queue.push(nb);
-          }
-        } else if (region[nb] >= 0 && region[nb] !== r.id) found.add(region[nb]);
+        const nb = neighborIndex(cols, rows, c, d);
+        if (nb >= 0 && zone[nb] === z) inner++;
+      }
+      const dd = Math.hypot(x - mx, y - my) - inner * size * 0.35;
+      if (dd < bd) { bd = dd; best = c; }
+    }
+    const [cx, cy] = center(best);
+    seas.push({ id: L + remap[z], cells: zc, cx, cy, terrain: T.SEA, coastal: true, sea: true, pop: 0, neighbors: [] });
+  }
+  const seaOf = new Int32Array(N).fill(-1);
+  for (let i = 0; i < N; i++) if (zone[i] >= 0 && remap[zone[i]] >= 0) seaOf[i] = L + remap[zone[i]];
+  const all = [...g.regions, ...seas];
+  const link = (a, b, type) => {
+    if (!all[a].neighbors.some((x) => x.id === b)) all[a].neighbors.push({ id: b, type });
+  };
+  for (const zr of seas) {
+    for (const c of zr.cells) for (let d = 0; d < 6; d++) {
+      const nb = neighborIndex(cols, rows, c, d);
+      if (nb < 0) continue;
+      if (seaOf[nb] >= 0 && seaOf[nb] !== zr.id) link(zr.id, seaOf[nb], 'sea');
+      else if (region[nb] >= 0) {
+        link(zr.id, region[nb], 'landing');
+        link(region[nb], zr.id, 'coast');
       }
     }
-    for (const o of found) {
-      if (r.neighbors.some((x) => x.id === o)) continue;
-      r.neighbors.push({ id: o, type: 'sea' });
-      if (!regs[o].neighbors.some((x) => x.id === r.id)) regs[o].neighbors.push({ id: r.id, type: 'sea' });
-    }
   }
-  g.regions = regs;
+  g.landCount = L;
+  g.regions = all;
+  g.seaOf = seaOf;
 }
 
 const f1 = (v) => Math.round(v * 10) / 10;
@@ -465,7 +564,7 @@ function buildGeometry(g) {
     }
   }
   const chains = traceChains(g, ext);
-  const regionPath = regions.map((r) => areaPath(chains, r.id));
+  const regionPath = regions.filter((r) => !r.sea).map((r) => areaPath(chains, r.id));
   const peaks = areaPath(chains, -2);
   const pairSegs = new Map();
   let borders = '';
@@ -501,7 +600,15 @@ function buildGeometry(g) {
     else if (t === T.DESERT) glyph.desert += `M${f1(x - 0.3 * s)} ${f1(y)}h0.1M${f1(x + 0.25 * s)} ${f1(y + 0.25 * s)}h0.1M${f1(x + 0.05 * s)} ${f1(y - 0.3 * s)}h0.1`;
     else if (t === T.TUNDRA) glyph.tundra += `M${f1(x - 0.4 * s)} ${f1(y)}h${f1(0.8 * s)}M${f1(x - 0.2 * s)} ${f1(y + 0.25 * s)}h${f1(0.4 * s)}`;
   }
-  g.paths = { regionPath, outline: regionPath, pairSegs, borders, peaks, land, glyph };
+  // 바다 구역 경계
+  const seaLab = new Int32Array(N).fill(-1);
+  for (let i = 0; i < N; i++) if (g.seaOf[i] >= 0) seaLab[i] = g.seaOf[i];
+  const seaChains = traceChains(g, seaLab, 0.3);
+  const seaPath = regions.filter((r) => r.sea).map((r) => areaPath(seaChains, r.id));
+  let seaBorders = '';
+  for (const c of seaChains) if (c.a >= 0 && c.b >= 0) seaBorders += chainStroke(c);
+  const outline = [...regionPath, ...seaPath];
+  g.paths = { regionPath: outline, outline, pairSegs, borders, peaks, land, glyph, seaBorders };
 }
 
 export function generateWorld(scn0, seed) {
@@ -526,6 +633,7 @@ export function generateWorld(scn0, seed) {
   else buildHistorical(scn, g);
   buildRegions(scn, g);
   finalizeRegions(scn, g);
+  buildSeaZones(scn, g);
   buildGeometry(g);
   g.toPx = g.geo ? g.geo.toPx : null;
   // 기후 판정용 위도
@@ -535,7 +643,7 @@ export function generateWorld(scn0, seed) {
     const c = pixelToCell(size, cols, rows, x, y);
     if (c >= 0 && g.region[c] >= 0 && (!filter || filter(g.region[c]))) return g.region[c];
     for (const r of g.regions) {
-      if (filter && !filter(r.id)) continue;
+      if (r.sea || (filter && !filter(r.id))) continue;
       const d = Math.hypot(r.cx - x, r.cy - y);
       if (d < bd) { bd = d; best = r.id; }
     }

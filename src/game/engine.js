@@ -5,6 +5,7 @@ import { POOLS, rating } from './generals.js';
 import { fixJosa } from './josa.js';
 import { weatherOf } from './weather.js';
 import { simulateDuel, duelist } from './duel.js';
+import { tv, initTraits, growTrait, TITLES, traitLabel } from './traits.js';
 
 // ───────── 조회 헬퍼 ─────────
 export const relKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
@@ -13,11 +14,14 @@ export const setRel = (s, a, b, rel) => {
   if (!rel || rel.type === 'none') delete s.relations[relKey(a, b)];
   else s.relations[relKey(a, b)] = rel;
 };
-export const nationRegions = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid ? (acc.push(i), acc) : acc), []);
+// 육지 영토만 (바다 구역의 함대는 제외)
+export const nationRegions = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && !r.sea ? (acc.push(i), acc) : acc), []);
+export const nationFleets = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && r.sea ? (acc.push(i), acc) : acc), []);
 export const gensIn = (s, rid, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.region === rid && (nid === undefined || g.nation === nid));
 export const nationGenerals = (s, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid);
 export const edgeBetween = (world, a, b) => world.regions[a].neighbors.find((n) => n.id === b) || null;
-export const hasTrait = (gens, t) => gens.some((g) => g.trait === t);
+export const nationTrait = (s, nid, id) => tv(nationGenerals(s, nid), id);
+export const landCount = (s) => s.regions.filter((r) => !r.sea).length;
 
 export function log(s, text, nations = [], kind = 'info') {
   text = fixJosa(text);
@@ -28,7 +32,7 @@ export function log(s, text, nations = [], kind = 'info') {
 
 export function nationPower(s, nid) {
   let p = 0;
-  for (const r of s.regions) if (r.owner === nid) p += r.troops / 1000 + 6 + r.pop * 0.2;
+  for (const r of s.regions) if (r.owner === nid) p += r.troops / 1000 + (r.sea ? 0 : 6 + r.pop * 0.2);
   return p + s.nations[nid].gold / 10 + nationGenerals(s, nid).length * 8;
 }
 
@@ -38,25 +42,30 @@ export function isVassalOf(s, a, b) {
 }
 
 export function computeMaxAp(s, nid) {
-  const n = s.nations[nid];
   const regions = nationRegions(s, nid).length;
-  const fast = Math.min(2, nationGenerals(s, nid).filter((g) => g.trait === '신속').length);
+  const fast = Math.min(2, nationTrait(s, nid, '신속'));
   let ap = 3 + Math.min(5, Math.floor(regions / 6)) + fast;
   if (s.nations.some((o) => o.alive && o.id !== nid && isVassalOf(s, nid, o.id))) ap -= 1;
   return Math.max(2, ap);
 }
 
-// 지역별 세수: 매 턴 자동 징수 (세율·민심·시장·정치 장수 반영)
+// ───────── 경제 ─────────
 export const effTax = (s, rid) => s.regions[rid].tax || s.nations[s.regions[rid].owner]?.taxRate || 'normal';
 
 export function regionTax(s, rid) {
   const r = s.regions[rid];
-  let g = (1 + r.pop * 0.4) * TAX[effTax(s, rid)].mult * (0.4 + 0.6 * (r.loyalty ?? 100) / 100) * weatherOf(s, rid).tax;
+  if (r.sea || r.owner === null) return 0;
+  let g = (1 + r.pop * 0.4) * TAX[effTax(s, rid)].mult * (0.4 + (0.6 * (r.loyalty ?? 100)) / 100);
+  const w = weatherOf(s, rid);
+  let wt = w.tax;
+  if (wt < 1) wt = 1 - (1 - wt) * (1 - tv(gensIn(s, rid, r.owner), '농정') / 2);
+  g *= wt;
   if (r.buildings.market) g *= 1.5;
-  if (hasTrait(gensIn(s, rid, r.owner), '정치')) g *= 1.3;
+  g *= 1 + tv(gensIn(s, rid, r.owner), '정치');
   return g + (r.buildings.port ? 3 : 0);
 }
 
+// 병력 유지비는 1명 단위로 계산(2,500명당 1금), 장수 녹봉 1금
 export function income(s, nid) {
   let inc = 0, troops = 0;
   s.regions.forEach((r, i) => {
@@ -64,24 +73,25 @@ export function income(s, nid) {
     inc += regionTax(s, i);
     troops += r.troops;
   });
-  inc = Math.round(inc);
-  const army = Math.round(troops / 2500);
+  inc *= 1 + nationTrait(s, nid, '상업');
+  const army = (troops / 2500) * (1 - nationTrait(s, nid, '병참'));
   const salary = nationGenerals(s, nid).length;
-  const upkeep = army + salary;
-  return { gross: inc, upkeep, army, salary, net: inc - upkeep, troops };
+  // 통치비: 영토 15곳을 넘으면 1곳당 0.5금
+  const admin = Math.max(0, nationRegions(s, nid).length - 15) * 0.5;
+  const r1 = (v) => Math.round(v * 10) / 10;
+  return { gross: r1(inc), upkeep: r1(army + salary + admin), army: r1(army), salary, admin: r1(admin), net: r1(inc - army - salary - admin), troops };
 }
 
 export function moveCost(world, from, to, s) {
   const e = edgeBetween(world, from, to);
   if (!e) return Infinity;
   let c = COST.move;
-  if (e.type === 'sea') c += 1;
   if (world.regions[to].terrain === T.MOUNTAIN) c += 1;
   if (s) c += weatherOf(s, to).ap;
   return c;
 }
 
-// 보급: 수도에서 내 땅(육로·강, 양쪽 항구가 있는 바닷길)으로 이어진 지역
+// 보급: 수도에서 내 땅과 내 함대가 있는 바다로 이어진 지역
 export function supplied(s, world, nid) {
   const set = new Set();
   const cap = s.nations[nid]?.capital;
@@ -89,10 +99,8 @@ export function supplied(s, world, nid) {
   const q = [cap];
   set.add(cap);
   for (let i = 0; i < q.length; i++) {
-    const r = q[i];
-    for (const nb of world.regions[r].neighbors) {
+    for (const nb of world.regions[q[i]].neighbors) {
       if (set.has(nb.id) || s.regions[nb.id].owner !== nid) continue;
-      if (nb.type === 'sea' && !(s.regions[r].buildings.port && s.regions[nb.id].buildings.port)) continue;
       set.add(nb.id);
       q.push(nb.id);
     }
@@ -103,28 +111,39 @@ export function supplied(s, world, nid) {
 export const nationBuff = (s, nid, key) => (s.buffs || []).filter((b) => b.nid === nid && b.until >= s.turn).reduce((m, b) => m * (b[key] || 1), 1);
 
 export const WALL_MAX = 3;
+export const ENGINE_MAX = 3;
 
 // ───────── 전투 계산 ─────────
-export function battleFactors(s, world, nid, from, to, genIds) {
+// opts.mode: 'siege'(포위: 성벽을 깎음) | 'assault'(강습: 이기면 즉시 함락, 성벽 효과·손실 증가)
+// opts.engines: 동행 공성병기 수
+export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   const e = edgeBetween(world, from, to);
   const tr = s.regions[to];
-  const terr = world.regions[to].terrain;
+  const wr = world.regions[to];
+  const terr = wr.terrain;
   const att = genIds.map((id) => s.generals[id]).filter(Boolean);
   const def = tr.owner === null ? [] : gensIn(s, to, tr.owner);
   const mods = [];
+  const add = (label, v) => {
+    if (v) mods.push(`${label} ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`);
+    return v;
+  };
   let a = 1;
   if (att.length) {
     const best = Math.max(...att.map((g) => g.lead * 0.5 + g.war * 0.5));
-    a += best / 250;
-    mods.push(`장수 지휘 +${Math.round((best / 250) * 100)}%`);
-    if (hasTrait(att, '명장')) { a += 0.15; mods.push('명장 +15%'); }
-    if (hasTrait(att, '맹장')) { a += 0.1; mods.push('맹장 +10%'); }
-    if (hasTrait(att, '책략')) { a += 0.1; mods.push('책략 +10%'); }
-    if (hasTrait(att, '기마') && e.type !== 'sea' && [T.PLAINS, T.DESERT, T.TUNDRA].includes(terr)) { a += 0.15; mods.push('기마 +15%'); }
+    a += add('장수 지휘', best / 250);
+    a += add('명장', tv(att, '명장'));
+    a += add('맹장', tv(att, '맹장'));
+    a += add('책략', tv(att, '책략'));
+    if (e.type !== 'sea' && e.type !== 'landing' && [T.PLAINS, T.DESERT, T.TUNDRA].includes(terr)) a += add('기마', tv(att, '기마'));
+    if ([T.MOUNTAIN, T.HILLS].includes(terr)) a += add('산악', tv(att, '산악'));
+    if (e.type === 'river') a += add('도하', tv(att, '도하'));
+    if (e.type === 'sea' || e.type === 'landing') a += add('수군', tv(att, '수군'));
+    if (opts.count && opts.count < tr.troops) a += add('돌격', tv(att, '돌격'));
   }
   let edgeMult = EDGE[e.type].mult;
-  if (e.type === 'river' && hasTrait(att, '도하')) edgeMult = 1;
-  if (e.type === 'sea' && hasTrait(att, '수군')) edgeMult = 1;
+  if (e.type === 'river' && tv(att, '도하')) edgeMult = 1;
+  if (e.type === 'landing' && tv(att, '수군')) edgeMult = 1;
   if (edgeMult < 1) mods.push(`${EDGE[e.type].name} ${Math.round((edgeMult - 1) * 100)}%`);
   if (terr === T.DESERT) { edgeMult *= 0.9; mods.push('사막 소모 -10%'); }
   const rel = tr.owner === null ? { type: 'none' } : getRel(s, nid, tr.owner);
@@ -133,24 +152,30 @@ export function battleFactors(s, world, nid, from, to, genIds) {
   let weather = w.att;
   if (e.type === 'river' && w.river) weather *= w.river;
   if (weather < 1) mods.push(`${w.icon}${w.name} ${Math.round((weather - 1) * 100)}%`);
-  const attSupply = supplied(s, world, nid).has(from) ? 1 : 0.8;
-  if (attSupply < 1) mods.push('보급 끊김 -20%');
+  let attSupply = supplied(s, world, nid).has(from) ? 1 : 0.8;
+  if (attSupply < 1) attSupply = 1 - 0.2 * (1 - tv(att, '보급'));
+  if (attSupply < 1) mods.push(`보급 끊김 -${Math.round((1 - attSupply) * 100)}%`);
   const buffA = nationBuff(s, nid, 'att');
   if (buffA !== 1) mods.push(`특수 효과 ${buffA > 1 ? '+' : ''}${Math.round((buffA - 1) * 100)}%`);
 
   let d = 1;
   if (def.length) {
     const best = Math.max(...def.map((g) => g.lead * 0.6 + g.intel * 0.4));
-    d += best / 250;
-    if (hasTrait(def, '수성')) d += 0.25;
-    if (hasTrait(def, '책략')) d += 0.1;
+    d += best / 250 + tv(def, '수성') + tv(def, '책략') + tv(def, '궁술');
+    if ([T.FOREST, T.HILLS, T.MOUNTAIN].includes(terr)) d += tv(def, '매복');
+    if (wr.sea) d += tv(def, '수군');
   }
-  let terrDef = TERRAIN[terr].def || 1;
-  if (terr === T.MOUNTAIN && hasTrait(att, '산악')) terrDef = 1.1;
-  const walls = 1 + 0.5 * Math.min(WALL_MAX, tr.buildings.walls || 0) / WALL_MAX;
-  const capital = tr.owner !== null && s.nations[tr.owner].capital === to ? 1.1 : 1;
+  let terrDef = wr.sea ? 1 : TERRAIN[terr].def || 1;
+  if (terr === T.MOUNTAIN && tv(att, '산악')) terrDef = 1.1;
+  const hp = Math.min(WALL_MAX, tr.buildings?.walls || 0);
+  const engines = opts.engines || 0;
+  const wallPower = hp ? Math.max(0.1, (opts.mode === 'assault' ? 1 : 0.5) + tv(def, '축성') - 0.15 * engines) : 0;
+  const walls = 1 + (wallPower * hp) / WALL_MAX;
+  const capital = tr.owner !== null && !wr.sea && s.nations[tr.owner].capital === to ? 1.1 : 1;
   const defSupply = tr.owner === null || supplied(s, world, tr.owner).has(to) ? 1 : 0.8;
-  const buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
+  let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
+  // 대동맹 회원국은 패권국의 침공에 결사항전
+  if (s.coalition && s.coalition.target === nid && s.coalition.members?.includes(tr.owner)) buffD *= 1.15;
   return {
     attMult: a * edgeMult * weather * attSupply * buffA,
     defMult: d * terrDef * walls * capital * defSupply * buffD,
@@ -158,8 +183,8 @@ export function battleFactors(s, world, nid, from, to, genIds) {
   };
 }
 
-export function estimateBattle(s, world, nid, from, to, count, genIds) {
-  const f = battleFactors(s, world, nid, from, to, genIds);
+export function estimateBattle(s, world, nid, from, to, count, genIds, opts = {}) {
+  const f = battleFactors(s, world, nid, from, to, genIds, { ...opts, count });
   const A = count * f.attMult;
   const D = s.regions[to].troops * f.defMult;
   let wins = 0;
@@ -181,44 +206,76 @@ export function canAct(s, nid, ap) {
   return null;
 }
 
-export function conscriptAmount(s, rid, nid) {
+// 징병: 최대치 안에서 원하는 만큼. 금·민심·인구 소모는 인원에 비례
+export function conscriptMax(s, rid, nid) {
   const r = s.regions[rid];
-  let add = r.pop * 220 * (r.buildings.barracks ? 1.5 : 1);
-  if (hasTrait(gensIn(s, rid, nid), '징병')) add *= 1.3;
+  let add = r.pop * 300 * (r.buildings.barracks ? 1.5 : 1) * (1 + tv(gensIn(s, rid, nid), '징병'));
   if ((r.loyalty ?? 100) < 40) add *= 0.5;
   return Math.max(1000, Math.round(add / 100) * 100);
 }
 
-export function doConscript(s, world, nid, rid) {
+export function conscriptCost(s, rid, amount) {
+  const r = s.regions[rid];
+  return {
+    gold: Math.ceil((amount / 1000) * 3),
+    loyalty: Math.round((amount / Math.max(1000, r.pop * 1000)) * 40),
+    pop: (amount / 1000) * 0.5,
+  };
+}
+
+export function doConscript(s, world, nid, rid, amount) {
   const r = s.regions[rid];
   const n = s.nations[nid];
-  if (r.owner !== nid) return fail('내 지역이 아닙니다.');
+  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
   if (r.conscripted) return fail('이번 턴에 이미 징병했습니다.');
-  if (n.gold < COST.conscriptGold) return fail(`금이 부족합니다 (필요 ${COST.conscriptGold}).`);
+  const max = conscriptMax(s, rid, nid);
+  amount = Math.max(100, Math.min(max, Math.round((amount ?? max) / 100) * 100));
+  const c = conscriptCost(s, rid, amount);
+  if (n.gold < c.gold) return fail(`금이 부족합니다 (필요 ${c.gold}).`);
   const err = canAct(s, nid, COST.conscript);
   if (err) return fail(err);
-  const add = conscriptAmount(s, rid, nid);
-  r.troops += add;
-  r.pop = Math.max(3, r.pop - add * 0.0003);
-  r.loyalty = Math.max(0, (r.loyalty ?? 100) - 6);
+  r.troops += amount;
+  r.pop = Math.max(3, r.pop - c.pop);
+  r.loyalty = Math.max(0, (r.loyalty ?? 100) - c.loyalty);
   r.conscripted = true;
-  n.gold -= COST.conscriptGold;
+  n.gold -= c.gold;
   n.ap -= COST.conscript;
-  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(add)}을 징병했습니다. (민심 -6)` };
+  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 징병했습니다. (금 -${c.gold}, 민심 -${c.loyalty})` };
+}
+
+// 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
+export const reliefCost = (s, rid) => Math.round(8 + s.regions[rid].pop * 1.5);
+export const RELIEF_COOLDOWN = 6;
+
+export function doRelief(s, nid, rid) {
+  const r = s.regions[rid];
+  const n = s.nations[nid];
+  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
+  if (r.reliefTurn !== undefined && s.turn - r.reliefTurn < RELIEF_COOLDOWN) return fail(`${RELIEF_COOLDOWN - (s.turn - r.reliefTurn)}턴 뒤에 다시 할 수 있습니다.`);
+  const cost = reliefCost(s, rid);
+  if (n.gold < cost) return fail(`금이 부족합니다 (필요 ${cost}).`);
+  const err = canAct(s, nid, 1);
+  if (err) return fail(err);
+  const gain = (r.loyalty ?? 100) < 40 ? 14 : 7;
+  n.gold -= cost;
+  n.ap -= 1;
+  r.reliefTurn = s.turn;
+  r.loyalty = Math.min(100, (r.loyalty ?? 100) + gain);
+  return { ok: true, msg: `${r.name}에 진휼을 베풀었습니다. (민심 +${gain})` };
 }
 
 export function buildCost(s, rid, nid, kind) {
   const b = BUILDINGS[kind];
   const w = s.regions[rid].buildings.walls;
   const repair = kind === 'walls' && w > 0 && w < WALL_MAX ? 0.5 : 1;
-  return Math.round(b.cost * repair * (hasTrait(gensIn(s, rid, nid), '건축') ? 0.7 : 1));
+  return Math.round(b.cost * repair * (1 - tv(gensIn(s, rid, nid), '건축')));
 }
 
 export function doBuild(s, world, nid, rid, kind) {
   const r = s.regions[rid];
   const n = s.nations[nid];
   const b = BUILDINGS[kind];
-  if (r.owner !== nid) return fail('내 지역이 아닙니다.');
+  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
   const repair = kind === 'walls' && r.buildings.walls > 0 && r.buildings.walls < WALL_MAX;
   if (r.buildings[kind] && !repair) return fail(`이미 ${b.name}이(가) 있습니다.`);
   if (b.coastal && !world.regions[rid].coastal) return fail('해안 지역에만 건설할 수 있습니다.');
@@ -232,8 +289,25 @@ export function doBuild(s, world, nid, rid, kind) {
   return { ok: true, msg: repair ? `${r.name}의 성벽을 보수했습니다.` : `${r.name}에 ${b.name}을(를) 건설했습니다.` };
 }
 
+export const engineCost = (s, rid) => (s.regions[rid].buildings.barracks ? 35 : 50);
+
+export function doBuildEngine(s, nid, rid) {
+  const r = s.regions[rid];
+  const n = s.nations[nid];
+  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
+  if ((r.engines || 0) >= ENGINE_MAX) return fail(`공성병기는 지역당 ${ENGINE_MAX}대까지입니다.`);
+  const cost = engineCost(s, rid);
+  if (n.gold < cost) return fail(`금이 부족합니다 (필요 ${cost}).`);
+  const err = canAct(s, nid, 1);
+  if (err) return fail(err);
+  n.gold -= cost;
+  n.ap -= 1;
+  r.engines = (r.engines || 0) + 1;
+  return { ok: true, msg: `${r.name}에서 공성병기를 제작했습니다. (${r.engines}대)` };
+}
+
 export function canSail(s, nid, from, genIds) {
-  return !!s.regions[from].buildings.port || genIds.some((id) => s.generals[id]?.trait === '수군');
+  return !!s.regions[from].buildings?.port || genIds.some((id) => tv([s.generals[id]].filter(Boolean), '수군'));
 }
 
 export function moveCheck(s, world, nid, from, to, count, genIds = []) {
@@ -241,9 +315,11 @@ export function moveCheck(s, world, nid, from, to, count, genIds = []) {
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
   const e = edgeBetween(world, from, to);
   if (!e) return '인접하지 않은 지역입니다.';
-  if (e.type === 'sea' && !canSail(s, nid, from, genIds)) return '항해하려면 출발지에 항구가 있거나 수군 장수가 필요합니다.';
-  if (e.type === 'sea' && (weatherOf(s, from).noSea || weatherOf(s, to).noSea)) return '폭풍으로 항해할 수 없습니다.';
-  if (count < 1 || count > fr.troops - 1) return '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
+  if (e.type === 'coast' && !canSail(s, nid, from, genIds)) return '배를 띄우려면 출발지에 항구가 있거나 수군 장수가 필요합니다.';
+  const seaMove = e.type === 'coast' || e.type === 'sea' || e.type === 'landing';
+  if (seaMove && (weatherOf(s, from).noSea || weatherOf(s, to).noSea)) return '폭풍으로 항해할 수 없습니다.';
+  const maxCount = fr.sea ? fr.troops : fr.troops - 1;
+  if (count < 1 || count > maxCount) return fr.sea ? '이동 병력이 올바르지 않습니다.' : '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
   if (tr.owner !== null && tr.owner !== nid) {
     const rel = getRel(s, nid, tr.owner);
     if (rel.type === 'alliance') return '동맹국은 공격할 수 없습니다. 먼저 동맹을 파기해야 합니다.';
@@ -264,7 +340,7 @@ function betray(s, nid, victim) {
 }
 
 function relocateRefugees(s, world, gens, nation, around) {
-  const own = world.regions[around].neighbors.map((n) => n.id).filter((id) => s.regions[id].owner === nation);
+  const own = world.regions[around].neighbors.map((n) => n.id).filter((id) => s.regions[id].owner === nation && !s.regions[id].sea);
   for (const g of gens) {
     if (own.length) g.region = own[0];
     else {
@@ -296,6 +372,12 @@ export function checkElimination(s, world, nid) {
   if (nationRegions(s, nid).length > 0) return;
   n.alive = false;
   n.capital = null;
+  for (const r of s.regions) {
+    if (r.owner === nid && r.sea) {
+      r.owner = null;
+      r.troops = 0;
+    }
+  }
   for (const g of Object.values(s.generals)) {
     if (g.nation === nid && g.status === 'active') g.status = 'gone';
     if (g.status === 'prisoner' && g.captor === nid) {
@@ -311,28 +393,35 @@ export function checkElimination(s, world, nid) {
   log(s, `☠️ ${n.name}이(가) 멸망했습니다.`, [nid], 'dead');
 }
 
-const TITLES = [[3, '역전의 장수'], [5, '백전노장'], [7, '만인적'], [9, '군신']];
 const STAT_NAME = { war: '무력', lead: '통솔', intel: '지력', pol: '정치' };
 
-// 장수 성장: 레벨마다 100×레벨 경험치, 레벨업 시 능력치 2개 상승
+// 장수 성장: 레벨마다 100×레벨 경험치. 레벨업 시 역할에 맞는 능력치 상승, 3·5·7·9레벨에 특성 획득/승급과 칭호
 export function gainExp(s, g, amt) {
   if (!g || g.status === 'dead') return;
-  g.exp = (g.exp || 0) + amt;
+  g.exp = (g.exp || 0) + Math.round(amt * (1 + nationTrait(s, g.nation, '학문')));
   g.level = g.level || 1;
   const rng = stateRng(s);
   while (g.exp >= g.level * 100) {
     g.exp -= g.level * 100;
     g.level++;
-    const keys = rng.shuffle(['war', 'lead', 'intel', 'pol']).slice(0, 2);
+    const prefer = g.role === 'civ' ? ['pol', 'intel', 'pol', 'intel', 'lead', 'war'] : ['war', 'lead', 'war', 'lead', 'intel', 'pol'];
+    const keys = [...new Set([rng.pick(prefer), rng.pick(prefer), rng.pick(prefer)])].slice(0, 2);
     const ups = keys.map((k) => {
       const inc = rng.int(2, 4);
       g[k] = Math.min(100, g[k] + inc);
       return `${STAT_NAME[k]}+${inc}`;
     });
-    const t = TITLES.filter(([lv]) => g.level >= lv).pop();
-    const newTitle = t && t[1] !== g.title ? t[1] : null;
-    if (newTitle) g.title = newTitle;
-    log(s, `🎖️ ${g.name} Lv${g.level} 달성 (${ups.join(', ')})${newTitle ? ` — 칭호 「${newTitle}」` : ''}`, [g.nation], 'general');
+    let extra = '';
+    if ([3, 5, 7, 9].includes(g.level)) {
+      const grown = growTrait(g, rng);
+      if (grown) extra += ` · ${grown}`;
+      const t = TITLES[g.role || 'mil'].filter(([lv]) => g.level >= lv).pop();
+      if (t && t[1] !== g.title) {
+        g.title = t[1];
+        extra += ` · 칭호 「${t[1]}」`;
+      }
+    }
+    log(s, `🎖️ ${g.name} Lv${g.level} 달성 (${ups.join(', ')})${extra}`, [g.nation], 'general');
   }
 }
 
@@ -344,21 +433,38 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const fr = s.regions[from], tr = s.regions[to];
   const cost = moveCost(world, from, to, s);
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from);
+  const engines = Math.min(opts.engines || 0, fr.engines || 0);
+  const leaveSea = () => {
+    if (fr.sea && fr.troops <= 0) {
+      fr.troops = 0;
+      fr.owner = null;
+    }
+  };
   n.ap -= cost;
-  if (tr.owner === nid) {
+  // 아군 지역 또는 빈 바다로 이동
+  if (tr.owner === nid || (tr.sea && (tr.owner === null || tr.troops <= 0))) {
     fr.troops -= count;
+    tr.owner = nid;
     tr.troops += count;
     for (const g of gens) g.region = to;
-    return { ok: true, msg: `${fr.name} → ${tr.name}: 병사 ${fmtTroops(count)} 이동.` };
+    if (engines && !tr.sea && !fr.sea) {
+      fr.engines -= engines;
+      tr.engines = Math.min(ENGINE_MAX, (tr.engines || 0) + engines);
+    }
+    leaveSea();
+    const verb = tr.sea && !fr.sea ? '승선' : fr.sea && !tr.sea ? '상륙' : '이동';
+    return { ok: true, msg: `${fr.name} → ${tr.name}: 병사 ${fmtTroops(count)} ${verb}.` };
   }
   const defender = tr.owner;
   if (defender !== null) {
     const rel = getRel(s, nid, defender);
     if (rel.type === 'nap' || rel.type === 'vassal') betray(s, nid, defender);
   }
-  const f = battleFactors(s, world, nid, from, to, gens.map((g) => g.id));
+  const hasWalls = !tr.sea && (tr.buildings.walls || 0) > 0;
+  const mode = hasWalls ? opts.mode || 'siege' : 'field';
+  const f = battleFactors(s, world, nid, from, to, gens.map((g) => g.id), { mode, engines, count });
   const defName = defender === null ? '중립 세력' : s.nations[defender].name;
-  const battle = { from, to, attacker: nid, defender, count, defTroops: tr.troops, turn: s.turn };
+  const battle = { from, to, attacker: nid, defender, count, defTroops: tr.troops, turn: s.turn, naval: !!tr.sea, mode };
   const lines = [];
 
   // 일기토: 플레이어가 직접 치른 결과(opts.duel) 또는 자동 진행
@@ -370,7 +476,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   let duelMult = 1;
   if (duel) {
     const ag = s.generals[duel.a], dg = s.generals[duel.b];
-    battle.duel = { a: ag.name, b: dg.name, winner: duel.winner, ko: duel.ko, rounds: duel.rounds.length };
+    battle.duel = { a: ag.name, b: dg.name, winner: duel.winner, ko: duel.ko, rounds: duel.rounds };
     if (duel.winner === 1) { duelMult = 1.15; gainExp(s, ag, 40); }
     else if (duel.winner === 2) { duelMult = 1 / 1.15; gainExp(s, dg, 40); }
     const loser = duel.winner === 1 ? dg : duel.winner === 2 ? ag : null;
@@ -386,10 +492,12 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const A = count * f.attMult * duelMult * rng.range(0.85, 1.15);
   const D = tr.troops * f.defMult * rng.range(0.85, 1.15);
   fr.troops -= count;
+  if (engines) fr.engines -= engines;
   (s.battles = s.battles || []).push(battle);
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
   if (battle.duel?.killed) report.killed.push(battle.duel.killed);
   const finish = (kind, msg) => {
+    leaveSea();
     if (lines.length) msg += ` [${lines.join(' / ')}]`;
     report.msg = msg;
     battle.result = kind;
@@ -404,11 +512,13 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     }
     return { ok: true, msg, report };
   };
+  const assaultLoss = mode === 'assault' ? (tv(atkGens, '공성') && atkGens.some((g) => g.traits.some(([t, l]) => t === '공성' && l >= 2)) ? 1.05 : 1.5) : 1;
 
-  // 공성: 성벽이 남아 있으면 이겨도 성벽만 깎이고 함락되지 않음
-  if (A > D && (tr.buildings.walls || 0) > 0) {
+  // 포위: 성벽이 남아 있으면 이겨도 성벽만 깎이고 함락되지 않음
+  if (mode === 'siege' && A > D) {
     const before = tr.buildings.walls;
-    tr.buildings.walls = Math.max(0, before - (A > D * 2 ? 2 : 1));
+    const dmg = 1 + (A > D * 2 ? 1 : 0) + Math.min(2, engines) + tv(atkGens, '공성');
+    tr.buildings.walls = Math.max(0, before - dmg);
     tr.siegedTurn = s.turn;
     battle.siege = { before, after: tr.buildings.walls };
     if (tr.buildings.walls > 0) {
@@ -416,22 +526,23 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       report.attLoss = Math.round(count * Math.min(0.6, (0.45 * D) / A + 0.1));
       tr.troops -= report.defLoss;
       fr.troops += count - report.attLoss;
+      fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + engines);
       for (const g of atkGens) gainExp(s, g, 10);
-      return finish('siege', `🏰 ${n.name}이(가) ${tr.name}(${defName})을(를) 포위 공격! 성벽 ${before}→${tr.buildings.walls}. 아군 손실 ${fmtTroops(report.attLoss)}, 적 손실 ${fmtTroops(report.defLoss)}.`);
+      return finish('siege', `🏰 ${n.name}이(가) ${tr.name}(${defName})을(를) 포위 공격! 성벽 ${before}→${tr.buildings.walls}${engines ? ` (공성병기 ${engines}대)` : ''}. 아군 손실 ${fmtTroops(report.attLoss)}, 적 손실 ${fmtTroops(report.defLoss)}.`);
     }
     lines.push('성벽 붕괴');
   }
 
   if (A > D) {
     const ratio = D / A;
-    const loss = Math.min(count - 1, Math.round(count * ratio * 0.7));
+    const loss = Math.min(count - 1, Math.round(count * ratio * 0.7 * assaultLoss));
     const survivors = Math.max(1, count - loss);
     report.win = true;
     report.attLoss = count - survivors;
     report.defLoss = tr.troops;
-    const wasCapital = defender !== null && s.nations[defender].capital === to;
+    const wasCapital = defender !== null && !tr.sea && s.nations[defender].capital === to;
     const plunder = wasCapital ? Math.floor(s.nations[defender].gold * 0.2) : 0;
-    const fierce = hasTrait(atkGens, '맹장') ? 0.12 : 0;
+    const fierce = tv(atkGens, '맹장') ? 0.12 : 0;
     for (const g of defGens) {
       if (rng() < 0.45) {
         if (rng() < 0.1 + fierce) {
@@ -450,27 +561,34 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       n.gold += plunder;
       report.plunder = plunder;
     }
+    if (mode === 'assault') tr.buildings.walls = Math.max(0, tr.buildings.walls - 1);
     transferRegion(s, world, to, nid);
     tr.troops = survivors;
-    tr.loyalty = defender === null ? 35 : 15;
-    tr.conscripted = true;
+    if (!tr.sea) {
+      tr.loyalty = defender === null ? 35 : 15;
+      tr.conscripted = true;
+      tr.engines = Math.min(ENGINE_MAX, (tr.engines || 0) + engines);
+    }
     for (const g of atkGens) {
       g.region = to;
       gainExp(s, g, 25);
     }
-    let msg = `⚔️ ${n.name}이(가) ${tr.name}(${defName})을(를) 점령! 아군 손실 ${fmtTroops(report.attLoss)}, 적 ${fmtTroops(report.defLoss)} 격파.`;
+    const what = tr.sea ? '해전에서 승리하고 제해권을 장악' : mode === 'assault' ? '강습으로 함락' : '점령';
+    let msg = `${tr.sea ? '⚓' : '⚔️'} ${n.name}이(가) ${tr.name}(${defName})을(를) ${what}! 아군 손실 ${fmtTroops(report.attLoss)}, 적 ${fmtTroops(report.defLoss)} 격파.`;
     if (wasCapital) msg += ` 수도 함락, ${plunder}금 약탈.`;
     if (report.captured.length) msg += ` 포로: ${report.captured.join(', ')}.`;
     if (report.killed.length) msg += ` 전사: ${report.killed.join(', ')}.`;
     return finish('win', msg);
   }
   const ratio = D > 0 ? A / D : 1;
-  const back = Math.round(count * 0.25 * rng());
+  const back = fr.sea || tr.sea ? 0 : Math.round(count * 0.25 * rng());
   report.win = false;
   report.attLoss = count - back;
-  report.defLoss = Math.max(0, Math.min(tr.troops - 1, Math.round(tr.troops * ratio * 0.6)));
+  const archery = 1 + 2 * tv(defGens, '궁술');
+  report.defLoss = Math.max(0, Math.min(tr.troops - 1, Math.round((tr.troops * ratio * 0.6) / archery)));
   tr.troops -= report.defLoss;
   fr.troops += back;
+  if (engines) fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + Math.floor(engines / 2));
   for (const g of atkGens) {
     const r = rng();
     if (r < 0.05) {
@@ -480,10 +598,14 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       g.status = 'prisoner';
       g.captor = defender;
       report.captured.push(g.name);
+    } else if (fr.sea && fr.troops <= 0) {
+      // 바다에서 패한 장수는 가까운 아군 땅으로 귀환
+      const home = nationRegions(s, nid);
+      g.region = s.nations[nid].capital ?? home[0];
     }
   }
   for (const g of defGens) gainExp(s, g, 25);
-  let msg = `🛡️ ${n.name}의 ${tr.name}(${defName}) 공격 실패. 아군 손실 ${fmtTroops(report.attLoss)}, 적 손실 ${fmtTroops(report.defLoss)}.`;
+  let msg = `🛡️ ${n.name}의 ${tr.name}(${defName}) ${tr.sea ? '해전' : mode === 'assault' ? '강습' : '공격'} 실패. 아군 손실 ${fmtTroops(report.attLoss)}, 적 손실 ${fmtTroops(report.defLoss)}.`;
   if (report.captured.length) msg += ` 포로로 잡힘: ${report.captured.join(', ')}.`;
   if (report.killed.length) msg += ` 전사: ${report.killed.join(', ')}.`;
   return finish('lose', msg);
@@ -492,7 +614,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
 export function doRelocate(s, nid, gid, to) {
   const g = s.generals[gid];
   if (!g || g.nation !== nid || g.status !== 'active') return fail('이동할 수 없는 장수입니다.');
-  if (s.regions[to].owner !== nid) return fail('내 지역으로만 배치할 수 있습니다.');
+  if (s.regions[to].owner !== nid || s.regions[to].sea) return fail('내 땅으로만 배치할 수 있습니다.');
   const err = canAct(s, nid, COST.relocate);
   if (err) return fail(err);
   s.nations[nid].ap -= COST.relocate;
@@ -507,8 +629,7 @@ export function isRuler(s, g) {
 
 export function recruitChance(s, nid, g) {
   const n = s.nations[nid];
-  let c = 30 + (n.reputation - 50) * 0.5 + (100 - g.loyalty) * 0.3;
-  if (hasTrait(nationGenerals(s, nid), '인덕')) c += 15;
+  let c = 30 + (n.reputation - 50) * 0.5 + (100 - g.loyalty) * 0.3 + nationTrait(s, nid, '인덕') * 5;
   if (isRuler(s, g)) c = 0;
   return Math.max(0, Math.min(90, Math.round(c)));
 }
@@ -585,8 +706,8 @@ export function poachChance(s, nid, g) {
   if (isRuler(s, g)) return 0;
   const mine = nationGenerals(s, nid);
   const intel = mine.length ? Math.max(...mine.map((x) => x.intel)) : 40;
-  const c = 12 + (intel - g.intel) / 2 + (s.nations[nid].reputation - 50) / 4 + (70 - g.loyalty) / 3;
-  return Math.max(0, Math.min(60, Math.round(c)));
+  const c = 12 + (intel - g.intel) / 2 + (s.nations[nid].reputation - 50) / 4 + (70 - g.loyalty) / 3 + nationTrait(s, nid, '첩보');
+  return Math.max(0, Math.min(65, Math.round(c)));
 }
 
 export function doPoach(s, nid, gid) {
@@ -608,7 +729,7 @@ export function doPoach(s, nid, gid) {
     g.region = n.capital;
     g.loyalty = 50;
     s.opinion[old][nid] -= 20;
-    const msg = `💰 ${g.name}이(가) 회유되어 ${n.name}로 넘어왔습니다!`;
+    const msg = `💰 ${g.name}이(가) 회유되어 ${n.name}(으)로 넘어왔습니다!`;
     log(s, msg, [nid, old], 'general');
     return { ok: true, msg };
   }
@@ -617,7 +738,7 @@ export function doPoach(s, nid, gid) {
 }
 
 // ───────── 장수 출현 (공평 규칙) ─────────
-// 장수 출현 확률: 낮은 기본값에 공평 보정 × 민심 × 국고 × 평판
+// 낮은 기본값 × 공평 보정 × 민심 × 국고 × 평판 × 인사 특성
 export function appearChance(s, nid) {
   const n = s.nations[nid];
   const alive = s.nations.filter((x) => x.alive);
@@ -630,6 +751,7 @@ export function appearChance(s, nid) {
   p *= Math.max(0.5, Math.min(1.3, loy / 75));
   p *= n.gold >= 200 ? 1.2 : n.gold < 30 ? 0.7 : 1;
   p *= Math.max(0.5, Math.min(1.4, n.reputation / 60));
+  p *= 1 + nationTrait(s, nid, '인사');
   if (regs.length <= 3) p += 0.02;
   return Math.min(0.3, p);
 }
@@ -665,12 +787,14 @@ export function spawnGeneral(s, nid, rng, forced = false) {
   if (!pick) return null;
   const own = nationRegions(s, nid);
   const gen = addGeneral(s, pick.g, nid, rng.chance(0.6) ? n.capital : rng.pick(own), rng);
-  log(s, `⭐ ${n.name}에 ${gen.name}(무${gen.war}/통${gen.lead}/지${gen.intel}/정${gen.pol}, ${gen.trait})이(가) 출현했습니다.`, [nid], 'general');
+  const kind = gen.role === 'civ' ? '문관' : '무관';
+  log(s, `⭐ ${n.name}에 ${kind} ${gen.name}(무${gen.war}/통${gen.lead}/지${gen.intel}/정${gen.pol}, ${gen.traits.map(traitLabel).join('·')})이(가) 출현했습니다.`, [nid], 'general');
   return gen;
 }
 
 export function addGeneral(s, data, nid, region, rng) {
-  const gen = { ...data, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90) };
+  const { role, traits } = initTraits(data, rng);
+  const gen = { ...data, role, traits, level: 1, exp: 0, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90) };
   s.generals[gen.id] = gen;
   s.usedGen[gen.id] = 1;
   s.appearHistory[gen.id] = (s.appearHistory[gen.id] || 0) + 1;

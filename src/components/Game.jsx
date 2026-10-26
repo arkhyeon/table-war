@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
-import { edgeBetween, getRel, canSail, income, doMove, gensIn, supplied, nationRegions } from '../game/engine.js';
+import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
-import { SEASONS, seasonOf } from '../game/weather.js';
+import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
 import { fixJosa } from '../game/josa.js';
 import { clearSave } from '../storage.js';
 import { fmtTroops } from '../game/format.js';
@@ -56,7 +56,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     const after = visibleSet(s, world, pid);
     const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid || before.has(b.to) || after.has(b.to) || before.has(b.from));
     if (s.opts?.showBattles !== false && seen.length && !s.gameOver) setReplay({ list: seen, i: 0 });
-    else if (s.turnNews?.length && !s.gameOver) setModal({ type: 'news' });
+    else if ((s.turnNews?.length || s.turnEvents?.length) && !s.gameOver) setModal({ type: 'news' });
     if (!s.nations[s.playerId].alive) setSelected(null);
   };
 
@@ -76,15 +76,18 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const targets = useMemo(() => {
     if (!moveMode || selected === null || game.regions[selected].owner !== game.playerId) return null;
     const m = new Map();
+    const fr = game.regions[selected];
+    const gens = gensIn(game, selected, pid).map((g) => g.id);
+    const probe = fr.sea ? fr.troops : fr.troops - 1;
     for (const nb of world.regions[selected].neighbors) {
       const t = game.regions[nb.id];
-      let kind = t.owner === game.playerId ? 'move' : 'attack';
-      if (t.owner !== null && t.owner !== game.playerId && getRel(game, game.playerId, t.owner).type === 'alliance') kind = 'blocked';
-      if (nb.type === 'sea' && !canSail(game, game.playerId, selected, Object.values(game.generals).filter((g) => g.status === 'active' && g.region === selected && g.nation === game.playerId).map((g) => g.id))) kind = 'blocked';
+      let kind = t.owner === pid || (t.sea && (t.owner === null || t.troops <= 0)) ? 'move' : 'attack';
+      const why = moveCheck(game, world, pid, selected, nb.id, Math.max(1, probe), gens);
+      if (why && !why.startsWith('행동력') && !why.startsWith('이동 병력')) kind = 'blocked';
       m.set(nb.id, kind);
     }
     return m;
-  }, [moveMode, selected, game, world]);
+  }, [moveMode, selected, game, world, pid]);
 
   const genCount = useMemo(() => {
     const c = {};
@@ -100,7 +103,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const onRegionClick = (rid) => {
     if (targets && targets.has(rid)) {
       if (targets.get(rid) === 'blocked') {
-        toast(getRel(game, game.playerId, game.regions[rid].owner ?? -1).type === 'alliance' ? '동맹국은 공격할 수 없습니다.' : '항구 또는 수군 장수가 있어야 항해할 수 있습니다.', true);
+        const fr = game.regions[selected];
+        toast(moveCheck(game, world, pid, selected, rid, Math.max(1, fr.sea ? fr.troops : fr.troops - 1), gensIn(game, selected, pid).map((g) => g.id)) || '이동할 수 없습니다.', true);
         return;
       }
       openMove(selected, rid);
@@ -117,8 +121,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const inc = income(game, game.playerId);
   const finishReplay = useCallback(() => {
     setReplay(null);
-    if (game.turnNews?.length) setModal({ type: 'news' });
-  }, [game.turnNews]);
+    if (game.turnNews?.length || game.turnEvents?.length) setModal({ type: 'news' });
+  }, [game.turnNews, game.turnEvents]);
   const nextReplay = useCallback(() => {
     if (!replay) return;
     if (replay.i + 1 < replay.list.length) setReplay({ ...replay, i: replay.i + 1 });
@@ -131,18 +135,19 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     return new Set(nationRegions(game, pid).filter((r) => !sup.has(r)));
   }, [game, world, pid]);
   const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
-  const year = (scn.startYear ?? 1) + Math.floor((game.turn - 1) / 4);
+  const year = yearOf(game.turn, scn.startYear ?? 1);
+  const myEvents = (game.turnEvents || []).filter((e) => e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
-  const startDuel = ({ from, to, count, sel }) => {
+  const startDuel = ({ from, to, count, sel, opts }) => {
     const ag = duelist(sel.map((id) => game.generals[id]));
     const dg = duelist(gensIn(game, to, game.regions[to].owner));
     if (dg.war < ag.war - 15 && Math.random() < 0.7) {
       toast(`${dg.name}이(가) 일기토를 거절하고 성문을 걸어 잠갔습니다.`);
-      const res = act((s) => doMove(s, world, pid, from, to, count, sel, { duel: false }));
+      const res = act((s) => doMove(s, world, pid, from, to, count, sel, { ...opts, duel: false }));
       if (res?.ok) { setModal(null); setMoveMode(false); }
       return;
     }
-    setModal({ type: 'duel', from, to, count, sel, attId: ag.id, defId: dg.id });
+    setModal({ type: 'duel', from, to, count, sel, opts, attId: ag.id, defId: dg.id });
   };
   const proposal = game.proposals[0];
   const showProposal = proposal && !modal && !replay && !game.gameOver;
@@ -160,7 +165,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <div className="stat">
           <small>턴 {game.turn}</small>
           <b>
-            {year}년 {SEASONS[seasonOf(game.turn)]}
+            {year}년 {SEASONS[seasonOf(game.turn)]} <small className="muted">{((game.turn - 1) % TURNS_PER_SEASON) + 1}/{TURNS_PER_SEASON}</small>
           </b>
         </div>
         <div className="stat">
@@ -248,6 +253,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           setMoveMode={setMoveMode}
           act={act}
           openGenerals={() => setModal({ type: 'gens' })}
+          openConscript={() => setModal({ type: 'conscript', rid: selected })}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} onDuel={startDuel} />}
@@ -258,17 +264,21 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           defId={modal.defId}
           onFinish={(d) => {
             const m = modal;
-            act((s) => doMove(s, world, pid, m.from, m.to, m.count, m.sel, { duel: d }));
+            act((s) => {
+              s.duelMoves = [...(s.duelMoves || []), ...d.rounds.map((r) => r.m1)].slice(-24);
+              return doMove(s, world, pid, m.from, m.to, m.count, m.sel, { ...m.opts, duel: d });
+            });
             setModal(null);
             setMoveMode(false);
           }}
         />
       )}
+      {modal?.type === 'conscript' && <ConscriptModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
       {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
-      {modal?.type === 'news' && <NewsModal news={game.turnNews || []} turn={game.turn} onClose={() => setModal(null)} />}
+      {modal?.type === 'news' && <NewsModal news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
       {showProposal && <ProposalModal world={world} game={game} act={act} />}
       {ask && (
         <ConfirmModal

@@ -60,9 +60,9 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       for (let r = 0; r < R; r++) {
         if (owner[r] !== n.id) continue;
         for (const nb of world.regions[r].neighbors) {
-          if (owner[nb.id] !== null) continue;
+          if (owner[nb.id] !== null || world.regions[nb.id].sea) continue;
           const t = world.regions[nb.id];
-          const d = Math.hypot(t.cx - cap.cx, t.cy - cap.cy) * (nb.type === 'sea' ? 2.5 : 1) + rng() * 10;
+          const d = Math.hypot(t.cx - cap.cx, t.cy - cap.cy) + rng() * 10;
           if (d < bd) { bd = d; best = nb.id; }
         }
       }
@@ -76,6 +76,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   }
   const namer = makeNamer(rng);
   const regions = world.regions.map((wr, i) => {
+    if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {}, loyalty: 100 };
     let civ;
     if (owner[i] !== null) civ = plan[owner[i]].civ;
     else {
@@ -98,8 +99,15 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       loyalty: owner[i] === null ? 50 : 80,
     };
   });
+  // 바다 이름: 가장 가까운 해안 지역 이름을 따서
+  world.regions.forEach((wr, i) => {
+    if (!wr.sea) return;
+    const coasts = wr.neighbors.filter((n) => n.type === 'landing').map((n) => world.regions[n.id]);
+    const near = coasts.sort((a, b) => Math.hypot(a.cx - wr.cx, a.cy - wr.cy) - Math.hypot(b.cx - wr.cx, b.cy - wr.cy))[0];
+    regions[i].name = near ? `${regions[near.id].name} 앞바다` : '먼바다';
+  });
   const s = {
-    version: 3,
+    version: 4,
     scenarioId: scn.id,
     seed,
     opts,

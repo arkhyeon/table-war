@@ -1,27 +1,29 @@
-// 일기토: 공격·강타·방어·반격 4가지 수
-// 원안(공격·카운터·방어)은 방어가 지는 경우가 없어 방어만 고르게 되므로,
-// 방어를 깨는 '강타'를 넣고 반격은 방어 상대에게 빈틈을 보이도록 해 순환 구조를 만들었다.
+import { tv } from './traits.js';
+
+// 일기토: 공격·강타·방어·반격
+// 원안(공격·카운터·방어)만으로는 방어가 지는 경우가 없어, 방어를 깨는 '강타'를 넣고
+// 각 수가 이기는 상대·지는 상대를 갖도록 피해 배수를 조정했다(균형점: 공격28%·강타27%·방어22%·반격22%).
 export const MOVES = {
-  attack: { name: '공격', icon: '🗡️', desc: '빠른 일격. 강타를 끊고, 반격에 당하고, 방어에 막힘(약한 피해)' },
-  smash: { name: '강타', icon: '🪓', desc: '방어를 부숨(큰 피해). 공격·반격에 짐' },
-  defend: { name: '방어', icon: '🛡️', desc: '공격을 막고 반격을 무력화. 강타에 뚫림' },
-  counter: { name: '반격', icon: '🔄', desc: '공격·강타를 받아침(큰 피해). 방어 상대에겐 빈틈' },
+  attack: { name: '공격', icon: '🗡️', desc: '빠른 찌르기. 강타를 끊음(큰 피해). 방어·반격에 당함' },
+  smash: { name: '강타', icon: '🪓', desc: '내려찍기. 방어를 부수고 반격 자세를 무너뜨림. 공격에 끊김' },
+  defend: { name: '방어', icon: '🛡️', desc: '막고 밀쳐냄. 공격을 받아치고 반격을 무력화. 강타에 뚫림' },
+  counter: { name: '반격', icon: '🔄', desc: '받아치기. 공격을 크게 되받아침. 강타·방어엔 빈틈' },
 };
 
 // OUT[a][b] = [a가 받는 피해, b가 받는 피해] (상대 위력 배수)
 const OUT = {
-  attack: { attack: [1, 1], smash: [0, 1], defend: [0, 0.3], counter: [1.5, 0] },
-  smash: { attack: [1, 0], smash: [1.6, 1.6], defend: [0, 2], counter: [1.5, 0] },
-  defend: { attack: [0.3, 0], smash: [2, 0], defend: [0, 0], counter: [0, 0.5] },
-  counter: { attack: [0, 1.5], smash: [0, 1.5], defend: [0.5, 0], counter: [0, 0] },
+  attack: { attack: [1, 1], smash: [0, 1.6], defend: [0.8, 0], counter: [1.2, 0] },
+  smash: { attack: [1.6, 0], smash: [1.5, 1.5], defend: [0, 1.2], counter: [0, 0.8] },
+  defend: { attack: [0, 0.8], smash: [1.2, 0], defend: [0, 0], counter: [0, 0.5] },
+  counter: { attack: [0, 1.2], smash: [0.8, 0], defend: [0.5, 0], counter: [0, 0] },
 };
 
-export const duelHp = (g) => Math.round(60 + g.war * 0.7 + g.lead * 0.2);
-export const duelPow = (g) => 8 + g.war * 0.2;
+export const duelHp = (g) => Math.round((60 + g.war * 0.7 + g.lead * 0.2) * (1 + tv([g], '무쌍')));
+export const duelPow = (g) => (8 + g.war * 0.2) * (1 + tv([g], '맹장') * 3);
 
-const BASE_MIX = { attack: 0.3, smash: 0.2, defend: 0.25, counter: 0.25 };
+const BASE_MIX = { attack: 0.28, smash: 0.27, defend: 0.225, counter: 0.225 };
 
-function bestResponse(opp) {
+export function bestResponse(opp) {
   let best = null, bv = -Infinity;
   for (const m of Object.keys(MOVES)) {
     const [mine, theirs] = OUT[m][opp];
@@ -31,11 +33,18 @@ function bestResponse(opp) {
   return best;
 }
 
-// AI의 수 선택: 지력이 높을수록 상대 수를 간파할 확률↑
 export const readChance = (me, opp) => Math.max(0, Math.min(0.45, (me.intel - opp.intel) / 150 + 0.1));
 
-export function aiMove(rng, me, opp, oppMove) {
+// AI의 수: 지력으로 상대 수를 간파하거나, 상대가 같은 수를 반복하면 그 버릇을 노린다
+export function aiMove(rng, me, opp, oppMove, history) {
   if (oppMove && rng() < readChance(me, opp)) return bestResponse(oppMove);
+  if (history && history.length >= 2) {
+    const freq = {};
+    for (const m of history) freq[m] = (freq[m] || 0) + 1;
+    const [top, c] = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
+    const bias = c / history.length - 0.25;
+    if (bias > 0 && rng() < bias * 1.6) return bestResponse(top);
+  }
   return rng.weighted(Object.keys(BASE_MIX), (k) => BASE_MIX[k]);
 }
 
