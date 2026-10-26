@@ -4,7 +4,7 @@ import { WEATHER } from '../game/weather.js';
 
 const NEUTRAL = '#b9b2a0';
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -203,6 +203,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
             <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
             <path d={fog.dim} fill="#1b1d22" opacity={0.22} fillRule="evenodd" />
             <path d={fog.hidden} fill="#3a3c40" fillRule="evenodd" />
+            {flash && [...flash].map((rid) => <path key={'f' + rid} className="flash" d={statics.outline[rid]} fill="#ffd34a33" fillRule="evenodd" stroke="#ffd34a" strokeWidth={3} />)}
             {focus !== null && focus !== undefined && <path d={statics.outline[focus]} fill="#ff334422" fillRule="evenodd" stroke="#ff3344" strokeWidth={3.2} />}
           {targets &&
             [...targets.entries()].filter(([rid]) => !world.regions[rid].sea).map(([rid, kind]) => (

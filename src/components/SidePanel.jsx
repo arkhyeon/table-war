@@ -8,14 +8,14 @@ import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
   doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX,
+  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus,
 } from '../game/engine.js';
 
 export function relTag(game, a, b) {
   if (a === b) return null;
   const r = getRel(game, a, b);
   if (r.type === 'alliance') return <span className="tag ally">동맹</span>;
-  if (r.type === 'nap') return <span className="tag nap">불가침 ~{r.until}턴</span>;
+  if (r.type === 'nap') return <span className="tag nap">{r.truce ? '정전' : '불가침'} ~{r.until}턴</span>;
   if (r.type === 'vassal') return <span className="tag vassal">{r.overlord === a ? '내 속국' : '종주국'}</span>;
   return null;
 }
@@ -129,7 +129,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
         </div>
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
           {game.coalition && <div style={{ color: 'var(--danger)' }}>⚔️ 대동맹 결성: {game.nations[game.coalition.target].name}이(가) 공공의 적</div>}
-          승리: 전체 육지의 60% 점령 또는 모든 국가 멸망·속국화.
+          승리: 전체 육지의 {Math.round((game.winShare || 0.6) * 100)}% 점령 또는 모든 국가 멸망·속국화.
         </div>
       </div>
 
@@ -230,6 +230,17 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             )}
             <span>인구</span>
             <span>{Math.round(r.pop)}천</span>
+            {r.owner !== null && governorOf(game, selected) && (
+              <>
+                <span>태수</span>
+                <span>
+                  {(() => {
+                    const gv = governorOf(game, selected), b = governorBonus(gv);
+                    return `${gv.name} (정${gv.pol}${gv.role === 'civ' ? '' : ', 무관 절반'}) · 세수 +${Math.round(b.tax * 100)}%${b.loyalty ? ` · 민심 +${b.loyalty}/턴` : ''}`;
+                  })()}
+                </span>
+              </>
+            )}
             <span>특징</span>
             <span>{[wr.coastal && '해안', wr.river && '강 유역'].filter(Boolean).join(' · ') || '-'}</span>
             <span>건물</span>

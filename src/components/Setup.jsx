@@ -7,6 +7,7 @@ import { createGame } from '../game/setup.js';
 import { CIVS } from '../game/civs.js';
 import { nationRegions } from '../game/engine.js';
 import { loadHistory } from '../storage.js';
+import { ACHIEVEMENTS, loadAchievements } from '../game/achievements.js';
 
 const randomSeed = () => Math.random().toString(36).slice(2, 8);
 
@@ -16,10 +17,11 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [nationCount, setNationCount] = useState(8);
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
-  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true });
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
+  const achieved = useMemo(loadAchievements, []);
   const scn = SCENARIOS.find((s) => s.id === scnId);
-  const opts = useMemo(() => (scn.procedural ? { nationCount } : {}), [scn, nationCount]);
+  const opts = useMemo(() => ({ ...(scn.procedural ? { nationCount } : {}), histStats: rules.histStats, difficulty: rules.difficulty }), [scn, nationCount, rules.histStats, rules.difficulty]);
 
   const world = useMemo(() => {
     try {
@@ -100,11 +102,20 @@ export default function Setup({ onStart, onResume, hasSave }) {
             ['revealTroops', '👁️ 병력 전체 공개', '끄면 시야 밖 지역의 병력은 ?로 표시'],
             ['rememberExplored', '🧭 탐색 지역 기억', '한 번 본 땅은 계속 지도에 표시 (지도 전체 공개를 껐을 때)'],
             ['showBattles', '⚔️ 턴마다 전투 다시보기', '시야 안에서 벌어진 전투만, 건너뛰기 가능'],
+            ['histStats', '📜 역사 능력치 사용', '끄면(기본) 장수 성향만 살리고 능력치는 나라마다 공평하게 무작위'],
           ].map(([k, label, tip]) => (
             <label key={k} title={tip}>
               <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
             </label>
           ))}
+          <label title="컴퓨터 세수·초기 병력 보정">
+            🎚️ 난이도{' '}
+            <select value={rules.difficulty} onChange={(e) => setRules({ ...rules, difficulty: e.target.value })}>
+              <option value="easy">쉬움</option>
+              <option value="normal">보통</option>
+              <option value="hard">어려움</option>
+            </select>
+          </label>
         </div>
         <h3>3. 국가 선택</h3>
         <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>나라 이름은 ✏️로 바꿀 수 있습니다. 장수 이름은 게임 중 장수 목록에서 바꿉니다.</p>
@@ -155,6 +166,18 @@ export default function Setup({ onStart, onResume, hasSave }) {
             게임 시작 ▶
           </button>
         </div>
+        <details style={{ marginTop: 12 }}>
+          <summary>
+            🏅 업적 {Object.keys(achieved).length}/{ACHIEVEMENTS.length}
+          </summary>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {ACHIEVEMENTS.map((a) => (
+              <span key={a.id} className={'tag' + (achieved[a.id] ? ' ally' : '')} title={a.desc + (achieved[a.id] ? ` — ${achieved[a.id].nation}, ${achieved[a.id].turn}턴` : '')} style={{ opacity: achieved[a.id] ? 1 : 0.5 }}>
+                {a.icon} {a.name} <small>{a.desc}</small>
+              </span>
+            ))}
+          </div>
+        </details>
       </div>
     </div>
   );

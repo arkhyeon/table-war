@@ -1,12 +1,13 @@
 import { stateRng } from './rng.js';
-import { TERRAIN, TAX } from './rules.js';
+import { TERRAIN, TAX, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
 import { riseNations } from './rise.js';
+import { trackStats, checkAchievements } from './achievements.js';
 import { updateExplored, encodeOwners } from './fog.js';
 import { hashString } from './rng.js';
 
@@ -54,7 +55,9 @@ function balanceOfPower(s, world) {
     return;
   }
   if ((s.coalitionCooldown || 0) > s.turn) return;
-  if (threat(top.id) > (s.turn >= 30 ? 2.1 : 2.5)) {
+  // 나라가 많은 지도에서 작은 1위에게까지 대동맹이 생기지 않도록 영토 비율 문턱(통일선의 40%)도 둠
+  const topShare = nationRegions(s, top.id).length / landCount(s);
+  if (threat(top.id) > (s.turn >= 30 ? 2.1 : 2.5) && topShare >= (s.winShare || 0.6) * 0.4) {
     if (prev !== top.id) {
       s.coalition = { target: top.id, since: s.turn };
       log(s, `⚔️ ${top.name}의 패권에 맞서 대동맹이 결성되었습니다! 각국이 ${top.name}을(를) 공동의 적으로 삼습니다.`, s.nations.map((x) => x.id), 'diplo');
@@ -83,8 +86,10 @@ function upkeep(s, world) {
   const rng = stateRng(s);
   for (const n of s.nations) {
     if (!n.alive) continue;
+    if (n.lost) n.lost = n.lost < 0.3 ? 0 : Math.round(n.lost * 0.85 * 100) / 100;
     const inc = income(s, n.id);
     let net = inc.net;
+    if (!n.isPlayer && inc.gross > 0) net += Math.round(inc.gross * (DIFFICULTY[s.opts?.difficulty]?.tax || 0));
     const lord = s.nations.find((o) => o.alive && isVassalOf(s, n.id, o.id));
     if (lord && inc.gross > 0) {
       const tribute = Math.round(inc.gross * 0.25);
@@ -119,6 +124,7 @@ function upkeep(s, world) {
   const supply = {};
   const sizes = {};
   for (const r of s.regions) if (r.owner !== null && !r.sea) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
+  const land = landCount(s);
   for (const n of s.nations) if (n.alive) supply[n.id] = supplied(s, world, n.id);
   for (let i = 0; i < s.regions.length; i++) {
     const r = s.regions[i];
@@ -152,10 +158,11 @@ function upkeep(s, world) {
     // 보급이 끊긴 지역: 병력 1~10% 감소, 민심 하락
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
-    const sprawl = Math.floor((sizes[r.owner] || 0) / 10); // 대제국일수록 통치 부담
+    // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
+    const sprawl = Math.floor(((sizes[r.owner] || 0) / land) * 8);
     // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
     const martial = r.troops >= r.pop * 250;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;
@@ -210,7 +217,8 @@ export function checkGameOver(s) {
   const p = s.nations[s.playerId];
   if (!p.alive) return { win: false, text: `${p.name}이(가) 멸망했습니다.` };
   const owned = nationRegions(s, s.playerId).length;
-  if (owned / landCount(s) >= 0.6) return { win: true, text: `전 지역의 60% 이상을 차지해 천하를 통일했습니다!` };
+  const ws = s.winShare || 0.6;
+  if (owned / landCount(s) >= ws) return { win: true, text: `전 지역의 ${Math.round(ws * 100)}% 이상을 차지해 천하를 통일했습니다!` };
   const rivals = s.nations.filter((n) => n.alive && n.id !== s.playerId && !isVassalOf(s, n.id, s.playerId));
   if (!rivals.length) return { win: true, text: '모든 국가가 멸망하거나 당신의 속국이 되었습니다!' };
   return null;
@@ -237,5 +245,9 @@ export function endTurn(s, world) {
   runEvents(s, world, stateRng(s));
   updateExplored(s, world);
   s.gameOver = s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
+  if (!s.spectator) {
+    trackStats(s);
+    s.newAchieve = checkAchievements(s, !!s.gameOver?.win);
+  }
   return s;
 }

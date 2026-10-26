@@ -402,3 +402,27 @@ export function gradeScore(g) {
   return ((s[0] + s[1]) / 2) * 0.7 + ((s[0] + s[1] + s[2] + s[3]) / 4) * 0.3;
 }
 export const gradeOf = (g) => GRADES.find(([t]) => gradeScore(g) >= t)[1];
+
+// 공평한 무작위 능력치: 역사 장수의 '성향'(가장 높은 두 능력)만 살리고 수준은 목표 점수에 맞춰 새로 뽑음
+const STATS = ['war', 'lead', 'intel', 'pol'];
+export function randomStats(data, target, rng) {
+  const main = [...STATS].sort((a, b) => data[b] - data[a]).slice(0, 2);
+  const g = {};
+  for (const k of STATS) g[k] = main.includes(k) ? target + rng.int(-1, 4) : rng.int(target - 38, target - 8);
+  for (let i = 0; i < 4; i++) {
+    const d = target - gradeScore(g);
+    if (Math.abs(d) < 0.5) break;
+    for (const k of STATS) g[k] += d;
+  }
+  for (const k of STATS) g[k] = Math.max(15, Math.min(100, Math.round(g[k])));
+  return { ...data, ...g };
+}
+
+// 나라별 장수 예산: 장수 수 × 76점. 이미 뛰어난 장수가 있으면 다음 장수는 약하게, 약하면 강하게
+export const GEN_BUDGET = 76;
+export function fairTarget(existingScores, rng, ruler = false) {
+  if (ruler) return 78 + rng.int(-3, 3);
+  const roll = GEN_BUDGET + (rng() + rng() + rng() - 1.5) * 46;
+  const need = GEN_BUDGET * (existingScores.length + 1) - existingScores.reduce((a, b) => a + b, 0);
+  return Math.max(45, Math.min(98, Math.round(roll * 0.6 + need * 0.4)));
+}

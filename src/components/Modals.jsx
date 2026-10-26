@@ -15,7 +15,8 @@ import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
-import { relTag, GenLine, TraitTags } from './SidePanel.jsx';
+import { relTag, GenLine, TraitTags, GradeTag } from './SidePanel.jsx';
+import { ACHIEVEMENTS } from '../game/achievements.js';
 import EditableName from './EditableName.jsx';
 import { G } from '../game/rules.js';
 
@@ -61,7 +62,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const canDuel = isAttack && sel.length > 0 && defGens.length > 0;
   const [wantDuel, setWantDuel] = useState(true);
   const verb = aid ? '원군 파견' : edge.type === 'coast' ? '승선' : edge.type === 'landing' ? '상륙' : edge.type === 'cliff' ? '절벽 상륙' : edge.type === 'sea' ? '항해' : '이동';
-  const title = isAttack ? (tr.sea ? `⚓ ${tr.name} 해전` : edge.type === 'landing' || edge.type === 'cliff' ? `⚔️ ${tr.name} ${edge.type === 'cliff' ? '절벽 ' : ''}상륙 공격` : `⚔️ ${tr.name} 공격`) : `🚩 ${tr.name} ${verb}`;
+  const title = isAttack ? (tr.sea ? `⚓ ${tr.name} 해전` : edge.type === 'landing' || edge.type === 'cliff' ? `⚔️ ${tr.name} ${edge.type === 'cliff' ? '절벽 ' : ''}상륙 공격` : `⚔️ ${tr.name} 공격`) : `${aid ? "🤝" : "🚩"} ${tr.name} ${verb}`;
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -232,7 +233,7 @@ export function ConscriptModal({ world, game, rid, act, onClose }) {
 function relText(game, a, b) {
   const r = getRel(game, a, b);
   if (r.type === 'alliance') return '동맹';
-  if (r.type === 'nap') return `불가침(~${r.until}턴)`;
+  if (r.type === 'nap') return `${r.truce ? '정전' : '불가침'}(~${r.until}턴)`;
   if (r.type === 'vassal') return r.overlord === a ? '내 속국' : '나의 종주국';
   return '-';
 }
@@ -683,15 +684,94 @@ export function NewsModal({ news, events = [], turn, onClose }) {
   );
 }
 
+// 점령 비율 추이 그래프 (연대기 기록에서 계산)
+function ShareChart({ game }) {
+  const frames = [...(game.history || []).map(decodeOwners), game.regions.map((r) => r.owner)];
+  const land = game.regions.filter((r) => !r.sea).length;
+  const N = game.nations.length;
+  const series = game.nations.map(() => []);
+  for (const f of frames) {
+    const c = new Array(N).fill(0);
+    f.forEach((o, i) => { if (o !== null && !game.regions[i].sea) c[o]++; });
+    c.forEach((v, k) => series[k].push(v / land));
+  }
+  const peak = series.map((sr) => Math.max(...sr));
+  const show = [...new Set([game.playerId, ...peak.map((p, k) => [p, k]).sort((x, y) => y[0] - x[0]).slice(0, 5).map(([, k]) => k)])];
+  const W = 320, H = 120, T = Math.max(1, frames.length - 1);
+  const ws = game.winShare || 0.6;
+  const top = Math.max(ws, ...show.map((k) => peak[k]));
+  const pt = (v, i) => `${((i / T) * W).toFixed(1)},${(H - (v / top) * H).toFixed(1)}`;
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H + 4}`} preserveAspectRatio="none" style={{ width: '100%', height: 150, background: 'var(--panel2)', borderRadius: 8 }}>
+        <line x1={0} x2={W} y1={H - (ws / top) * H} y2={H - (ws / top) * H} stroke="#e0b04f" strokeDasharray="4 4" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+        {show.map((k) => (
+          <polyline key={k} points={series[k].map(pt).join(' ')} fill="none" stroke={game.nations[k].color} strokeWidth={k === game.playerId ? 2.6 : 1.4} vectorEffect="non-scaling-stroke" />
+        ))}
+      </svg>
+      <div className="row" style={{ flexWrap: 'wrap', gap: '2px 10px', fontSize: 12, marginTop: 4 }}>
+        {show.map((k) => (
+          <span key={k}>
+            <span className="chip" style={{ background: game.nations[k].color }} />
+            {game.nations[k].name} 최고 {Math.round(peak[k] * 100)}%
+          </span>
+        ))}
+        <span className="muted">· 점선 = 통일선 {Math.round(ws * 100)}%</span>
+      </div>
+    </div>
+  );
+}
+
+const KEY_EVENT = /^(🔥|🌱|👑|☠️|💢|⚔️ .*대동맹|🙇)/;
+
 export function GameOverModal({ result, game, onNew, onContinue, onChronicle }) {
   const me = game.nations[game.playerId];
+  const st = game.stats || {};
+  const heroes = Object.values(game.generals).filter((g) => g.wins).sort((a, b) => b.wins - a.wins).slice(0, 5);
+  const events = game.log.filter((l) => KEY_EVENT.test(l.text)).slice(0, 10).reverse();
+  const fresh = game.newAchieve || [];
   return (
-    <Modal title={result.win ? '🏆 승리!' : '💀 패배'}>
+    <Modal title={result.win ? '🏆 승리!' : '💀 패배'} wide>
       <p>{fixJosa(result.text)}</p>
       <p className="muted">
-        {me.name} · {game.turn}턴 · 영토 {nationRegions(game, game.playerId).length}
+        {me.name} · {game.turn}턴 · 영토 {nationRegions(game, game.playerId).length} · 전투 {st.won || 0}승 {st.lost || 0}패 · 일기토 {st.duels || 0}승 · 최소 영토 {st.minRegions ?? '-'}곳
       </p>
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
+      {fresh.length > 0 && (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <b>🎉 새 업적</b>{' '}
+          {fresh.map((id) => {
+            const a = ACHIEVEMENTS.find((x) => x.id === id);
+            return (
+              <span key={id} className="tag ally" title={a.desc} style={{ marginRight: 4 }}>
+                {a.icon} {a.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <h4 style={{ margin: '6px 0' }}>📈 영토 추이</h4>
+      <ShareChart game={game} />
+      <div className="diplo" style={{ marginTop: 10 }}>
+        <div className="card col" style={{ fontSize: 13 }}>
+          <b>🎖️ 최다 전공 장수</b>
+          {heroes.map((g) => (
+            <div key={g.id}>
+              <span className="chip" style={{ background: game.nations[g.nation]?.color }} /> {g.name} <GradeTag g={g} /> {g.wins}승{g.duelWins ? ` · 일기토 ${g.duelWins}승` : ''} <small className="muted">Lv{g.level || 1}{g.status === 'dead' ? ' ✝' : ''}</small>
+            </div>
+          ))}
+          {!heroes.length && <span className="muted">기록 없음</span>}
+        </div>
+        <div className="card col" style={{ fontSize: 13 }}>
+          <b>📜 주요 사건</b>
+          {events.map((l, i) => (
+            <div key={i}>
+              <small className="muted">{l.turn}턴</small> {fixJosa(l.text)}
+            </div>
+          ))}
+          {!events.length && <span className="muted">기록 없음</span>}
+        </div>
+      </div>
+      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 10, flexWrap: 'wrap' }}>
         <button onClick={onChronicle}>📽️ 연대기</button>
         {result.win && <button onClick={onContinue}>계속 플레이</button>}
         <button className="primary" onClick={onNew}>
@@ -707,10 +787,10 @@ export function HelpModal({ onClose }) {
     <Modal title="❓ 게임 방법" onClose={onClose} wide>
       <div className="help">
         <ul>
-          <li><b>목표</b>: 전체 육지의 60%를 차지하거나 다른 모든 나라를 멸망·속국화하세요.</li>
+          <li><b>목표</b>: 전체 육지의 60%(세계사 40%, 동아시아 50%)를 차지하거나 다른 모든 나라를 멸망·속국화하세요.</li>
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
           <li><b>시간</b>: 2턴이 한 계절, 8턴이 1년. 날씨는 매 턴 바뀝니다.</li>
-          <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +5) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
+          <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
           <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(우클릭으로 바로 열기). 육지는 최소 1명을 남겨야 합니다.</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
@@ -718,16 +798,18 @@ export function HelpModal({ onClose }) {
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
           <li><b>징병</b>: 인원을 직접 정합니다. 징집은 1명당 5금이고 인구의 5%를 넘게 뽑으면 넘은 만큼 민심 하락, 모병은 1명당 12금에 민심 영향 없음(최대치 절반). 병영 +50%.</li>
           <li><b>자원병</b>: 민심 60 이상인 지역은 매 턴 백성이 스스로 입대합니다. 영토를 잃거나 수도가 위협받으면 민심 40 이상 지역에서 4배로 늘어납니다.</li>
-          <li><b>민심</b>: 점령 직후 15(중립지는 35)에서 매 턴 회복. 주둔군 3천↑·수도·낮은 세율·인덕 장수로 빨라지고, 영토 10곳마다 통치 부담 -1. 25 미만이면 반란. 대책: 🍚진휼(비싸고 6턴에 한 번, +7/+14), 계엄(인구 대비 대군 주둔 시 반란 불가, 대신 회복 -1), 치안 장수.</li>
+          <li><b>민심</b>: 점령 직후 15(중립지는 35)에서 매 턴 회복. 주둔군 3천↑·수도·낮은 세율·인덕 장수로 빨라지고, 전 육지의 1/8을 차지할 때마다 통치 부담 -1. 25 미만이면 반란. 대책: 🍚진휼(비싸고 6턴에 한 번, +7/+14), 계엄(인구 대비 대군 주둔 시 반란 불가, 대신 회복 -1), 치안 장수.</li>
           <li><b>보급</b>: 수도와 끊긴 지역은 ✂ 표시, 병력이 매 턴 1~10% 무작위 감소, 전투력 -20%(보급 특성으로 경감).</li>
           <li><b>공성</b>: 성벽(내구 3)이 있으면 공격 방식 선택. 포위=이겨도 성벽만 깎음(1, 압승 2, 🛠️공성병기·공성 장수 추가), 0이 되면 함락. 강습=이기면 바로 함락하지만 성벽 효과 2배·손실 1.5배. 포위당하지 않은 턴엔 성벽 복구.</li>
           <li><b>날씨</b>: 북쪽은 눈(공격 -25%, AP+1, 세수 -25%), 남쪽은 가뭄(세수 -35%)이 잦지만 남쪽은 풍년(+35%)도 잦아 연간 손익이 비슷합니다. 비는 도강을 어렵게, 폭풍은 항해를 막습니다.</li>
           <li><b>사건</b>: 역병·홍수·지진·금광·교역 호황·해적·도적·용병단·장수 출분 등 어느 나라에나 일어나는 사건이 턴 소식에 카드로 나옵니다.</li>
           <li><b>세력 균형</b>: 국력이 평균의 2배를 넘으면 주변국 호감이 계속 떨어지고, 1위가 2.5배를 넘으면 대동맹이 결성됩니다. AI 회원국끼리는 싸우지 않고 패권국을 노리며, 패권국의 침공에 방어 +15%.</li>
-          <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 8 + 무력×0.2(맹장·무쌍 특성 가산). 이기면 전투력 +15%, 지면 -15%.</li>
+          <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 2 + (무력-40)×0.42(맹장·무쌍 특성 가산). 상대 의도 간파는 무력 85%·지력 15%의 전장 감각 차이로 정해져 힌트로 보입니다. 이기면 전투력 +15%, 지면 -15%.</li>
           <li><b>장수와 전투력</b>: 장수는 병사 수를 늘리지 않고 배율을 올립니다. 공격 시 동행 장수 중 최고 (무력+통솔)/2 ÷ 250(최대 약 +40%) + 특성, 방어 시 주둔 장수 최고 (통솔×0.6+지력×0.4) ÷ 250 + 특성.</li>
-          <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유.</li>
-          <li><b>외교</b>: 금·영토 거래, 동맹(상호 공격 불가), 불가침, 속국, 공동 공격. 불가침·종속 상대를 공격하면 배신 페널티.</li>
+          <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 등급은 F~SSR. 기본은 공평한 무작위 능력치(장수 성향만 역사대로, 나라마다 장수 수준 합이 비슷 — 뛰어난 장수가 있으면 다음 장수는 약해짐). 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유. 멸망한 나라의 왕은 승자의 장수가 되고, 충성이 낮으면 옛 나라를 부흥시킬 수 있습니다.</li>
+          <li><b>태수</b>: 지역에 주둔한 장수 중 정치가 가장 높은 장수가 태수. 정치 50 초과분만큼 세수 증가(정치 90 = +16%), 정치 70↑ 민심 +1, 90↑ +2. 무관은 효과 절반.</li>
+          <li><b>신흥국</b>: 빈 땅의 봉기, 민심 30 미만 변방(컴퓨터 나라)의 독립, 옛 왕의 부흥으로 새 나라가 생깁니다. 지도에서 깜빡이고 소식 카드가 뜹니다.</li>
+          <li><b>외교</b>: 금·영토 거래, 동맹(상호 공격 불가), 불가침, 정전(6턴, 땅을 잃는 쪽이 원함), 속국, 공동 공격, 속국 병합. 동맹국 땅으로 이동하면 원군(병사만) 파견. 불가침·종속 상대를 공격하면 배신 페널티.</li>
           <li><b>전황</b>: 시야 안의 전투만 다시보기·화살표로 보여줍니다. 📽️ 연대기로 영토 변화를 돌려볼 수 있습니다.</li>
         </ul>
         <h4>건물</h4>
@@ -862,7 +944,7 @@ export function DuelModal({ game, attId, defId, onFinish }) {
             ))}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-            반격 &gt; 공격 &gt; 방어 &gt; 반격 (가위바위보). 같은 수끼리는 서로 절반 피해. 최대 6합. 지력이 높을수록 상대 의도를 미리 간파하고, 같은 수를 반복하면 상대가 버릇을 노립니다.
+            반격 &gt; 공격 &gt; 방어 &gt; 반격 (가위바위보). 같은 수끼리는 서로 절반 피해. 최대 6합. 무력(85%)과 지력(15%)으로 정한 전장 감각이 높을수록 상대 의도를 미리 간파하고, 같은 수를 반복하면 상대가 버릇을 노립니다.
           </div>
         </>
       ) : (

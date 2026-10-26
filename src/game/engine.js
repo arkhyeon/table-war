@@ -1,7 +1,7 @@
 import { stateRng } from './rng.js';
 import { T, TERRAIN, EDGE, BUILDINGS, COST, TAX, G } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
-import { POOLS, rating } from './generals.js';
+import { POOLS, rating, randomStats, fairTarget, gradeScore } from './generals.js';
 import { fixJosa } from './josa.js';
 import { weatherOf } from './weather.js';
 import { simulateDuel, duelist } from './duel.js';
@@ -44,7 +44,7 @@ export function isVassalOf(s, a, b) {
 export function computeMaxAp(s, nid) {
   const regions = nationRegions(s, nid).length;
   const fast = Math.min(2, nationTrait(s, nid, '신속'));
-  let ap = 3 + Math.min(5, Math.floor(regions / 6)) + fast;
+  let ap = 3 + Math.min(7, Math.floor(regions / 6)) + fast;
   if (s.nations.some((o) => o.alive && o.id !== nid && isVassalOf(s, nid, o.id))) ap -= 1;
   return Math.max(2, ap);
 }
@@ -62,8 +62,23 @@ export function regionTax(s, rid) {
   g *= wt;
   if (r.buildings.market) g *= 1.5;
   const gens = gensIn(s, rid, r.owner);
-  g *= 1 + tv(gens, '정치') + (r.river ? tv(gens, '치수') : 0) + (r.buildings.port ? tv(gens, '교역') : 0);
+  g *= 1 + tv(gens, '정치') + (r.river ? tv(gens, '치수') : 0) + (r.buildings.port ? tv(gens, '교역') : 0) + governorBonus(governorOf(s, rid)).tax;
   return Math.round((g + (r.buildings.port ? 3 : 0)) * G);
+}
+
+// 태수: 주둔 장수 중 정치가 가장 높은 장수(문관 우선). 문관은 효과 그대로, 무관은 절반
+export function governorOf(s, rid) {
+  const r = s.regions[rid];
+  if (r.owner === null || r.sea) return null;
+  const gens = gensIn(s, rid, r.owner);
+  if (!gens.length) return null;
+  const val = (g) => g.pol * (g.role === 'civ' ? 1 : 0.5);
+  return gens.reduce((a, b) => (val(b) > val(a) ? b : a));
+}
+export function governorBonus(g) {
+  if (!g) return { tax: 0, loyalty: 0 };
+  const k = g.role === 'civ' ? 1 : 0.5;
+  return { tax: (Math.max(0, g.pol - 50) / 250) * k, loyalty: g.pol >= 90 ? 2 * k : g.pol >= 70 ? 1 * k : 0 };
 }
 
 // 병력 유지비는 1명 단위로 계산(2,500명당 1금), 장수 녹봉 1금
@@ -393,6 +408,7 @@ function transferRegion(s, world, rid, newOwner) {
   const old = r.owner;
   r.owner = newOwner;
   if (old !== null) {
+    s.nations[old].lost = (s.nations[old].lost || 0) + 1;
     const gens = gensIn(s, rid, old);
     if (gens.length) relocateRefugees(s, world, gens, old, rid);
     const n = s.nations[old];
@@ -418,7 +434,7 @@ export function checkElimination(s, world, nid, by = null) {
     king.captor = null;
     king.nation = by;
     king.region = conq.capital ?? nationRegions(s, by)[0];
-    king.loyalty = 45;
+    king.loyalty = 55;
     king.exKing = n.name;
     king.joined = s.turn;
     log(s, `🙇 ${n.name}의 군주 ${king.name}이(가) ${conq.name}에 귀순해 장수가 되었습니다.`, [by, nid], 'general');
@@ -539,8 +555,9 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   if (duel) {
     const ag = s.generals[duel.a], dg = s.generals[duel.b];
     battle.duel = { a: ag.name, b: dg.name, winner: duel.winner, ko: duel.ko, rounds: duel.rounds };
-    if (duel.winner === 1) { duelMult = 1.15; gainExp(s, ag, 40); }
-    else if (duel.winner === 2) { duelMult = 1 / 1.15; gainExp(s, dg, 40); }
+    if (duel.winner === 1) { duelMult = 1.15; gainExp(s, ag, 40); ag.duelWins = (ag.duelWins || 0) + 1; }
+    else if (duel.winner === 2) { duelMult = 1 / 1.15; gainExp(s, dg, 40); dg.duelWins = (dg.duelWins || 0) + 1; }
+    if (duel.winner === 1 && nid === s.playerId) (s.stats = s.stats || {}).duels = (s.stats.duels || 0) + 1;
     const loser = duel.winner === 1 ? dg : duel.winner === 2 ? ag : null;
     if (duel.ko && loser && rng() < 0.4) {
       loser.status = 'dead';
@@ -567,6 +584,10 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     battle.defLoss = report.defLoss;
     battle.win = kind === 'win';
     battle.msg = fixJosa(msg);
+    // 전공 기록 (승리 요약·업적용)
+    for (const g of kind === 'lose' ? defGens : atkGens) g.wins = (g.wins || 0) + 1;
+    const st = (s.stats = s.stats || {});
+    if (nid === s.playerId) st[kind === 'lose' ? 'lost' : 'won'] = (st[kind === 'lose' ? 'lost' : 'won'] || 0) + 1;
     log(s, msg, defender === null ? [nid] : [nid, defender], 'battle');
     if (defender !== null) {
       s.opinion[defender][nid] -= 15;
@@ -854,7 +875,12 @@ export function spawnGeneral(s, nid, rng, forced = false) {
   return gen;
 }
 
-export function addGeneral(s, data, nid, region, rng) {
+export function addGeneral(s, data, nid, region, rng, ruler = false) {
+  if (!s.opts?.histStats) {
+    const mine = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && g.base);
+    data = randomStats(data, fairTarget(mine.map((g) => g.base), rng, ruler), rng);
+  }
+  data = { ...data, base: Math.round(gradeScore(data)) };
   const { role, traits } = initTraits(data, rng);
   const gen = { ...data, role, traits, level: 1, exp: 0, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90) };
   s.generals[gen.id] = gen;

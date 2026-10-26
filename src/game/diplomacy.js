@@ -7,6 +7,7 @@ import { fmtGold } from './format.js';
 export const TREATY_LABEL = {
   alliance: '동맹 (상호 공격 불가)',
   nap: '불가침 10턴',
+  truce: '정전 6턴 (전쟁 중 휴전)',
   vassal_them: '상대가 내 속국이 됨',
   vassal_me: '내가 상대의 속국이 됨',
   joint: '공동 공격',
@@ -26,6 +27,7 @@ export function describeDeal(s, from, to, deal) {
   if (deal.get.regions.length) parts.push(`${To} → ${F}: 영토 ${rn(deal.get.regions)}`);
   if (deal.treaty === 'alliance') parts.push('동맹 체결');
   if (deal.treaty === 'nap') parts.push('10턴 불가침');
+  if (deal.treaty === 'truce') parts.push('6턴 정전');
   if (deal.treaty === 'vassal_them') parts.push(`${To}이(가) ${F}의 속국이 됨`);
   if (deal.treaty === 'vassal_me') parts.push(`${F}이(가) ${To}의 속국이 됨`);
   if (deal.treaty === 'joint' && deal.target !== null) parts.push(`함께 ${s.nations[deal.target].name} 공격`);
@@ -63,6 +65,7 @@ export function validateDeal(s, world, from, to, deal) {
   if (deal.get.regions.length >= nationRegions(s, to).length) return '상대의 모든 영토를 요구할 수는 없습니다.';
   const rel = getRel(s, from, to);
   if (deal.treaty === 'alliance' && rel.type === 'alliance') return '이미 동맹입니다.';
+  if ((deal.treaty === 'truce' || deal.treaty === 'nap') && rel.type !== 'none') return '이미 조약 관계입니다.';
   if ((deal.treaty === 'vassal_them' || deal.treaty === 'vassal_me') && rel.type === 'vassal') return '이미 종속 관계입니다.';
   if (deal.treaty === 'vassal_them' && s.nations.some((o) => o.alive && isVassalOf(s, from, o.id))) return '속국은 다른 나라를 속국으로 둘 수 없습니다.';
   if (deal.treaty === 'joint') {
@@ -99,6 +102,15 @@ export function evaluateDeal(s, world, from, to, deal) {
     case 'nap':
       v += -5 + (ratio > 1 ? 25 : 8) + op * 0.3 - (adj.has(from) ? 0 : 5);
       break;
+    case 'truce': {
+      // 최근 땅을 많이 잃었으면 쉬고 싶고, 이기고 있으면 싫다
+      const lostTo = s.nations[to].lost || 0, lostFrom = s.nations[from].lost || 0;
+      v += -20 + lostTo * 10 - lostFrom * 6 + (ratio > 1.2 ? 25 : ratio > 0.9 ? 8 : ratio > 0.5 ? -10 : -45) + op * 0.2;
+      // 후반 1위는 이기고 있는 전쟁을 멈추지 않음
+      const top = s.nations.filter((x) => x.alive).reduce((a, b) => (nationPower(s, b.id) > nationPower(s, a.id) ? b : a));
+      if (s.turn >= 35 && top.id === to && !s.nations[to].isPlayer) v -= 80;
+      break;
+    }
     case 'vassal_them':
       v += -160 + 110 * Math.max(0, Math.min(2.5, ratio - 1)) + op * 0.4 + (adj.has(from) ? 10 : -40);
       break;
@@ -153,6 +165,7 @@ export function applyDeal(s, world, from, to, deal) {
     s.opinion[to][from] += 15;
     s.opinion[from][to] += 15;
   } else if (deal.treaty === 'nap') setRel(s, from, to, { type: 'nap', until: s.turn + 10 });
+  else if (deal.treaty === 'truce') setRel(s, from, to, { type: 'nap', until: s.turn + 6, truce: true });
   else if (deal.treaty === 'vassal_them') setRel(s, from, to, { type: 'vassal', overlord: from, since: s.turn });
   else if (deal.treaty === 'vassal_me') setRel(s, from, to, { type: 'vassal', overlord: to, since: s.turn });
   else if (deal.treaty === 'joint') {

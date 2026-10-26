@@ -67,3 +67,10 @@ export const BATTLE_KIND = {
   landing: '🚣 상륙전',
   cliff: '🧗 절벽 상륙전',
 };
+
+// 난이도: 컴퓨터 세수·초기 병력 보정
+export const DIFFICULTY = {
+  easy: { name: '쉬움', tax: -0.15, troops: 0.85 },
+  normal: { name: '보통', tax: 0, troops: 1 },
+  hard: { name: '어려움', tax: 0.2, troops: 1.2 },
+};

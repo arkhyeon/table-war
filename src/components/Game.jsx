@@ -6,6 +6,7 @@ import { endTurn } from '../game/turn.js';
 import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck, getRel } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
+import { ACHIEVEMENTS } from '../game/achievements.js';
 import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
 import { spawnGeneral } from '../game/engine.js';
 import { stateRng } from '../game/rng.js';
@@ -61,6 +62,10 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     endTurn(s, world);
     setGame(s);
     if (s.spectator) return;
+    for (const id of s.newAchieve || []) {
+      const a = ACHIEVEMENTS.find((x) => x.id === id);
+      if (a) toast(`🏅 업적 달성: ${a.icon} ${a.name}`);
+    }
     const after = visibleSet(s, world, pid);
     const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid || before.has(b.to) || after.has(b.to) || before.has(b.from));
     if (s.opts?.showBattles !== false && seen.length && !s.gameOver) setReplay({ list: seen, i: 0 });
@@ -182,7 +187,8 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   }, [game, world, pid]);
   const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
   const year = yearOf(game.turn, scn.startYear ?? 1);
-  const myEvents = (game.turnEvents || []).filter((e) => e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
+  const flashSet = useMemo(() => new Set((game.turnEvents || []).flatMap((e) => e.rids || [])), [game.turnEvents]);
+  const myEvents = (game.turnEvents || []).filter((e) => e.global || e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
   const startDuel = ({ from, to, count, sel, opts }) => {
     const ag = duelist(sel.map((id) => game.generals[id]));
@@ -252,9 +258,9 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             </button>
           </div>
         )}
-        <button onClick={() => setModal({ type: 'diplo' })}>🤝 외교</button>
-        <button onClick={() => setModal({ type: 'gens' })}>⭐ 장수</button>
-        <button onClick={() => setShowLog((v) => !v)}>📜 기록</button>
+        <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
+        <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>
+        <button onClick={() => setShowLog((v) => !v)} title="기록">📜<span className="lbl"> 기록</span></button>
         <button onClick={() => setModal({ type: 'chronicle' })} title="연대기">📽️</button>
         <button onClick={() => setModal({ type: 'help' })}>❓</button>
         <button
@@ -265,7 +271,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           ☰
         </button>
         <button className="primary" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
-          턴 종료 ⏭
+          <span className="lbl">턴 종료 </span>⏭
         </button>
       </div>
       <div className="main">
@@ -284,11 +290,12 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             weather={game.weather}
             cutSet={cutSet}
             focus={replay ? replay.list[replay.i].to : null}
+            flash={flashSet}
             onClick={onRegionClick}
             onContext={onRegionContext}
           />
           {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} delay={replayDelay} onSpeed={toggleReplaySpeed} />}
-          {moveMode && <div className="map-hint">이동/공격할 인접 지역을 클릭하세요 (Esc 취소) · 노랑=이동 빨강=공격</div>}
+          {moveMode && <div className="map-hint">이동/공격할 인접 지역을 누르세요<span className="lbl"> (Esc 취소)</span> · 노랑=이동 빨강=공격</div>}
           {showLog && (
             <div className="log">
               {game.log.slice(0, 60).map((l, i) => (

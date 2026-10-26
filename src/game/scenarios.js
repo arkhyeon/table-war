@@ -17,6 +17,7 @@ export const SCENARIOS = [
   },
   {
     id: 'world1200',
+    winShare: 0.4,
     startYear: 1200,
     name: '세계사 1200년',
     era: '몽골 제국 직전',
@@ -56,6 +57,7 @@ export const SCENARIOS = [
   },
   {
     id: 'eastasia650',
+    winShare: 0.5,
     startYear: 650,
     name: '동아시아 650년',
     era: '삼국 통일 전쟁기',

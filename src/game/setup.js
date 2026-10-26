@@ -1,8 +1,8 @@
 import { makeRng, hashString } from './rng.js';
-import { T, G } from './rules.js';
+import { T, G, DIFFICULTY } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
-import { addGeneral, computeMaxAp } from './engine.js';
+import { addGeneral, computeMaxAp, nationPower } from './engine.js';
 import { rollWeather } from './weather.js';
 import { updateExplored, encodeOwners } from './fog.js';
 
@@ -156,6 +156,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     scenarioId: scn.id,
     seed,
     opts,
+    winShare: scn.winShare || 0.6,
     turn: 1,
     rs: hashString(`play:${scn.id}:${seed}`) | 0,
     playerId,
@@ -177,7 +178,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   };
   for (const n of plan) {
     const capReg = regions[n.region];
-    capReg.troops = (12 + n.size * 2) * 1000;
+    capReg.troops = Math.round(((12 + n.size * 2) * 1000 * (n.id === playerId && !opts.spectator ? 1 : DIFFICULTY[opts.difficulty]?.troops || 1)) / 100) * 100;
     capReg.loyalty = 100;
     capReg.buildings.walls = 3;
     capReg.buildings.market = 1;
@@ -213,7 +214,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       const cands = (POOLS[n.civ] || []).filter((g) => !s.usedGen[g.id]);
       data = rng.weighted(cands, (g) => rating(g) / (1 + (appearHistory[g.id] || 0) * 0.5)) || parseGeneral(`${n.name} 왕|60|60|60|60|정치`, `ruler_${n.id}`);
     }
-    const g = addGeneral(s, data, n.id, n.region, rng);
+    const g = addGeneral(s, data, n.id, n.region, rng, true);
     g.loyalty = 100;
     s.nations[n.id].ruler = g.id;
   }
@@ -226,6 +227,15 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
   }
+  // 업적용 시작 기록: 국력 순위, 섬 출발 여부
+  const pw = s.nations.map((x) => nationPower(s, x.id));
+  const isl = (() => {
+    const seen = new Set([s.nations[playerId].capital]);
+    const q = [...seen];
+    for (let k = 0; k < q.length; k++) for (const nb of world.regions[q[k]].neighbors) if (!world.regions[nb.id].sea && !seen.has(nb.id)) { seen.add(nb.id); q.push(nb.id); }
+    return seen.size < world.landCount * 0.15;
+  })();
+  s.stats = { startRank: pw.filter((v) => v > pw[playerId]).length, startCount: pw.length, startIsland: isl };
   s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, ...opts };
   delete s.opts.names;
   if (opts.spectator) s.spectator = true;

@@ -17,7 +17,7 @@ function outcome(a, b) {
 }
 
 export const duelHp = (g) => Math.round((60 + g.war * 0.7 + g.lead * 0.2) * (1 + tv([g], '무쌍')));
-export const duelPow = (g) => (8 + g.war * 0.2) * (1 + tv([g], '맹장') * 3);
+export const duelPow = (g) => Math.max(4, 2 + (g.war - 40) * 0.42) * (1 + tv([g], '맹장') * 3);
 
 const BASE_MIX = { attack: 1 / 3, defend: 1 / 3, counter: 1 / 3 };
 
@@ -31,7 +31,9 @@ export function bestResponse(opp) {
   return best;
 }
 
-export const readChance = (me, opp) => Math.max(0, Math.min(0.45, (me.intel - opp.intel) / 150 + 0.1));
+// 간파: 칼끝을 읽는 건 전장 감각 — 무력 85% + 지력 15%. 같으면 15%, 차이 20이면 약 35%
+const sense = (g) => g.war * 0.85 + g.intel * 0.15;
+export const readChance = (me, opp) => Math.max(0.05, Math.min(0.45, (sense(me) - sense(opp)) / 100 + 0.15));
 
 // AI의 수: 지력으로 상대 수를 간파하거나, 상대가 같은 수를 반복하면 그 버릇을 노린다
 export function aiMove(rng, me, opp, oppMove, history) {

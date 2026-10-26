@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
-  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf,
+  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, governorOf, doRelocate,
 } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex } from './diplomacy.js';
 
@@ -11,13 +11,15 @@ const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
 
 // 후반 패권국: 35턴 이후 국력 1위이면서 육지 22% 이상 → 0~1 (턴이 갈수록 공격적)
 export function hegemonDrive(s, nid) {
-  if (s.turn < 35) return 0;
+  if (s.turn < 30) return 0;
   const alive = s.nations.filter((n) => n.alive);
   const top = alive.reduce((a, b) => (nationPower(s, b.id) > nationPower(s, a.id) ? b : a));
   if (top.id !== nid) return 0;
   const land = s.regions.filter((r) => !r.sea).length;
-  if (nationRegions(s, nid).length / land < 0.22) return 0;
-  return Math.min(1, 0.4 + (s.turn - 35) / 50);
+  // 문턱: 통일선의 37%(60%면 22%), 나라가 많은 지도에선 더 낮게
+  const need = Math.min((s.winShare || 0.6) * 0.37, 2.2 / alive.length);
+  if (nationRegions(s, nid).length / land < need) return 0;
+  return Math.min(1, 0.5 + (s.turn - 30) / 40);
 }
 
 const hostile = (s, a, b) => {
@@ -201,7 +203,13 @@ export function aiActions(s, world, nid) {
   const building = n.posture === 'build';
   const drive = n.isPlayer ? 0 : hegemonDrive(s, nid);
   // 패권국 총동원: 행동력 +1~2
-  if (drive) n.ap += Math.round(drive * 2);
+  if (drive) n.ap += Math.round(drive * 3);
+  // 태수 배치: 놀고 있는 문관 한 명을 태수 없는 큰 고을로 (턴당 1명)
+  if (n.ap > 3) {
+    const civs = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && g.role === 'civ' && n.ruler !== g.id && governorOf(s, g.region)?.id !== g.id);
+    const spot = nationRegions(s, nid).filter((r) => governorOf(s, r)?.role !== 'civ').sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
+    if (civs.length && spot !== undefined) doRelocate(s, nid, civs[0].id, spot);
+  }
   // 오래된 속국 병합 (패권국은 항상, 나머지는 가끔)
   for (const o of s.nations) {
     if (!o.alive || o.isPlayer || o.id === nid || annexCheck(s, nid, o.id)) continue;
@@ -436,7 +444,11 @@ export function aiDiplomacy(s, world, nid) {
   const myP = nationPower(s, nid), theirP = nationPower(s, o.id);
   const op = s.opinion[nid][o.id];
   const deal = emptyDeal();
-  if (rel.type === 'none' && op > 25) deal.treaty = 'alliance';
+  if (rel.type === 'none' && (n.lost || 0) >= 2.5 && neighbors.has(o.id) && theirP > myP * 0.9) {
+    // 땅을 연달아 잃는 중: 금을 주고 정전 요청
+    deal.treaty = 'truce';
+    deal.give.gold = Math.min(n.gold, Math.round(n.gold * 0.2));
+  } else if (rel.type === 'none' && op > 25) deal.treaty = 'alliance';
   else if (rel.type === 'none' && theirP > myP * 2.2 && neighbors.has(o.id) && rng.chance(0.4)) deal.treaty = 'vassal_me';
   else if (rel.type === 'none' && theirP > myP * 1.3 && neighbors.has(o.id)) {
     deal.treaty = 'nap';

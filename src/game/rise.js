@@ -71,6 +71,11 @@ function seize(s, world, n, rids, troopsMult = 1) {
   n.capital = rids[0];
 }
 
+// 신흥국 소식: 모든 나라에 알리고 지도에서 깜빡임
+function announceRise(s, n, rids, icon, title, story, others = []) {
+  (s.turnEvents = s.turnEvents || []).push({ icon, title, story, effect: `${n.name} 건국 (${rids.length}개 지역)`, nations: [n.id, ...others], global: true, rids });
+}
+
 function finish(s, n, king) {
   king.status = 'active';
   king.captor = null;
@@ -85,7 +90,7 @@ function finish(s, n, king) {
 // 1) 부흥: 망국의 왕이었던 장수가 불만을 품고 옛 땅에서 거병
 function tryRestore(s, world, rng) {
   const cands = Object.values(s.generals).filter((g) => {
-    if (!g.exKing || g.status !== 'active' || (g.loyalty ?? 100) >= 60 || s.turn - (g.joined ?? 0) < 8) return false;
+    if (!g.exKing || g.status !== 'active' || (g.loyalty ?? 100) >= 50 || s.turn - (g.joined ?? 0) < 8) return false;
     const host = s.nations[g.nation];
     if (!host?.alive || host.isPlayer || host.ruler === g.id || host.capital === g.region) return false;
     return (s.regions[g.region].loyalty ?? 100) < 70;
@@ -107,6 +112,7 @@ function tryRestore(s, world, rng) {
   }
   seize(s, world, n, rids, 1);
   finish(s, n, king);
+  announceRise(s, n, rids, '🔥', `${n.name} 부흥`, `옛 군주 ${king.name}이(가) ${s.nations[host].name}의 지배에 반기를 들고 옛 나라를 되살렸습니다.`, [host]);
   log(s, `🔥 옛 ${n.name}의 군주 ${king.name}이(가) ${s.nations[host].name}에 반기를 들고 ${n.name}을(를) 부흥했습니다! (${rids.length}개 지역)`, [n.id, host], 'warn');
   return true;
 }
@@ -133,15 +139,16 @@ function tryRise(s, world, rng) {
   const lead = leaderFor(s, civ, rng);
   const n = newNation(s, civ, freshName(s, civ, rng));
   seize(s, world, n, o.rids, o.mult);
-  const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng);
+  const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng, true);
   finish(s, n, king);
   const how = o.from !== undefined ? `${s.nations[o.from].name}의 학정에 맞서 ${s.regions[o.rids[0]].name}에서 독립` : `${s.regions[o.rids[0]].name} 일대의 빈 땅에서 거병`;
+  announceRise(s, n, o.rids, '🌱', `신흥국 ${n.name} 출현`, `${king.name}이(가) ${how}했습니다.`, o.from !== undefined ? [o.from] : []);
   log(s, `🌱 ${king.name}이(가) ${how}해 신흥국 ${n.name}을(를) 세웠습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
   return true;
 }
 
 export function riseNations(s, world, rng) {
   if (s.turn < 10 || s.opts?.noRise) return;
-  if (rng() < 0.25 && tryRestore(s, world, rng)) return;
-  if (rng() < 0.04) tryRise(s, world, rng);
+  if (rng() < 0.08 && tryRestore(s, world, rng)) return;
+  if (rng() < 0.03) tryRise(s, world, rng);
 }
