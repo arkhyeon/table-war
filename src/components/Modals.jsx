@@ -131,7 +131,7 @@ function opinionLabel(v) {
   return '적대';
 }
 
-export function DiplomacyModal({ world, game, act, onClose }) {
+export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const others = game.nations.filter((n) => n.alive && n.id !== pid);
@@ -205,7 +205,7 @@ export function DiplomacyModal({ world, game, act, onClose }) {
                   className="danger sm"
                   onClick={() => {
                     const warn = rel.type === 'alliance' ? '동맹 파기: 평판 -10, 상대 호감 -30' : rel.type === 'nap' ? '불가침 파기: 평판 -8, 상대 호감 -25' : rel.overlord === pid ? '속국을 독립시킵니다.' : '독립 선언: 평판 -5, 종주국 호감 -40';
-                    if (confirm(warn + '\n진행할까요?')) act((s) => breakTreaty(s, pid, t.id));
+                    confirmIt(warn + ' — 진행할까요?', () => act((s) => breakTreaty(s, pid, t.id)));
                   }}
                 >
                   {rel.type === 'alliance' ? '동맹 파기' : rel.type === 'nap' ? '불가침 파기' : rel.overlord === pid ? '속국 해방' : '독립 선언'}
@@ -296,7 +296,7 @@ export function DiplomacyModal({ world, game, act, onClose }) {
 }
 
 // ───────── 장수 ─────────
-export function GeneralsModal({ world, game, act, onClose, onFocus }) {
+export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus }) {
   const pid = game.playerId;
   const [tab, setTab] = useState('mine');
   const mine = nationGenerals(game, pid).sort((a, b) => rating(b) - rating(a));
@@ -379,7 +379,7 @@ export function GeneralsModal({ world, game, act, onClose, onFocus }) {
                   <button className="sm" disabled={isRuler(game, g) || game.tried[g.id] === game.turn || me.ap < COST.recruit} onClick={() => act((s) => doRecruit(s, pid, g.id))}>
                     등용 ({recruitChance(game, pid, g)}%, {COST.recruit}AP)
                   </button>
-                  <button className="sm danger" onClick={() => confirm(`${g.name}을(를) 처형할까요? (평판 -4)`) && act((s) => doExecute(s, pid, g.id))}>
+                  <button className="sm danger" onClick={() => confirmIt(fixJosa(`${g.name}을(를) 처형할까요? (평판 -4)`), () => act((s) => doExecute(s, pid, g.id)))}>
                     처형
                   </button>
                   <button className="sm" onClick={() => act((s) => doRelease(s, pid, g.id))}>
@@ -570,5 +570,21 @@ export function HelpModal({ onClose }) {
         <p className="muted">문명: {Object.values(CIVS).map((c) => c.name).join(', ')}</p>
       </div>
     </Modal>
+  );
+}
+
+export function ConfirmModal({ text, onYes, onNo }) {
+  return (
+    <div className="modal-bg" style={{ zIndex: 20 }} onMouseDown={(e) => e.target === e.currentTarget && onNo()}>
+      <div className="modal" style={{ width: 'min(400px, 100%)' }}>
+        <p style={{ marginTop: 0 }}>{text}</p>
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onNo}>취소</button>
+          <button className="primary" onClick={onYes}>
+            확인
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

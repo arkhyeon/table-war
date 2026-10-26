@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
 import { edgeBetween, getRel, canSail, income } from '../game/engine.js';
 import { fixJosa } from '../game/josa.js';
@@ -12,7 +12,9 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const [moveMode, setMoveMode] = useState(false);
   const [modal, setModal] = useState(null);
   const [toasts, setToasts] = useState([]);
-  const [showLog, setShowLog] = useState(true);
+  const [showLog, setShowLog] = useState(() => window.innerWidth > 860);
+  const [ask, setAsk] = useState(null); // { text, onYes }
+  const confirmIt = useCallback((text, onYes) => setAsk({ text, onYes }), []);
   const toastId = useRef(0);
   const me = game.nations[game.playerId];
 
@@ -145,7 +147,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <button onClick={() => setModal({ type: 'help' })}>❓</button>
         <button
           onClick={() => {
-            if (confirm('메인 화면으로 나갈까요? (자동 저장됨)')) onExit();
+            confirmIt('메인 화면으로 나갈까요? (자동 저장됨)', onExit);
           }}
         >
           ☰
@@ -196,11 +198,21 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
-      {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} onClose={() => setModal(null)} />}
-      {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
+      {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
+      {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal?.type === 'news' && <NewsModal news={game.turnNews || []} turn={game.turn} onClose={() => setModal(null)} />}
       {showProposal && <ProposalModal world={world} game={game} act={act} />}
+      {ask && (
+        <ConfirmModal
+          text={ask.text}
+          onNo={() => setAsk(null)}
+          onYes={() => {
+            setAsk(null);
+            ask.onYes();
+          }}
+        />
+      )}
       {game.gameOver && (
         <GameOverModal
           result={game.gameOver}
