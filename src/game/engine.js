@@ -87,7 +87,7 @@ export function moveCost(world, from, to, s) {
   if (!e) return Infinity;
   let c = COST.move;
   if (world.regions[to].terrain === T.MOUNTAIN) c += 1;
-  if (e.type === 'cliff') c += 1;
+  if (e.type === 'cliff' || e.type === 'strait') c += 1;
   if (s) c += weatherOf(s, to).ap;
   return c;
 }
@@ -115,6 +115,11 @@ export const WALL_MAX = 3;
 export const ENGINE_MAX = 3;
 
 // ───────── 전투 계산 ─────────
+// 장수 보정은 여러 장수·특성이 겹쳐도 무한히 커지지 않게 완만한 상한(+60%)을 둔다
+// 실제 = 0.6 × (1 − e^(−합/0.6)) : 합 +20% → +17%, +40% → +29%, +80% → +44%, +150% → +55%
+export const GEN_CAP = 0.6;
+export const capBonus = (x) => (x <= 0 ? x : GEN_CAP * (1 - Math.exp(-x / GEN_CAP)));
+
 // opts.mode: 'siege'(포위: 성벽을 깎음) | 'assault'(강습: 이기면 즉시 함락, 성벽 효과·손실 증가)
 // opts.engines: 동행 공성병기 수
 export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
@@ -129,7 +134,8 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
     if (v) mods.push(`${label} ${v > 0 ? '+' : ''}${Math.round(v * 100)}%`);
     return v;
   };
-  let a = 1;
+  let a = 0; // 장수로 인한 공격 보정 합 (상한 적용 전)
+  let betrayal = 0;
   if (att.length) {
     const best = Math.max(...att.map((g) => g.lead * 0.5 + g.war * 0.5));
     a += add('장수 지휘', best / 250);
@@ -146,11 +152,11 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   let edgeMult = EDGE[e.type].mult;
   if (e.type === 'river' && tv(att, '도하')) edgeMult = 1;
   if (e.type === 'landing' && tv(att, '수군')) edgeMult = 1;
-  if (e.type === 'landing' || e.type === 'cliff') edgeMult = 1 - (1 - edgeMult) * (1 - tv(att, '상륙'));
+  if (e.type === 'landing' || e.type === 'cliff' || e.type === 'strait') edgeMult = 1 - (1 - edgeMult) * (1 - Math.max(tv(att, '상륙'), e.type === 'strait' ? tv(att, '수군') : 0));
   if (edgeMult < 1) mods.push(`${EDGE[e.type].name} ${Math.round((edgeMult - 1) * 100)}%`);
   if (terr === T.DESERT && !tv(att, '사막')) { edgeMult *= 0.9; mods.push('사막 소모 -10%'); }
   const rel = tr.owner === null ? { type: 'none' } : getRel(s, nid, tr.owner);
-  if (rel.type === 'nap' || rel.type === 'vassal') { a -= 0.15; mods.push('배신 사기저하 -15%'); }
+  if (rel.type === 'nap' || rel.type === 'vassal') { betrayal = 0.15; mods.push('배신 사기저하 -15%'); }
   // 상륙은 출발한 바다의 날씨, 그 외는 전장 날씨
   const seaSide = e.type === 'landing' || e.type === 'cliff';
   const w = weatherOf(s, seaSide ? from : to);
@@ -169,7 +175,7 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   const buffA = nationBuff(s, nid, 'att');
   if (buffA !== 1) mods.push(`특수 효과 ${buffA > 1 ? '+' : ''}${Math.round((buffA - 1) * 100)}%`);
 
-  let d = 1;
+  let d = 0; // 장수로 인한 방어 보정 합 (상한 적용 전)
   if (def.length) {
     const best = Math.max(...def.map((g) => g.lead * 0.6 + g.intel * 0.4));
     d += best / 250 + tv(def, '수성') + tv(def, '책략') + tv(def, '궁술');
@@ -191,8 +197,9 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   // 대동맹 회원국은 패권국의 침공에 결사항전
   if (s.coalition && s.coalition.target === nid && s.coalition.members?.includes(tr.owner)) buffD *= 1.15;
   return {
-    attMult: a * edgeMult * weather * attSupply * buffA,
-    defMult: d * terrDef * walls * capital * defSupply * buffD * awe,
+    attMult: (1 + capBonus(a) - betrayal) * edgeMult * weather * attSupply * buffA,
+    defMult: (1 + capBonus(d)) * terrDef * walls * capital * defSupply * buffD * awe,
+    genAtt: capBonus(a), genAttRaw: a, genDef: capBonus(d), genDefRaw: d,
     mods, def, att, edge: e, terrDef, walls, defSupply, weather: w,
   };
 }

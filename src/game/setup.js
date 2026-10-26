@@ -16,7 +16,17 @@ export function planNations(world, scn, seed, opts = {}) {
     const count = opts.nationCount || 8;
     const civs = rng.shuffle(RANDOM_CIVS.slice());
     const caps = [];
-    const regs = world.regions.filter((r) => r.cells.length >= 4);
+    // 수도 후보: 육지이면서 지역 5곳 이상인 땅덩어리에 속한 곳 (바다 구역·작은 섬 제외)
+    const mass = new Array(world.regions.length).fill(-1);
+    const massSize = [];
+    for (const r of world.regions) {
+      if (r.sea || mass[r.id] >= 0) continue;
+      const q = [r.id];
+      mass[r.id] = massSize.length;
+      for (let k = 0; k < q.length; k++) for (const nb of world.regions[q[k]].neighbors) if (!world.regions[nb.id].sea && mass[nb.id] < 0) { mass[nb.id] = mass[r.id]; q.push(nb.id); }
+      massSize.push(q.length);
+    }
+    const regs = world.regions.filter((r) => !r.sea && r.cells.length >= 4 && massSize[mass[r.id]] >= 5);
     for (let i = 0; i < count && regs.length; i++) {
       let best = null, bd = -1;
       for (let k = 0; k < 60; k++) {
@@ -32,11 +42,35 @@ export function planNations(world, scn, seed, opts = {}) {
       return { name: names[Math.floor(i / civs.length) % names.length] || `${CIVS[civ].name}${i}`, civ, region: r.id, size: rng.int(3, 6), capital: null, ruler: null, pools: [civ] };
     });
   } else {
-    const taken = new Set();
-    list = scn.nations.map((n) => {
+    // 수도 배치: 모든 (국가, 지역) 쌍을 거리순으로 정렬해 가까운 것부터 짝지음 → 연쇄로 밀려나는 일 방지
+    const pairs = [];
+    scn.nations.forEach((n, i) => {
       const [x, y] = world.toPx(n.lon, n.lat);
-      const region = world.nearestRegion(x, y, (id) => !taken.has(id));
-      taken.add(region);
+      const best = new Map();
+      for (let c = 0; c < world.N; c++) {
+        const r = world.region[c];
+        if (r < 0) continue;
+        const [cx, cy] = world.center(c);
+        const d = (cx - x) ** 2 + (cy - y) ** 2;
+        if (!best.has(r) || d < best.get(r)) best.set(r, d);
+      }
+      [...best.entries()].sort((a, b) => a[1] - b[1]).slice(0, 12).forEach(([r, d]) => pairs.push([d, i, r]));
+    });
+    pairs.sort((a, b) => a[0] - b[0]);
+    const capOf = new Array(scn.nations.length).fill(-1);
+    const taken = new Set();
+    for (const [, i, r] of pairs) {
+      if (capOf[i] >= 0 || taken.has(r)) continue;
+      capOf[i] = r;
+      taken.add(r);
+    }
+    list = scn.nations.map((n, i) => {
+      let region = capOf[i];
+      if (region < 0) {
+        const [x, y] = world.toPx(n.lon, n.lat);
+        region = world.nearestRegion(x, y, (id) => !taken.has(id));
+        taken.add(region);
+      }
       return { ...n, region, pools: n.pools || [n.civ] };
     });
   }
@@ -61,7 +95,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       for (let r = 0; r < R; r++) {
         if (owner[r] !== n.id) continue;
         for (const nb of world.regions[r].neighbors) {
-          if (owner[nb.id] !== null || world.regions[nb.id].sea) continue;
+          if (owner[nb.id] !== null || world.regions[nb.id].sea || nb.type === 'strait') continue;
           const t = world.regions[nb.id];
           const d = Math.hypot(t.cx - cap.cx, t.cy - cap.cy) + rng() * 10;
           if (d < bd) { bd = d; best = nb.id; }
@@ -184,10 +218,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
   }
-  s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, turnsPerSeason: 2, ...opts };
+  s.opts = { revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, ...opts };
   delete s.opts.names;
   if (opts.spectator) s.spectator = true;
-  s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff, s.opts.turnsPerSeason);
+  s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다. (시드: ${seed})`, nations: [playerId], kind: 'info' });

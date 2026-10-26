@@ -1,9 +1,10 @@
 import { T } from './rules.js';
 
 export const SEASONS = ['봄', '여름', '가을', '겨울'];
-// 계절 길이(턴)는 판마다 옵션 (기본 2턴 = 한 계절, 8턴 = 1년)
-export const seasonOf = (turn, tps = 2) => Math.floor((turn - 1) / tps) % 4;
-export const yearOf = (turn, start = 1, tps = 2) => start + Math.floor((turn - 1) / (tps * 4));
+// 2턴 = 한 계절, 8턴 = 1년
+export const TURNS_PER_SEASON = 2;
+export const seasonOf = (turn) => Math.floor((turn - 1) / TURNS_PER_SEASON) % 4;
+export const yearOf = (turn, start = 1) => start + Math.floor((turn - 1) / (TURNS_PER_SEASON * 4));
 
 // 날씨 효과: att=공격력 배율(전장 기준), ap=진입 행동력 추가, tax=세수 배율, loyalty=민심 변화, noSea=항해 불가
 export const WEATHER = {
@@ -65,8 +66,8 @@ export function climateOf(r) {
   return 'temperate';
 }
 
-export function rollWeather(world, turn, seedNum, tps = 2) {
-  const season = seasonOf(turn, tps);
+export function rollWeather(world, turn, seedNum) {
+  const season = seasonOf(turn);
   const zone = world.unit * 9;
   return world.regions.map((r) => {
     const zx = Math.floor(r.cx / zone), zy = Math.floor(r.cy / zone);

@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
-  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income,
+  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf,
 } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal } from './diplomacy.js';
 
@@ -22,6 +22,25 @@ const hostile = (s, a, b) => {
 const isEnemyFleet = (s, nid, rid) => s.regions[rid].sea && s.regions[rid].owner !== null && s.regions[rid].owner !== nid && s.regions[rid].troops > 0;
 
 // 전략 목표: 6턴마다 가장 만만하거나 미운 이웃 국가를 정하고 병력을 그쪽 국경으로 모은다
+// 태세: 목표국보다 확실히 강하거나 공격받는 중이면 '전쟁', 아니면 '내실'(징병·건설 우선, 국가 공격 자제)
+function updatePosture(s, world, nid) {
+  const n = s.nations[nid];
+  const mine = nationRegions(s, nid);
+  const avgLoy = mine.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, mine.length);
+  let underAttack = false;
+  for (const r of mine) {
+    let enemy = 0;
+    for (const nb of world.regions[r].neighbors) {
+      const t = s.regions[nb.id];
+      if (t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner)) enemy += t.troops;
+    }
+    if (enemy > s.regions[r].troops * 1.5 && enemy > 5000) underAttack = true;
+  }
+  const ratio = n.goal !== null && n.goal !== undefined && s.nations[n.goal]?.alive ? nationPower(s, nid) / Math.max(1, nationPower(s, n.goal)) : 0;
+  const strong = ratio >= 1.25 && avgLoy >= 50 && income(s, nid).net > 0;
+  n.posture = strong || (underAttack && ratio >= 0.8) || s.coalition?.target === n.goal ? 'war' : 'build';
+}
+
 function updateGoal(s, world, nid) {
   const n = s.nations[nid];
   if (n.goal !== undefined && n.goal !== null && s.nations[n.goal]?.alive && s.turn - (n.goalSince || 0) < 6) return;
@@ -122,6 +141,8 @@ function attackOption(s, world, nid, from, to, count, gens, need) {
 export function aiActions(s, world, nid) {
   const n = s.nations[nid];
   updateGoal(s, world, nid);
+  updatePosture(s, world, nid);
+  const building = n.posture === 'build';
   // 섬나라: 육로로 맞닿은 적이나 중립지가 없으면 해군 중심
   const island = !nationRegions(s, nid).some((r) => world.regions[r].neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== nid && hostile(s, nid, s.regions[x.id].owner)));
   let guard = 0;
@@ -146,11 +167,12 @@ export function aiActions(s, world, nid) {
         const count = reg.sea ? reg.troops : reg.troops - 1000 - keep;
         if (count < 2000 && !reg.sea) continue;
         if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;
-        const need = t.owner === null ? 1.25 : s.coalition?.target === t.owner && inCoalition(s, nid) ? 1.05 : 1.15 + (1 - n.aggression) * 0.45;
+        let need = t.owner === null ? 1.25 : s.coalition?.target === t.owner && inCoalition(s, nid) ? 1.05 : 1.15 + (1 - n.aggression) * 0.45;
+        if (building && t.owner !== null) need += 0.4; // 내실 중엔 확실한 기회만
         const { est, opts: mo } = attackOption(s, world, nid, r, nb.id, count, gens, need);
         if (est.ratio < need) continue;
         const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0);
-        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? 15 : 0), run: () => doMove(s, world, nid, r, nb.id, count, gens, mo) });
+        opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? 15 : 0) - (building && t.owner !== null ? 20 : 0), run: () => doMove(s, world, nid, r, nb.id, count, gens, mo) });
       }
     }
     // 승선: 바다 건너 약한 해안이 있으면 함대를 띄움
@@ -178,10 +200,27 @@ export function aiActions(s, world, nid) {
     }
     // 바다에 남은 함대는 가까운 아군 해안으로 귀환
     for (const z of fleets) {
+      if (s.regions[z].guard === nid && s.regions[z].troops >= 3000) continue;
       const back = world.regions[z].neighbors.find((x) => (x.type === 'landing' || x.type === 'cliff') && s.regions[x.id].owner === nid);
       if (back && !moveCheck(s, world, nid, z, back.id, s.regions[z].troops, [])) {
         const gens = gensIn(s, z, nid).map((g) => g.id);
         opts.push({ score: 12, run: () => doMove(s, world, nid, z, back.id, s.regions[z].troops, gens) });
+      }
+    }
+    // 경비 함대: 적 해안과 맞닿은 바다에 함대를 띄워 바닷길을 막음 (해전 유도)
+    if (!fleets.some((z) => s.regions[z].guard === nid) && s.turn > 3) {
+      for (const r of mine) {
+        const reg = s.regions[r];
+        if (!reg.buildings.port || reg.troops < 14000) continue;
+        const z = world.regions[r].neighbors.find((x) => {
+          if (x.type !== 'coast' || s.regions[x.id].owner !== null) return false;
+          return world.regions[x.id].neighbors.some((y) => !s.regions[y.id].sea && s.regions[y.id].owner !== null && s.regions[y.id].owner !== nid && hostile(s, nid, s.regions[y.id].owner));
+        });
+        if (!z) continue;
+        const cnt = Math.round(Math.min(8000, reg.troops / 4) / 100) * 100;
+        if (moveCheck(s, world, nid, r, z.id, cnt, [])) continue;
+        opts.push({ score: island ? 22 : 11, run: () => { const res = doMove(s, world, nid, r, z.id, cnt, []); if (res.ok) s.regions[z.id].guard = nid; return res; } });
+        break;
       }
     }
     // 징병: 민심이 45 아래로 떨어지지 않을 만큼, 금이 허락하는 만큼
@@ -197,7 +236,7 @@ export function aiActions(s, world, nid) {
         return k.loyalty > (r.loyalty ?? 100) - 45 || k.gold > n.gold - 20 * G || a > net * 0.5;
       };
       while (amount > 1000 && bad(amount)) amount -= 500;
-      if (amount >= 1000 && conscriptCost(s, c, amount, mode).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 * G ? 12 : 0) + (dist[c] === 0 ? 6 : 0), run: () => doConscript(s, world, nid, c, amount, mode) });
+      if (amount >= 1000 && conscriptCost(s, c, amount, mode).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 * G ? 12 : 0) + (dist[c] === 0 ? 6 : 0) + (building ? 8 : 0), run: () => doConscript(s, world, nid, c, amount, mode) });
     }
     // 진휼: 반란 위험 지역
     const sad = mine.filter((r) => (s.regions[r].loyalty ?? 100) < 28 && (s.regions[r].reliefTurn === undefined || s.turn - s.regions[r].reliefTurn >= RELIEF_COOLDOWN)).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty)[0];
@@ -206,7 +245,7 @@ export function aiActions(s, world, nid) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
       if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
       const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
-      if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2, run: () => doBuild(s, world, nid, mk, 'market') });
+      if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2 + (building ? 6 : 0), run: () => doBuild(s, world, nid, mk, 'market') });
       const br = mine.filter((r) => !s.regions[r].buildings.barracks && dist[r] <= 1).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
       if (br !== undefined && n.gold >= 200 * G) opts.push({ score: 15, run: () => doBuild(s, world, nid, br, 'barracks') });
       const pt = mine.filter((r) => world.regions[r].coastal && !s.regions[r].buildings.port).sort((a, b) => s.regions[b].troops - s.regions[a].troops)[0];
@@ -237,9 +276,41 @@ export function aiActions(s, world, nid) {
 }
 
 // AI 외교: 다른 AI와 자동 협상, 플레이어에게는 제안을 보냄
+// 강한 이웃이 생기면 그 이웃과 맞닿은 다른 나라에 동맹·공동 공격을 제안
+function seekCoalition(s, world, nid, rng) {
+  const myP = nationPower(s, nid);
+  const nbs = new Set();
+  for (const r of nationRegions(s, nid)) for (const nb of world.regions[r].neighbors) {
+    const o = s.regions[nb.id].owner;
+    if (o !== null && o !== nid && !s.regions[nb.id].sea) nbs.add(o);
+  }
+  const threat = [...nbs].filter((o) => hostile(s, nid, o) && nationPower(s, o) > myP * 1.4).sort((a, b) => nationPower(s, b) - nationPower(s, a))[0];
+  if (threat === undefined || !rng.chance(0.5)) return false;
+  const bordersThreat = (x) => nationRegions(s, x).some((r) => world.regions[r].neighbors.some((nb) => s.regions[nb.id].owner === threat));
+  const partners = s.nations.filter((o) => o.alive && o.id !== nid && o.id !== threat && bordersThreat(o.id) && getRel(s, o.id, threat).type !== 'alliance' && !isVassalOf(s, o.id, threat));
+  if (!partners.length) return false;
+  const o = rng.pick(partners);
+  const deal = emptyDeal();
+  const rel = getRel(s, nid, o.id);
+  if (rel.type === 'alliance') {
+    if (s.joint.some((j) => (j.a === nid || j.b === nid) && j.target === threat)) return false;
+    deal.treaty = 'joint';
+    deal.target = threat;
+  } else if (rel.type === 'none') deal.treaty = 'alliance';
+  else return false;
+  if (validateDeal(s, world, nid, o.id, deal)) return false;
+  if (o.isPlayer) {
+    if (s.proposals.length < 2) s.proposals.push({ from: nid, deal, text: describeDeal(s, nid, o.id, deal) + ` (공동의 위협: ${s.nations[threat].name})` });
+    return true;
+  }
+  if (evaluateDeal(s, world, nid, o.id, deal) >= 0) applyDeal(s, world, nid, o.id, deal);
+  return true;
+}
+
 export function aiDiplomacy(s, world, nid) {
   const rng = stateRng(s);
   const n = s.nations[nid];
+  if (seekCoalition(s, world, nid, rng)) return;
   if (!rng.chance(0.18)) return;
   const others = s.nations.filter((o) => o.alive && o.id !== nid);
   if (!others.length) return;

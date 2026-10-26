@@ -90,6 +90,10 @@ export function evaluateDeal(s, world, from, to, deal) {
       v += -25 + op * 0.8 + (ratio > 1 ? 15 : 0);
       const enemies = s.nations.filter((o) => o.alive && o.id !== to && o.id !== from && s.opinion[to][o.id] < -20 && s.opinion[from][o.id] < -10);
       if (enemies.length) v += 20;
+      // 둘 다 맞닿은 더 강한 나라가 있으면 손잡을 이유가 충분
+      const nbTo = adjacentNations(s, world, to), nbFrom = adjacentNations(s, world, from);
+      const big = s.nations.some((o) => o.alive && o.id !== to && o.id !== from && nbTo.has(o.id) && nbFrom.has(o.id) && nationPower(s, o.id) > Math.max(P, Q) * 1.3);
+      if (big) v += 30;
       break;
     }
     case 'nap':

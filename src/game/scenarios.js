@@ -24,7 +24,7 @@ export const SCENARIOS = [
     bbox: [-170, -56, 180, 76],
     cols: 100,
     rows: 50,
-    regionSize: 10,
+    regionSize: 6,
     seaReach: 3,
     nations: [
       N('몽골', 'steppe', 103, 47, 7, '카라코룸', '테무진|90|99|92|90|명장'),
@@ -61,9 +61,9 @@ export const SCENARIOS = [
     era: '삼국 통일 전쟁기',
     desc: '당 태종의 대당제국, 고구려·백제·신라, 토번과 돌궐이 각축하는 7세기 동아시아.',
     bbox: [70, 12, 150, 55],
-    cols: 66,
-    rows: 42,
-    regionSize: 11,
+    cols: 80,
+    rows: 51,
+    regionSize: 8,
     seaReach: 4,
     nations: [
       N('당', 'china', 108.9, 34.3, 10, '장안', '당 태종|80|95|90|95|명장'),

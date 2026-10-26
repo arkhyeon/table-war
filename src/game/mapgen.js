@@ -80,6 +80,7 @@ function buildHistorical(scn, g) {
   const geo = makeGeo(scn.bbox, W, H);
   g.geo = geo;
   const isLand = rasterLand(geo, W, H);
+  g.isLand = isLand;
   for (let i = 0; i < N; i++) {
     const [x, y] = center(i);
     let n = isLand(x, y) ? 1 : 0;
@@ -233,6 +234,14 @@ class Heap {
   get size() { return this.a.length; }
 }
 
+// 두 육지 칸 사이에 실제로 바다(해협)가 있는지: 중심을 잇는 선 위 세 점을 실제 해안선으로 검사
+function waterBetween(g, a, b) {
+  if (!g.isLand) return false;
+  const [ax, ay] = g.center(a), [bx, by] = g.center(b);
+  for (const t of [0.35, 0.5, 0.65]) if (!g.isLand(ax + (bx - ax) * t, ay + (by - ay) * t)) return true;
+  return false;
+}
+
 function buildRegions(scn, g) {
   const { N, cols, rows, terrain, river, rng } = g;
   const passable = (i) => terrain[i] !== T.SEA && terrain[i] !== T.PEAK;
@@ -255,7 +264,7 @@ function buildRegions(scn, g) {
     region[c] = k;
     for (let d = 0; d < 6; d++) {
       const nb = neighborIndex(cols, rows, c, d);
-      if (nb < 0 || !passable(nb) || region[nb] !== -1) continue;
+      if (nb < 0 || !passable(nb) || region[nb] !== -1 || waterBetween(g, c, nb)) continue;
       const step = 1 + (terrain[nb] === T.MOUNTAIN ? 1.2 : 0) + (river[nb] !== river[c] ? 1.6 : 0) + rng() * 0.9;
       heap.push([cost + step, nb, k]);
     }
@@ -335,7 +344,8 @@ function finalizeRegions(scn, g) {
         if (nb < 0 || region[nb] < 0 || region[nb] === r.id) continue;
         if (region[nb] < r.id) continue;
         const key = r.id * 100000 + region[nb];
-        const p = pairs.get(key) || { n: 0, riv: 0 };
+        const p = pairs.get(key) || { n: 0, riv: 0, water: 0 };
+        if (waterBetween(g, c, nb)) p.water++;
         p.n++;
         if (river[c] || river[nb]) p.riv++;
         pairs.set(key, p);
@@ -369,7 +379,7 @@ function finalizeRegions(scn, g) {
   }
   for (const [key, p] of pairs) {
     const a = Math.floor(key / 100000), b = key % 100000;
-    const type = p.riv / p.n >= 0.4 ? 'river' : 'land';
+    const type = p.water / p.n > 0.5 ? 'strait' : p.riv / p.n >= 0.4 ? 'river' : 'land';
     regs[a].neighbors.push({ id: b, type });
     regs[b].neighbors.push({ id: a, type });
   }
@@ -649,17 +659,21 @@ export function generateWorld(scn0, seed) {
   g.toPx = g.geo ? g.geo.toPx : null;
   // 기후 판정용 위도
   for (const r of g.regions) r.lat = g.geo ? g.geo.toLL(r.cx, r.cy)[1] : 62 - (r.cy / H) * 124;
+  // 좌표에서 가장 가까운 육지 칸이 속한 지역 (필터를 통과하는 지역만)
   g.nearestRegion = (x, y, filter) => {
-    let best = -1, bd = Infinity;
     const c = pixelToCell(size, cols, rows, x, y);
     if (c >= 0 && g.region[c] >= 0 && (!filter || filter(g.region[c]))) return g.region[c];
-    for (const r of g.regions) {
-      if (r.sea || (filter && !filter(r.id))) continue;
-      const d = Math.hypot(r.cx - x, r.cy - y);
-      if (d < bd) { bd = d; best = r.id; }
+    let best = -1, bd = Infinity;
+    for (let i = 0; i < N; i++) {
+      const r = g.region[i];
+      if (r < 0 || (filter && !filter(r))) continue;
+      const [cx, cy] = g.center(i);
+      const d = (cx - x) ** 2 + (cy - y) ** 2;
+      if (d < bd) { bd = d; best = r; }
     }
     return best;
   };
+
   delete g.rng;
   return g;
 }

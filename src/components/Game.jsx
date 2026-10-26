@@ -6,7 +6,7 @@ import { endTurn } from '../game/turn.js';
 import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
-import { SEASONS, seasonOf, yearOf } from '../game/weather.js';
+import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
 import { spawnGeneral } from '../game/engine.js';
 import { stateRng } from '../game/rng.js';
 import { G } from '../game/rules.js';
@@ -30,7 +30,6 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const spect = !!game.spectator;
   const [auto, setAuto] = useState(false);
   const [autoSpeed, setAutoSpeed] = useState(900);
-  const tps = game.opts?.turnsPerSeason || 2;
   const vis = useMemo(() => visibleSet(game, world, pid), [game, world, pid]);
 
   const toast = useCallback((text, bad = false) => {
@@ -181,7 +180,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     return new Set(nationRegions(game, pid).filter((r) => !sup.has(r)));
   }, [game, world, pid]);
   const shownBattles = replay ? [replay.list[replay.i]] : (game.battles || []).filter((b) => b.attacker === pid || b.defender === pid || vis.has(b.to));
-  const year = yearOf(game.turn, scn.startYear ?? 1, tps);
+  const year = yearOf(game.turn, scn.startYear ?? 1);
   const myEvents = (game.turnEvents || []).filter((e) => e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
   const startDuel = ({ from, to, count, sel, opts }) => {
@@ -211,7 +210,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <div className="stat">
           <small>턴 {game.turn}</small>
           <b>
-            {year}년 {SEASONS[seasonOf(game.turn, tps)]} {tps > 1 && <small className="muted">{((game.turn - 1) % tps) + 1}/{tps}</small>}
+            {year}년 {SEASONS[seasonOf(game.turn)]} <small className="muted">{((game.turn - 1) % TURNS_PER_SEASON) + 1}/{TURNS_PER_SEASON}</small>
           </b>
         </div>
         <div className="stat">

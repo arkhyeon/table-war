@@ -16,7 +16,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [nationCount, setNationCount] = useState(8);
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
-  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, turnsPerSeason: 2 });
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true });
   const [names, setNames] = useState({});
   const scn = SCENARIOS.find((s) => s.id === scnId);
   const opts = useMemo(() => (scn.procedural ? { nationCount } : {}), [scn, nationCount]);
@@ -105,14 +105,6 @@ export default function Setup({ onStart, onResume, hasSave }) {
               <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
             </label>
           ))}
-          <label title="한 계절이 몇 턴인지. 짧을수록 날씨·계절이 빨리 바뀜">
-            🗓️ 계절 길이{' '}
-            <select value={rules.turnsPerSeason} onChange={(e) => setRules({ ...rules, turnsPerSeason: +e.target.value })}>
-              <option value={1}>1턴 (1년 = 4턴)</option>
-              <option value={2}>2턴 (1년 = 8턴)</option>
-              <option value={4}>4턴 (1년 = 16턴)</option>
-            </select>
-          </label>
         </div>
         <h3>3. 국가 선택</h3>
         <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>나라 이름은 ✏️로 바꿀 수 있습니다. 장수 이름은 게임 중 장수 목록에서 바꿉니다.</p>

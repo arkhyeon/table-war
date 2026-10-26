@@ -3,9 +3,9 @@ import { tv } from './traits.js';
 // 일기토: 반격 > 공격 > 방어 > 반격 의 가위바위보
 // 이긴 쪽만 피해를 주고, 같은 수끼리 맞붙으면 서로 절반씩 피해(마창 맞부딪침)
 export const MOVES = {
-  attack: { name: '공격', icon: '🗡️', desc: '내리베기. 방어를 뚫지만 반격에 걸림' },
-  defend: { name: '방어', icon: '🛡️', desc: '창대로 막기. 반격을 무력화하지만 공격에 뚫림' },
-  counter: { name: '반격', icon: '🔄', desc: '흘리고 찌르기. 공격을 받아치지만 방어에 막힘' },
+  attack: { name: '공격', icon: '🗡️', desc: '힘껏 내리베기. 웅크린 방어를 깨부수지만, 크게 휘두르는 틈을 반격에 찔림' },
+  defend: { name: '방어', icon: '🛡️', desc: '방패를 세우고 밀어붙이기. 흘려낼 칼이 없으니 반격 자세는 그대로 밀려 넘어지지만, 내리베기엔 깨짐' },
+  counter: { name: '반격', icon: '🔄', desc: '상대 칼을 흘리고 찌르기. 휘두른 공격엔 통하지만, 밀고 들어오는 방어엔 흘릴 것이 없어 당함' },
 };
 
 const BEATS = { counter: 'attack', attack: 'defend', defend: 'counter' };

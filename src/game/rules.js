@@ -18,6 +18,7 @@ export const TERRAIN = {
 export const EDGE = {
   land: { name: '육로', mult: 1, desc: '' },
   river: { name: '도강', mult: 0.8, desc: '강 건너 공격 -20%' },
+  strait: { name: '해협', mult: 0.7, desc: '좁은 해협 건너기: 공격 -30%, 행동력 +1 (수군·상륙 장수가 경감)' },
   coast: { name: '승선', mult: 1, desc: '항구 또는 수군 장수 필요' },
   sea: { name: '해전', mult: 1, desc: '함대끼리 교전' },
   landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군·상륙 장수가 경감)' },

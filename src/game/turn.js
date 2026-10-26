@@ -212,7 +212,7 @@ export function endTurn(s, world) {
   upkeep(s, world);
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
-  s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff, s.opts?.turnsPerSeason || 2);
+  s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
   runEvents(s, world, stateRng(s));
   updateExplored(s, world);
   s.gameOver = s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
