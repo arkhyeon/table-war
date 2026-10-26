@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #1b1d22;
   --panel: #24272e;
   --panel2: #2d313a;
@@ -96,6 +97,7 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .gen { font-size: 13px; padding: 4px 0; border-bottom: 1px dashed var(--line); }
 .gen:last-child { border-bottom: 0; }
 .stats4 { color: var(--muted); font-size: 12px; }
+.sheet-bar, .sheet-fab { display: none; }
 .log { position: absolute; left: 10px; bottom: 10px; width: min(460px, 60%); max-height: 34%; overflow: auto; background: #15171bdd; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; padding: 6px 8px; }
 .log div { padding: 2px 0; border-bottom: 1px solid #ffffff10; }
 .log .me { color: #ffe3a0; }
@@ -124,13 +126,29 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
 .help p, .help li { font-size: 14px; line-height: 1.55; }
 
 @media (max-width: 860px) {
-  .main { grid-template-columns: 1fr; grid-template-rows: 1fr 45%; }
+  .main { grid-template-columns: 1fr; }
   .side { border-left: 0; border-top: 1px solid var(--line); }
   .setup-body { grid-template-columns: 1fr; }
   .preview { height: 340px; }
   .nation-list { height: auto; max-height: 320px; }
   .diplo { grid-template-columns: 1fr; }
   .log { max-height: 26%; }
+}
+/* 태블릿·폰: 정보 패널은 바텀시트(지역을 누르면 올라옴), 지도는 화면 전체 */
+@media (max-width: 860px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr; position: relative; }
+  .side {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; max-height: 62vh; border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0; box-shadow: 0 -8px 24px #0008; padding-top: 0;
+    transform: translateY(105%); transition: transform 0.22s ease-out;
+  }
+  .side.open { transform: translateY(0); }
+  .side .nation-card { order: 9; }
+  .side .sheet-bar { order: -1; }
+  .sheet-bar { display: flex; position: sticky; top: 0; z-index: 1; justify-content: space-between; align-items: center; padding: 8px 2px 6px; background: var(--panel); }
+  .sheet-bar .grip { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin-left: calc(50% - 22px); }
+  .sheet-fab { display: block; position: fixed; right: 12px; bottom: 14px; z-index: 7; width: 48px; height: 48px; border-radius: 50%; font-size: 20px; padding: 0; background: var(--panel2); border-color: var(--accent); box-shadow: 0 4px 12px #0008; }
+  .log { max-height: 30%; width: calc(100% - 80px); }
 }
 /* 폰: 상단바를 한두 줄로 압축 (버튼은 아이콘만) */
 @media (max-width: 600px) {
@@ -140,7 +158,6 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
   .stat b { font-size: 14px; }
   .stat small { font-size: 10px; }
   .topbar .spacer { display: none; }
-  .main { grid-template-rows: 1fr 42%; }
   .modal { max-height: 92vh; overflow: auto; }
   .map-hint { font-size: 11px; max-width: 70%; }
   .map-hint .lbl { display: none; }

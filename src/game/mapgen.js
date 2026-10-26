@@ -134,10 +134,13 @@ function buildHistorical(scn, g) {
 }
 
 // 랜덤 지도 유형: 땅덩어리 배치 방식
+// 랜덤 지도 유형: 대륙판(plates) 배치와 육지 비율
+// plates: [개수, 최소 반지름, 최대 반지름], warp: 해안선 비틀림 세기, inland: 내해 파기
 export const MAP_STYLES = {
-  pangaea: { name: '대륙', land: 0.5, blobs: [[1, 0.34, 0.42]], islands: [2, 3] },
-  continents: { name: '양대륙', land: 0.46, blobs: [[2, 0.22, 0.3], [1, 0.16, 0.22]], islands: [1, 2] },
-  archipelago: { name: '군도', land: 0.4, blobs: [[5, 0.11, 0.17]], islands: [2, 3] },
+  continents: { name: '대륙들', land: 0.44, plates: [[2, 0.2, 0.27], [1, 0.13, 0.18]], warp: 0.22, islands: [2, 3] },
+  pangaea: { name: '판게아', land: 0.5, plates: [[1, 0.33, 0.4], [2, 0.14, 0.2]], warp: 0.2, inland: true, islands: [1, 3] },
+  archipelago: { name: '군도', land: 0.36, plates: [[6, 0.08, 0.13]], warp: 0.28, islands: [3, 5] },
+  peninsulas: { name: '반도', land: 0.47, plates: [[1, 0.28, 0.34], [3, 0.1, 0.15]], warp: 0.32, islands: [2, 3] },
 };
 
 function landComponents(g, isLand) {
@@ -160,32 +163,50 @@ function landComponents(g, isLand) {
 function buildProcedural(scn, g) {
   const { N, size, W, H, terrain, river, rng, center, cols, rows } = g;
   const S = scn.regionSize;
-  const nh = makeNoise(rng), nr = makeNoise(rng), nm = makeNoise(rng);
-  const styleKey = rng.weighted(Object.keys(MAP_STYLES), (k) => ({ pangaea: 0.35, continents: 0.35, archipelago: 0.3 })[k]);
+  const nh = makeNoise(rng), nm = makeNoise(rng), nw1 = makeNoise(rng), nw2 = makeNoise(rng), nd = makeNoise(rng);
+  const styleKey = rng.weighted(Object.keys(MAP_STYLES), (k) => ({ continents: 0.3, pangaea: 0.25, archipelago: 0.2, peninsulas: 0.25 })[k]);
   const style = MAP_STYLES[styleKey];
   g.style = styleKey;
-  // 땅덩어리 씨앗: 서로 떨어지게 배치
-  const blobs = [];
+  const A = H / W; // 세로/가로 비
+  // 대륙판: 길쭉하고 기울어진 타원, 서로 겹치지 않게
+  const plates = [];
   const place = (r) => {
-    let best = null, bd = -1;
-    for (let k = 0; k < 40; k++) {
-      const c = [rng.range(0.15 + r * 0.5, 0.85 - r * 0.5), rng.range(0.18 + r * 0.6, 0.82 - r * 0.6)];
-      const d = blobs.length ? Math.min(...blobs.map((b) => Math.hypot(b[0] - c[0], b[1] - c[1]) - b[2] - r)) : rng();
+    let best = null, bd = -Infinity;
+    for (let k = 0; k < 60; k++) {
+      const c = [rng.range(0.12 + r * 0.55, 0.88 - r * 0.55), rng.range(0.15 + r * 0.7, 0.85 - r * 0.7)];
+      const d = plates.length ? Math.min(...plates.map((p) => Math.hypot(p.x - c[0], (p.y - c[1]) * A * 1.6) - p.r - r)) : rng();
       if (d > bd) { bd = d; best = c; }
     }
-    blobs.push([best[0], best[1], r]);
+    plates.push({ x: best[0], y: best[1], r, rot: rng.range(0, Math.PI), stretch: rng.range(1.1, 1.9) });
   };
-  for (const [n, r0, r1] of style.blobs) for (let k = 0; k < n; k++) place(rng.range(r0, r1));
+  for (const [n, r0, r1] of style.plates) for (let k = 0; k < n; k++) place(rng.range(r0, r1));
+  const plateVal = (px, py) => {
+    let v = 0;
+    for (const p of plates) {
+      const dx = px - p.x, dy = (py - p.y) * A * 1.6;
+      const c = Math.cos(p.rot), sn = Math.sin(p.rot);
+      const u = (dx * c + dy * sn) / p.stretch, w = (-dx * sn + dy * c) * p.stretch;
+      v = Math.max(v, 1 - Math.hypot(u, w) / (p.r * 1.25));
+    }
+    return v;
+  };
+  // 내해(판게아): 큰 대륙 안쪽을 파서 지중해 같은 바다
+  const inland = style.inland ? { x: plates[0].x + rng.range(-0.06, 0.06), y: plates[0].y + rng.range(-0.08, 0.08), r: plates[0].r * rng.range(0.32, 0.45) } : null;
   const height = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const [x, y] = center(i);
     const nx = x / W, ny = y / H;
-    let e = nh.fbm(nx * 5, ny * 5 * (H / W) * 1.6, 5);
-    let blob = 0;
-    for (const [bx, by, br] of blobs) blob = Math.max(blob, 1 - Math.hypot((nx - bx) * 1.2, ny - by) / (br * 1.6));
-    e = e * 0.5 + Math.max(0, blob) * 0.7;
-    const edge = Math.max(Math.abs(nx - 0.5) * 2, Math.abs(ny - 0.5) * 2);
-    e -= Math.pow(edge, 4) * 0.6;
+    // 도메인 왜곡: 해안선을 비틀어 반도·만이 생기게
+    const wx = (nw1.fbm(nx * 3.2, ny * 3.2 * A * 1.6, 4) - 0.5) * style.warp * 2;
+    const wy = (nw2.fbm(nx * 3.2 + 7.1, ny * 3.2 * A * 1.6 + 3.3, 4) - 0.5) * style.warp * 2;
+    const px = nx + wx, py = ny + wy;
+    const detail = nh.fbm(px * 6, py * 6 * A * 1.6, 6);
+    let e = Math.max(0, plateVal(px, py)) * 0.85 + detail * 0.45;
+    if (inland) e -= Math.max(0, 1 - Math.hypot(px - inland.x, (py - inland.y) * A * 1.6) / inland.r) * 0.6;
+    // 가장자리는 바다 (둥근 사각형 + 비틀림으로 직선 테두리 방지)
+    const ex = Math.abs(px - 0.5) * 2, ey = Math.abs(py - 0.5) * 2;
+    const edge = Math.pow(Math.pow(ex, 6) + Math.pow(ey, 6), 1 / 6);
+    e -= Math.max(0, edge - 0.62) * 3.2;
     height[i] = e;
   }
   const sorted = Array.from(height).sort((a, b) => a - b);
@@ -244,25 +265,51 @@ function buildProcedural(scn, g) {
       const nb = neighborIndex(cols, rows, q[j], d);
       if (nb >= 0 && dist[nb] < 0) { dist[nb] = dist[q[j]] + 1; q.push(nb); }
     }
-    let best = -1, bd = 0;
+    // 대륙에서 너무 멀지 않은 바다(5~11칸)에 섬 — 지도 구석에 처박히지 않게
+    const cand = [];
     for (let i = 0; i < N; i++) {
       const [x, y] = center(i);
-      if (x < W * 0.08 || x > W * 0.92 || y < H * 0.1 || y > H * 0.9) continue;
-      const v = dist[i] + rng() * 2;
-      if (v > bd) { bd = v; best = i; }
+      if (x < W * 0.1 || x > W * 0.9 || y < H * 0.12 || y > H * 0.88) continue;
+      if (dist[i] >= 5 && dist[i] <= 11) cand.push(i);
     }
-    if (best < 0 || bd < 5) break;
+    if (!cand.length) break;
+    const best = rng.pick(cand);
     isLandH[best] = 1;
     height[best] = seaLevel + 0.02;
     grow([best], Math.round(S * rng.range(4.5, 7)));
   }
   const land = [];
   for (let i = 0; i < N; i++) if (isLandH[i]) land.push(i);
-  // 산은 육지의 12~18%, 고산은 3% 정도로 고정 (산맥만 가득한 지도 방지)
+  // 산맥: 대륙판마다 1~2줄기의 굽은 능선을 긋고, 능선에 가까울수록 높은 산 (흩뿌린 산 대신 줄기)
+  const ranges = [];
+  for (const p of plates) {
+    const n = p.r > 0.18 ? rng.int(1, 2) : rng.int(0, 1);
+    for (let k = 0; k < n; k++) {
+      let ang = p.rot + rng.range(-0.6, 0.6) + (k ? Math.PI / 2 : 0);
+      let x = p.x + rng.range(-p.r, p.r) * 0.5, y = p.y + rng.range(-p.r, p.r) * 0.5 / (A * 1.6);
+      const pts = [[x, y]];
+      const steps = rng.int(4, 7), len = (p.r * 1.6) / steps;
+      for (let t = 0; t < steps; t++) {
+        ang += rng.range(-0.45, 0.45);
+        x += Math.cos(ang) * len;
+        y += (Math.sin(ang) * len) / (A * 1.6);
+        pts.push([x, y]);
+      }
+      ranges.push(pts);
+    }
+  }
+  const segDist = (px, py, [ax, ay], [bx, by]) => {
+    const dx = bx - ax, dy = (by - ay) * A * 1.6, qx = px - ax, qy = (py - ay) * A * 1.6;
+    const t = Math.max(0, Math.min(1, (qx * dx + qy * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(qx - dx * t, qy - dy * t);
+  };
   const ridge = new Float32Array(N);
   for (const i of land) {
     const [x, y] = center(i);
-    ridge[i] = 1 - Math.abs(nr.fbm((x / W) * 6, (y / H) * 6 * (H / W) * 1.6, 4) * 2 - 1);
+    const nx = x / W, ny = y / H;
+    let d = 1;
+    for (const pts of ranges) for (let k = 1; k < pts.length; k++) d = Math.min(d, segDist(nx, ny, pts[k - 1], pts[k]));
+    ridge[i] = 1 - d * 9 + (nd.fbm(nx * 9, ny * 9 * A * 1.6, 3) - 0.5) * 0.7;
   }
   const rs = land.map((i) => ridge[i]).sort((a, b) => a - b);
   const mtnT = rs[Math.floor(rs.length * (1 - rng.range(0.12, 0.18)))];
@@ -365,6 +412,22 @@ function buildRegions(scn, g) {
   const K = Math.max(4, Math.round(cells.length / S));
   const minD = Math.max(2, Math.floor(Math.sqrt(S) * 0.95));
   const seeds = [];
+  // 역사 지도: 나라마다 수도 자리에 씨앗을 먼저 심어 수도끼리 한 지역에 뭉치지 않게
+  if (g.geo && scn.nations) {
+    for (const n of scn.nations) {
+      const [x, y] = g.geo.toPx(n.lon, n.lat);
+      let c = pixelToCell(g.size, cols, rows, x, y);
+      if (c < 0 || !passable(c)) {
+        let bd = Infinity;
+        for (const i of cells) {
+          const [cx, cy] = g.center(i);
+          const d = (cx - x) ** 2 + (cy - y) ** 2;
+          if (d < bd) { bd = d; c = i; }
+        }
+      }
+      if (c >= 0 && passable(c) && seeds.every((s) => hexDistance(cols, s, c) >= 2)) seeds.push(c);
+    }
+  }
   for (const c of rng.shuffle(cells.slice())) {
     if (seeds.length >= K) break;
     if (seeds.every((s) => hexDistance(cols, s, c) >= minD)) seeds.push(c);
@@ -729,7 +792,7 @@ function buildGeometry(g) {
   }
   // 지형 기호: 듬성듬성 배치
   const s = unit;
-  const glyph = { forest: '', hills: '', mountain: '', desert: '', tundra: '', peakCap: '' };
+  const glyph = { forest: '', hills: '', mountain: '', mountainShade: '', desert: '', tundra: '', peakCap: '', cliff: '' };
   for (let i = 0; i < N; i++) {
     const t = terrain[i];
     if (t === T.SEA || t === T.PLAINS) continue;
@@ -737,12 +800,32 @@ function buildGeometry(g) {
     const dense = t === T.PEAK || t === T.MOUNTAIN;
     if (dense ? r % 2 || (c + (r >> 1)) % 2 : r % 3 || (c + (r / 3) | 0) % 3) continue;
     const [x, y] = center(i);
-    if (t === T.PEAK) glyph.peakCap += `M${f1(x - 0.55 * s)} ${f1(y + 0.4 * s)}L${f1(x)} ${f1(y - 0.5 * s)}L${f1(x + 0.55 * s)} ${f1(y + 0.4 * s)}Z`;
-    else if (t === T.MOUNTAIN) glyph.mountain += `M${f1(x - 0.45 * s)} ${f1(y + 0.3 * s)}L${f1(x)} ${f1(y - 0.4 * s)}L${f1(x + 0.45 * s)} ${f1(y + 0.3 * s)}Z`;
+    if (t === T.PEAK) glyph.peakCap += `M${f1(x - 0.6 * s)} ${f1(y + 0.45 * s)}L${f1(x)} ${f1(y - 0.6 * s)}L${f1(x + 0.6 * s)} ${f1(y + 0.45 * s)}Z`;
+    else if (t === T.MOUNTAIN) {
+      // 봉우리: 밝은 면 + 그늘진 면
+      glyph.mountain += `M${f1(x - 0.55 * s)} ${f1(y + 0.38 * s)}L${f1(x)} ${f1(y - 0.5 * s)}L${f1(x + 0.55 * s)} ${f1(y + 0.38 * s)}Z`;
+      glyph.mountainShade += `M${f1(x)} ${f1(y - 0.5 * s)}L${f1(x + 0.55 * s)} ${f1(y + 0.38 * s)}L${f1(x + 0.1 * s)} ${f1(y + 0.38 * s)}Z`;
+    }
     else if (t === T.FOREST) glyph.forest += `M${f1(x - 0.25 * s)} ${f1(y)}a${f1(0.25 * s)} ${f1(0.25 * s)} 0 1 0 ${f1(0.5 * s)} 0a${f1(0.25 * s)} ${f1(0.25 * s)} 0 1 0 ${f1(-0.5 * s)} 0`;
     else if (t === T.HILLS) glyph.hills += `M${f1(x - 0.4 * s)} ${f1(y + 0.2 * s)}Q${f1(x)} ${f1(y - 0.4 * s)} ${f1(x + 0.4 * s)} ${f1(y + 0.2 * s)}`;
     else if (t === T.DESERT) glyph.desert += `M${f1(x - 0.3 * s)} ${f1(y)}h0.1M${f1(x + 0.25 * s)} ${f1(y + 0.25 * s)}h0.1M${f1(x + 0.05 * s)} ${f1(y - 0.3 * s)}h0.1`;
     else if (t === T.TUNDRA) glyph.tundra += `M${f1(x - 0.4 * s)} ${f1(y)}h${f1(0.8 * s)}M${f1(x - 0.2 * s)} ${f1(y + 0.25 * s)}h${f1(0.4 * s)}`;
+  }
+  // 절벽 해안: 절벽으로 이어진 (바다 구역, 육지 지역) 접촉 칸에 톱니 표시
+  const cliffPair = new Set();
+  for (const r of regions) if (r.sea) for (const nb of r.neighbors) if (nb.type === 'cliff') cliffPair.add(r.id * 100000 + nb.id);
+  if (cliffPair.size) {
+    for (let i = 0; i < N; i++) {
+      const rr = region[i];
+      if (rr < 0 || (i + ((i / cols) | 0)) % 2) continue;
+      for (let d = 0; d < 6; d++) {
+        const nb = neighborIndex(cols, rows, i, d);
+        if (nb < 0 || g.seaOf[nb] < 0 || !cliffPair.has(g.seaOf[nb] * 100000 + rr)) continue;
+        const [x, y] = center(i);
+        glyph.cliff += `M${f1(x - 0.42 * s)} ${f1(y + 0.18 * s)}L${f1(x - 0.21 * s)} ${f1(y - 0.22 * s)}L${f1(x)} ${f1(y + 0.18 * s)}L${f1(x + 0.21 * s)} ${f1(y - 0.22 * s)}L${f1(x + 0.42 * s)} ${f1(y + 0.18 * s)}`;
+        break;
+      }
+    }
   }
   // 바다 구역 경계
   const seaLab = new Int32Array(N).fill(-1);
@@ -767,10 +850,47 @@ export const detailFactor = (d) => {
   return (m.grid * m.grid) / m.region;
 };
 
+// 좁은 해협: 지도 해상도로는 바다에 막히지만 실제로는 건너다닌 곳 → 해협 경로로 직접 연결
+const STRAITS = [
+  [130.93, 33.88, 130.98, 34.02], // 간몬 (규슈-혼슈)
+  [140.75, 41.25, 140.7, 41.75], // 쓰가루 (혼슈-홋카이도)
+  [134.98, 34.65, 134.65, 34.22], // 아카시·나루토 (혼슈-아와지-시코쿠)
+  [133.0, 34.3, 132.8, 33.95], // 시마나미 (혼슈-시코쿠 서쪽)
+  [1.6, 51.05, 1.75, 50.85], // 도버
+  [15.62, 38.25, 15.66, 38.05], // 메시나
+  [12.62, 56.05, 12.68, 55.9], // 외레순
+  [36.45, 45.38, 36.6, 45.2], // 케르치
+  [29.0, 41.15, 29.1, 41.0], // 보스포루스
+  [26.4, 40.2, 26.5, 40.05], // 다르다넬스
+  [-5.6, 36.05, -5.4, 35.85], // 지브롤터
+  [9.25, 41.35, 9.2, 41.2], // 보니파시오 (코르시카-사르데냐)
+  [79.85, 9.25, 79.75, 9.05], // 팔크 (인도-스리랑카)
+  [43.35, 12.65, 43.2, 12.5], // 바브엘만데브
+  [-6.0, 54.9, -5.1, 55.25], // 노스 해협 (아일랜드-스코틀랜드)
+];
+
+function linkStraits(g) {
+  g.straitLines = [];
+  if (!g.geo) return;
+  for (const [a0, a1, b0, b1] of STRAITS) {
+    const [ax, ay] = g.geo.toPx(a0, a1), [bx, by] = g.geo.toPx(b0, b1);
+    if (ax < 0 || ay < 0 || bx < 0 || by < 0 || ax > g.W || bx > g.W || ay > g.H || by > g.H) continue;
+    const ra = g.nearestRegion(ax, ay), rb = g.nearestRegion(bx, by);
+    if (ra < 0 || rb < 0 || ra === rb) continue;
+    const A = g.regions[ra], B = g.regions[rb];
+    if (A.sea || B.sea || Math.hypot(A.cx - B.cx, A.cy - B.cy) > g.W * 0.08) continue;
+    if (!A.neighbors.some((x) => x.id === rb)) A.neighbors.push({ id: rb, type: 'strait' });
+    if (!B.neighbors.some((x) => x.id === ra)) B.neighbors.push({ id: ra, type: 'strait' });
+    g.straitLines.push([ax, ay, bx, by]);
+  }
+}
+
 export function generateWorld(scn0, seed, detail = 'normal') {
   const dm = MAP_DETAIL[detail] || MAP_DETAIL.normal;
   // 보통은 예전 시드와 같은 지도가 나오도록 rng 키를 유지
-  const rng = makeRng(detail === 'normal' || !MAP_DETAIL[detail] ? `${scn0.id}:${seed}` : `${scn0.id}:${seed}:${detail}`);
+  // 역사 지도는 시드와 상관없이 늘 같은 지도(그 시대의 고정된 지역 구획)
+  const mapSeed = scn0.procedural ? seed : 'fixed';
+  const rng = makeRng(detail === 'normal' || !MAP_DETAIL[detail] ? `${scn0.id}:${mapSeed}` : `${scn0.id}:${mapSeed}:${detail}`);
   const gc = Math.round(scn0.cols * dm.grid), gr = Math.round(scn0.rows * dm.grid);
   const scn = { ...scn0, cols: gc * FINE, rows: gr * FINE, regionSize: Math.max(2, Math.round(scn0.regionSize * dm.region)) * FINE * FINE, seaReach: Math.max(2, Math.round((scn0.seaReach || 4) * dm.grid)) * FINE };
   const size = HEX / FINE / dm.grid;
@@ -797,6 +917,11 @@ export function generateWorld(scn0, seed, detail = 'normal') {
   g.toPx = g.geo ? g.geo.toPx : null;
   // 기후 판정용 위도
   for (const r of g.regions) r.lat = g.geo ? g.geo.toLL(r.cx, r.cy)[1] : 62 - (r.cy / H) * 124;
+  // 좌표가 들어 있는 육지 지역 (바다·고산이면 -1)
+  g.regionAt = (x, y) => {
+    const c = pixelToCell(size, cols, rows, x, y);
+    return c >= 0 && g.region[c] >= 0 ? g.region[c] : -1;
+  };
   // 좌표에서 가장 가까운 육지 칸이 속한 지역 (필터를 통과하는 지역만)
   g.nearestRegion = (x, y, filter) => {
     const c = pixelToCell(size, cols, rows, x, y);
@@ -811,6 +936,7 @@ export function generateWorld(scn0, seed, detail = 'normal') {
     }
     return best;
   };
+  linkStraits(g);
 
   delete g.rng;
   return g;

@@ -299,6 +299,38 @@ export function doConscript(s, world, nid, rid, amount, mode = 'draft') {
 export const reliefCost = (s, rid) => Math.round(((8 + s.regions[rid].pop * 1.5) * G) / 100) * 100;
 export const RELIEF_COOLDOWN = 6;
 
+// 천도: 수도와 길이 이어진 내 땅으로 수도를 옮김 (12턴에 한 번)
+export const CAPITAL_COOLDOWN = 12;
+export const capitalMoveCost = (s, nid) => Math.round((40 * G + s.nations[nid].gold * 0.05) / G) * G;
+export function capitalMoveCheck(s, world, nid, rid) {
+  const n = s.nations[nid], r = s.regions[rid];
+  if (!r || r.sea || r.owner !== nid) return '내 땅으로만 천도할 수 있습니다.';
+  if (n.capital === rid) return '이미 수도입니다.';
+  if (n.capitalMoved !== undefined && s.turn - n.capitalMoved < CAPITAL_COOLDOWN) return `천도는 ${CAPITAL_COOLDOWN}턴에 한 번 (${CAPITAL_COOLDOWN - (s.turn - n.capitalMoved)}턴 남음)`;
+  if ((r.loyalty ?? 100) < 60) return '민심 60 이상인 곳으로만 천도할 수 있습니다.';
+  if (n.capital !== null && !supplied(s, world, nid).has(rid)) return '지금 수도와 길이 이어진 곳이어야 합니다.';
+  if (n.gold < capitalMoveCost(s, nid)) return '금이 부족합니다.';
+  return canAct(s, nid, 3);
+}
+export function doMoveCapital(s, world, nid, rid) {
+  const err = capitalMoveCheck(s, world, nid, rid);
+  if (err) return fail(err);
+  const n = s.nations[nid];
+  const old = n.capital;
+  n.gold -= capitalMoveCost(s, nid);
+  n.ap -= 3;
+  n.capital = rid;
+  n.capitalMoved = s.turn;
+  const r = s.regions[rid];
+  r.loyalty = Math.min(100, (r.loyalty ?? 100) + 10);
+  if (old !== null) s.regions[old].loyalty = Math.max(0, (s.regions[old].loyalty ?? 100) - 10);
+  // 군주도 새 수도로
+  const king = s.generals[n.ruler];
+  if (king && king.status === 'active') king.region = rid;
+  log(s, `🏯 ${n.name}이(가) ${old !== null ? s.regions[old].name + '에서 ' : ''}${r.name}(으)로 천도했습니다.`, [nid], 'info');
+  return { ok: true, msg: `${r.name}(으)로 천도했습니다.` };
+}
+
 export function doRelief(s, nid, rid) {
   const r = s.regions[rid];
   const n = s.nations[nid];

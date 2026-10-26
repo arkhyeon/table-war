@@ -5,6 +5,7 @@ import { POOLS, parseGeneral, rating } from './generals.js';
 import { addGeneral, computeMaxAp, nationPower } from './engine.js';
 import { rollWeather } from './weather.js';
 import { detailFactor } from './mapgen.js';
+import { PLACES, placeName, placeExists } from './places.js';
 import { updateExplored, encodeOwners } from './fog.js';
 
 export const colorFor = (i) => `hsl(${Math.round((i * 137.508 + 20) % 360)}, ${58 + (i % 3) * 10}%, ${46 + ((i * 7) % 3) * 6}%)`;
@@ -124,7 +125,20 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     }
     if (!grew) break;
   }
-  const namer = makeNamer(rng);
+  // 지명: 역사 지도는 실제 지명 사전에서 그 시대 이름을, 나머지는 문명 음절로 지은 이름 (역사 지도는 시드와 무관하게 고정)
+  const namer = makeNamer(makeRng(`names:${scn.id}:${scn.procedural ? seed : 'fixed'}`));
+  const real = {};
+  if (world.geo) {
+    const capNames = new Set(plan.map((n) => n.capital).filter(Boolean));
+    for (const p of PLACES) {
+      if (!placeExists(p, scn.startYear ?? 1)) continue;
+      const [x, y] = world.toPx(p.lon, p.lat);
+      const r = world.regionAt(x, y);
+      if (r < 0 || real[r]) continue;
+      const nm = placeName(p, scn.startYear ?? 1);
+      if (!capNames.has(nm)) real[r] = nm;
+    }
+  }
   const regions = world.regions.map((wr, i) => {
     if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {}, loyalty: 100 };
     const river = !!wr.river;
@@ -141,7 +155,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     const isCap = plan.find((n) => n.region === i);
     const troops = Math.max(5, Math.round((owner[i] === null ? rng.int(20, 70) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90)) / df)) * 100;
     return {
-      name: isCap && isCap.capital ? isCap.capital : namer(civ),
+      name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
       owner: owner[i],
       troops,
       pop: Math.round((wr.pop / df) * 10) / 10,

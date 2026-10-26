@@ -17,7 +17,13 @@ import { fmtTroops, fmtGold } from '../game/format.js';
 
 export default function Game({ world, scn, game, setGame, onExit }) {
   const [selected, setSelected] = useState(game.nations[game.playerId].capital);
-  const [moveMode, setMoveMode] = useState(false);
+  const [moveMode, setMoveModeRaw] = useState(false);
+  // 모바일: 정보 패널을 바텀시트로 (이동 대상 고를 땐 내려감)
+  const [sheet, setSheet] = useState(false);
+  const setMoveMode = useCallback((v) => {
+    setMoveModeRaw(v);
+    if (v) setSheet(false);
+  }, []);
   const [modal, setModal] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [showLog, setShowLog] = useState(() => window.innerWidth > 860);
@@ -162,6 +168,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     }
     setSelected(rid);
     setMoveMode(false);
+    setSheet(true);
   };
 
   const onRegionContext = (rid) => {
@@ -291,6 +298,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             cutSet={cutSet}
             focus={replay ? replay.list[replay.i].to : null}
             flash={flashSet}
+            home={game.nations[pid]?.capital}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}
             onClick={onRegionClick}
@@ -316,7 +324,12 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             ))}
           </div>
         </div>
+        <button className="sheet-fab" onClick={() => setSheet((v) => !v)} title="정보 패널">
+          {sheet ? '▾' : '📋'}
+        </button>
         <SidePanel
+          sheetOpen={sheet}
+          onCloseSheet={() => setSheet(false)}
           world={world}
           game={game}
           selected={selected}

@@ -18,6 +18,7 @@ import { fmtTroops, fmtGold } from '../game/format.js';
 import { relTag, GenLine, TraitTags, GradeTag } from './SidePanel.jsx';
 import { ACHIEVEMENTS } from '../game/achievements.js';
 import EditableName from './EditableName.jsx';
+import Slider from './Slider.jsx';
 import { G } from '../game/rules.js';
 
 function Modal({ title, onClose, wide, children }) {
@@ -84,7 +85,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
       <div className="col">
         <label>
           병력 {count.toLocaleString('ko-KR')} / {maxCount.toLocaleString('ko-KR')}명
-          <input type="range" min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={(e) => setCount(Math.min(maxCount, +e.target.value))} style={{ width: '100%' }} />
+          <Slider min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={setCount} style={{ width: '100%' }} />
         </label>
         {myGens.length > 0 && !aid && (
           <div>
@@ -107,7 +108,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
             </label>
             {(fr.engines || 0) > 0 && (
               <label style={{ fontSize: 13 }}>
-                🛠️ 공성병기 동행 {engines}/{fr.engines} <input type="range" min={0} max={fr.engines} value={engines} onChange={(e) => setEngines(+e.target.value)} />
+                🛠️ 공성병기 동행 {engines}/{fr.engines} <Slider min={0} max={fr.engines} value={engines} onChange={setEngines} />
                 <small className="muted"> 대당 성벽 효과 -15%, 포위 피해 +1(최대 2)</small>
               </label>
             )}
@@ -189,7 +190,7 @@ export function ConscriptModal({ world, game, rid, act, onClose }) {
         </div>
         <label>
           인원 <b>{amt.toLocaleString('ko-KR')}명</b> / 최대 {max.toLocaleString('ko-KR')}
-          <input type="range" min={100} max={max} step={100} value={amt} onChange={(e) => setAmount(+e.target.value)} style={{ width: '100%' }} />
+          <Slider min={100} max={max} step={100} value={amt} onChange={setAmount} style={{ width: '100%' }} />
         </label>
         <div className="kv">
           <span>금</span>
@@ -807,6 +808,9 @@ export function HelpModal({ onClose }) {
           <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 2 + (무력-40)×0.42(맹장·무쌍 특성 가산). 상대 의도 간파는 무력 85%·지력 15%의 전장 감각 차이로 정해져 힌트로 보입니다. 이기면 전투력 +15%, 지면 -15%.</li>
           <li><b>장수와 전투력</b>: 장수는 병사 수를 늘리지 않고 배율을 올립니다. 공격 시 동행 장수 중 최고 (무력+통솔)/2 ÷ 250(최대 약 +40%) + 특성, 방어 시 주둔 장수 최고 (통솔×0.6+지력×0.4) ÷ 250 + 특성.</li>
           <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 등급은 F~SSR. 기본은 공평한 무작위 능력치(장수 성향만 역사대로, 나라마다 장수 수준 합이 비슷 — 뛰어난 장수가 있으면 다음 장수는 약해짐). 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유. 멸망한 나라의 왕은 승자의 장수가 되고, 충성이 낮으면 옛 나라를 부흥시킬 수 있습니다.</li>
+          <li><b>천도</b>: 내 땅(수도와 길이 이어지고 민심 60 이상)을 골라 🏯천도 — 금·3AP, 12턴에 한 번. 새 수도 민심 +10, 옛 수도 -10. 컴퓨터도 수도가 위험하면 천도합니다.</li>
+          <li><b>해협</b>: 간몬·쓰가루·도버·메시나·보스포루스·지브롤터 등 좁은 해협은 흰 점선으로 이어져 배 없이 건널 수 있습니다(-30%, AP+1).</li>
+          <li><b>지도 보기</b>: 휠·＋－·두 손가락으로 확대, 끌어서 이동. 폰에서는 지역을 누르면 정보창이 아래에서 올라옵니다(📋 버튼으로 열고 닫기). 병력을 모르는 지역은 이름만 보입니다.</li>
           <li><b>태수</b>: 지역에 주둔한 장수 중 정치가 가장 높은 장수가 태수. 정치 50 초과분만큼 세수 증가(정치 90 = +16%), 정치 70↑ 민심 +1, 90↑ +2. 무관은 효과 절반.</li>
           <li><b>신흥국</b>: 빈 땅의 봉기, 민심 30 미만 변방(컴퓨터 나라)의 독립, 옛 왕의 부흥으로 새 나라가 생깁니다. 지도에서 깜빡이고 소식 카드가 뜹니다.</li>
           <li><b>외교</b>: 금·영토 거래, 동맹(상호 공격 불가), 불가침, 정전(6턴, 땅을 잃는 쪽이 원함), 속국, 공동 공격, 속국 병합. 동맹국 땅으로 이동하면 원군(병사만) 파견. 불가침·종속 상대를 공격하면 배신 페널티.</li>

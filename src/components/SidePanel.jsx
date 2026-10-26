@@ -8,7 +8,7 @@ import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
   doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus,
+  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN,
 } from '../game/engine.js';
 
 export function relTag(game, a, b) {
@@ -63,7 +63,7 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, sheetOpen, onCloseSheet }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -91,8 +91,14 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
     });
 
   return (
-    <div className="side">
-      <div className="card">
+    <div className={'side' + (sheetOpen ? ' open' : '')}>
+      <div className="sheet-bar">
+        <span className="grip" />
+        <button className="sm ghost" onClick={onCloseSheet}>
+          닫기 ✕
+        </button>
+      </div>
+      <div className="card nation-card">
         <h3>
           <span className="chip" style={{ background: me.color }} />
           {spectator ? `👁️ 관전 중 (기준: ${me.name})` : <EditableName value={me.name} onSave={(t) => act((s) => ((s.nations[pid].name = t), { ok: true, msg: `국호를 ${t}(으)로 바꿨습니다.` }))} />}
@@ -294,6 +300,15 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
                   🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({fmtGold(engineCost(game, selected))}금·1AP)
                 </button>
+                {me.capital !== selected && (
+                  <button
+                    onClick={() => act((s) => doMoveCapital(s, world, pid, selected))}
+                    disabled={!!capitalMoveCheck(game, world, pid, selected)}
+                    title={capitalMoveCheck(game, world, pid, selected) || `수도를 이곳으로 옮깁니다. 새 수도 민심 +10, 옛 수도 -10. ${CAPITAL_COOLDOWN}턴에 한 번`}
+                  >
+                    🏯 천도 ({fmtGold(capitalMoveCost(game, pid))}금·3AP)
+                  </button>
+                )}
               </div>
               <h4 style={{ marginTop: 10 }}>건설</h4>
               <div className="actions">

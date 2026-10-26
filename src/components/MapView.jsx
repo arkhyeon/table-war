@@ -122,13 +122,22 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
   const drag = useRef(null);
 
-  useEffect(() => setVb([0, 0, world.W, world.H]), [world]);
+  // 처음 화면: 세로로 긴 화면(폰)이면 높이에 맞춰 꽉 채우고 내 수도 쪽을 보여줌
+  const fitView = () => {
+    const el = svgRef.current;
+    const rect = el?.getBoundingClientRect();
+    if (!rect || !rect.width || rect.height / rect.width <= (world.H / world.W) * 1.15) return [0, 0, world.W, world.H];
+    const w = world.H * (rect.width / rect.height);
+    const cx = home !== null && home !== undefined && world.regions[home] ? world.regions[home].cx : world.W / 2;
+    return [Math.max(0, Math.min(world.W - w, cx - w / 2)), 0, w, world.H];
+  };
+  useEffect(() => setVb(fitView()), [world]); // eslint-disable-line react-hooks/exhaustive-deps
   // 전투 다시보기: 해당 지역으로 화면 이동
   useEffect(() => {
     if (focus === null || focus === undefined) return;
@@ -183,10 +192,38 @@ export default function MapView({ world, regions, nations, selected, targets, on
       return [x + (w - nw) / 2, y + (h - nh) / 2, nw, nh];
     });
 
+  // 화면 좌표 → 지도 좌표 (meet 배치 여백 고려)
+  const toWorld = (cx, cy, [x, y, w, h]) => {
+    const rect = svgRef.current.getBoundingClientRect();
+    const scale = Math.min(rect.width / w, rect.height / h);
+    const ox = x - (rect.width / scale - w) / 2, oy = y - (rect.height / scale - h) / 2;
+    return [ox + (cx - rect.left) / scale, oy + (cy - rect.top) / scale];
+  };
+  const pointers = useRef(new Map());
+  const pinch = useRef(null);
   const onPointerDown = (e) => {
+    pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.current.size === 2) {
+      // 두 손가락: 핀치 줌 시작
+      const [[ax, ay], [bx, by]] = [...pointers.current.values()];
+      pinch.current = { dist: Math.hypot(ax - bx, ay - by), vb, mid: toWorld((ax + bx) / 2, (ay + by) / 2, vb) };
+      if (drag.current) drag.current.moved = true;
+      return;
+    }
     drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
   };
   const onPointerMove = (e) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch.current && pointers.current.size >= 2) {
+      const [[ax, ay], [bx, by]] = [...pointers.current.values()];
+      const pc = pinch.current;
+      const [x, y, w, h] = pc.vb;
+      const nw = Math.max(world.W / 12, Math.min(world.W * 1.2, (w * pc.dist) / Math.max(10, Math.hypot(ax - bx, ay - by))));
+      const nh = nw * (h / w);
+      const [mx, my] = pc.mid;
+      setVb([mx - (mx - x) * (nw / w), my - (my - y) * (nh / h), nw, nh]);
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
@@ -197,7 +234,9 @@ export default function MapView({ world, regions, nations, selected, targets, on
     const scale = Math.min(rect.width / w, rect.height / h);
     setVb([x - dx / scale, y - dy / scale, w, h]);
   };
-  const onPointerUp = () => {
+  const onPointerUp = (e) => {
+    pointers.current.delete(e?.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
     setTimeout(() => (drag.current = null), 0);
   };
   const click = (rid, e) => {
@@ -263,6 +302,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        onPointerCancel={onPointerUp}
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -312,11 +352,12 @@ export default function MapView({ world, regions, nations, selected, targets, on
           <g clipPath={`url(#${clipId})`}>
             <path d={statics.glyph.tundra} fill="none" stroke="#ffffff" strokeWidth={s * 0.15} opacity={0.6} />
             <path d={statics.glyph.forest} fill="#1f5a2a" opacity={0.35} />
-            <path d={statics.glyph.hills} fill="none" stroke="#5b4422" strokeWidth={s * 0.12} opacity={0.5} />
+            <path d={statics.glyph.hills} fill="none" stroke="#4a3518" strokeWidth={s * 0.16} strokeLinecap="round" opacity={0.7} />
             <path d={statics.glyph.desert} fill="none" stroke="#8a6a2a" strokeWidth={s * 0.18} strokeLinecap="round" opacity={0.6} />
-            <path d={statics.glyph.mountain} fill="#5b4632" opacity={0.55} />
+            <path d={statics.glyph.mountain} fill="#7a634b" stroke="#2b1f14" strokeWidth={s * 0.08} strokeLinejoin="round" opacity={0.9} />
+            {statics.glyph.mountainShade && <path d={statics.glyph.mountainShade} fill="#2b1f14" opacity={0.45} />}
             <path d={statics.peaks} fill={TERRAIN[7].color} fillRule="evenodd" />
-            <path d={statics.glyph.peakCap} fill="#ece8df" opacity={0.85} />
+            <path d={statics.glyph.peakCap} fill="#f4f1ea" stroke="#3a3a3a" strokeWidth={s * 0.08} strokeLinejoin="round" />
             <path d={statics.borders} fill="none" stroke="#00000045" strokeWidth={0.7} />
             <path d={nationBorder} fill="none" stroke="#1b1b1b" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
             <path d={fog.dim} fill="#1b1d22" opacity={0.22} fillRule="evenodd" />
@@ -339,6 +380,12 @@ export default function MapView({ world, regions, nations, selected, targets, on
           </g>
           <path d={statics.riverD} fill="none" stroke="#3f86b4" strokeWidth={s * 0.28} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
           <path d={statics.land} fill="none" stroke="#2c5468" strokeWidth={1.1} />
+          {statics.glyph.cliff && (
+            <>
+              <path d={statics.glyph.cliff} fill="none" stroke="#fffdf6" strokeWidth={s * 0.3} strokeLinejoin="round" opacity={0.8} />
+              <path d={statics.glyph.cliff} fill="none" stroke="#5a2d14" strokeWidth={s * 0.14} strokeLinejoin="round" />
+            </>
+          )}
           {targets &&
             [...targets.entries()].filter(([rid]) => world.regions[rid].sea).map(([rid, kind]) => (
               <path
@@ -353,6 +400,12 @@ export default function MapView({ world, regions, nations, selected, targets, on
             ))}
           {selected !== null && selected !== undefined && world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
           {seaLines}
+          {(world.straitLines || []).map(([ax, ay, bx, by], k) => (
+            <g key={'st' + k}>
+              <line x1={ax} y1={ay} x2={bx} y2={by} stroke="#15171b" strokeWidth={s * 0.42} strokeLinecap="round" opacity={0.6} />
+              <line x1={ax} y1={ay} x2={bx} y2={by} stroke="#fffdf6" strokeWidth={s * 0.2} strokeDasharray={`${s * 0.35} ${s * 0.25}`} strokeLinecap="round" />
+            </g>
+          ))}
           {arrows}
           {!compact && moves && showArmy && <MoveLayer world={world} nations={nations} moves={moves} visible={(rid) => viewOf(rid) === 'visible'} outline={statics.outline} s={s} />}
           {!compact &&
@@ -380,51 +433,72 @@ export default function MapView({ world, regions, nations, selected, targets, on
               }
               const visible = v === 'visible';
               const own = reg.owner;
-              const col = own === null ? '#666' : nations[own].color;
-              const t = !showTroops || showTroops(r.id) ? fmt(reg.troops) : '?';
-              const fs = s * 0.8;
-              const bw = Math.max(s * 1.9, String(t).length * fs * 0.62 + s * 0.6);
+              const col = own === null ? '#777' : nations[own].color;
+              const known = !showTroops || showTroops(r.id);
+              // 병력을 모르는 지역은 '?' 대신 지역 이름만
+              const t = known ? fmt(reg.troops) : reg.name;
+              const fs = known ? s * 0.8 : s * 0.62;
+              const bw = Math.max(s * 1.9, String(t).length * fs * (known ? 0.62 : 0.95) + s * 0.6);
               const rebel = visible && reg.loyalty !== undefined && reg.owner !== null && reg.loyalty < 30;
               const wx = weather ? WEATHER[weather[r.id]] : null;
               const cut = cutSet?.has(r.id);
               const gc = visible ? genCount?.[r.id] || 0 : 0;
               const b = reg.buildings;
-              const icons = (b.walls ? `🏰${b.walls < 3 ? b.walls : ''}` : '') + (b.market ? '💰' : '') + (b.port ? '⚓' : '') + (b.barracks ? '⚔️' : '');
+              const icons = [b.walls && `🏰${b.walls < 3 ? b.walls : ''}`, b.market && '💰', b.port && '⚓', b.barracks && '⚔️'].filter(Boolean);
+              const army = showArmy && own !== null && known && reg.troops > 0;
+              const ib = s * 0.95; // 아이콘 배지 크기
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
-                  {showArmy && own !== null && t !== '?' && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.5} y={-s * 0.78} />}
-                  <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill="#fffdf6" stroke={col} strokeWidth={s * 0.22} />
-                  {wx && wx.icon && (
-                    <text x={-bw / 2 - s * 0.1} dy={-s * 0.75} fontSize={s * 0.75} textAnchor="middle">
-                      {wx.icon}
-                    </text>
-                  )}
-                  {cut && (
-                    <text x={bw / 2 + s * 0.2} dy={s * 1.3} fontSize={s * 0.75} textAnchor="middle" fill="#ff9a3c" stroke="#000" strokeWidth={0.3} fontWeight="700">
-                      ✂
-                    </text>
-                  )}
-                  {rebel && <circle cx={bw / 2} cy={-s * 0.7} r={s * 0.35} fill="#e2655a" stroke="#000" strokeWidth={0.4} />}
-                  <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill="#222">
+                  {army && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.5} y={-s * 0.78} />}
+                  <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill={known ? '#fffdf6' : '#e9e4d6'} stroke={col} strokeWidth={s * 0.22} />
+                  <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill={known ? '#1d1d1d' : '#55524a'}>
                     {t}
                   </text>
+                  {wx && wx.icon && (
+                    <g transform={`translate(${-bw / 2 - s * 0.15},${-s * 0.85})`}>
+                      <circle r={ib * 0.62} fill="#1d2a36" stroke="#fffdf6" strokeWidth={s * 0.08} opacity={0.92} />
+                      <text dy={ib * 0.3} fontSize={ib * 0.85} textAnchor="middle">
+                        {wx.icon}
+                      </text>
+                    </g>
+                  )}
+                  {cut && (
+                    <g transform={`translate(${bw / 2 + s * 0.1},${s * 0.95})`}>
+                      <circle r={ib * 0.55} fill="#ff9a3c" stroke="#1d1d1d" strokeWidth={s * 0.08} />
+                      <text dy={ib * 0.28} fontSize={ib * 0.75} textAnchor="middle" fill="#1d1d1d" fontWeight="700">
+                        ✂
+                      </text>
+                    </g>
+                  )}
+                  {rebel && <circle cx={bw / 2} cy={-s * 0.7} r={s * 0.38} fill="#e2655a" stroke="#fffdf6" strokeWidth={s * 0.1} />}
                   {capitals.has(r.id) && (
-                    <text x={-bw / 2 - s * 0.6} dy={s * 0.35} fontSize={s * 1.05} textAnchor="middle" fill="#ffd34d" stroke="#000" strokeWidth={0.4}>
-                      ♛
-                    </text>
+                    <g transform={`translate(${-bw / 2 - s * 0.55},0)`}>
+                      <circle r={ib * 0.62} fill="#2a2210" stroke="#ffd34d" strokeWidth={s * 0.1} />
+                      <text dy={ib * 0.33} fontSize={ib * 0.95} textAnchor="middle" fill="#ffd34d">
+                        ♛
+                      </text>
+                    </g>
                   )}
                   {gc > 0 && (
-                    <text x={bw / 2 + s * 0.55} dy={s * 0.3} fontSize={s * 0.8} textAnchor="middle" fill="#ffe066" stroke="#000" strokeWidth={0.35} fontWeight="700">
-                      ★{gc > 1 ? gc : ''}
-                    </text>
+                    <g transform={`translate(${bw / 2 + s * 0.6},0)`}>
+                      <circle r={ib * 0.62} fill="#2a2210" stroke="#ffe066" strokeWidth={s * 0.1} />
+                      <text dy={ib * 0.32} fontSize={ib * (gc > 1 ? 0.7 : 0.9)} textAnchor="middle" fill="#ffe066" fontWeight="700">
+                        {gc > 1 ? `★${gc}` : '★'}
+                      </text>
+                    </g>
                   )}
-                  {icons && (
-                    <text dy={s * 1.85} fontSize={s * 0.6} textAnchor="middle">
-                      {icons}
-                    </text>
+                  {icons.length > 0 && (
+                    <g transform={`translate(0,${s * 1.55})`}>
+                      <rect x={(-icons.length * ib) / 2 - s * 0.15} y={-ib * 0.55} width={icons.length * ib + s * 0.3} height={ib * 1.1} rx={ib * 0.45} fill="#fffdf6" stroke={col} strokeWidth={s * 0.1} opacity={0.95} />
+                      {icons.map((ic, k) => (
+                        <text key={k} x={(k - (icons.length - 1) / 2) * ib} dy={ib * 0.3} fontSize={ib * 0.78} textAnchor="middle" fill="#1d1d1d" fontWeight="700">
+                          {ic}
+                        </text>
+                      ))}
+                    </g>
                   )}
-                  {zoomed && (
-                    <text dy={showArmy && own !== null && reg.troops > 0 ? -s * 2.4 : -s * 1.25} fontSize={s * 0.62} textAnchor="middle" fill="#111" stroke="#fffdf6" strokeWidth={s * 0.18} paintOrder="stroke">
+                  {zoomed && known && (
+                    <text dy={army ? -s * 2.4 : -s * 1.25} fontSize={s * 0.66} textAnchor="middle" fill="#fffdf6" stroke="#15171b" strokeWidth={s * 0.22} paintOrder="stroke" fontWeight="600">
                       {reg.name}
                     </text>
                   )}
@@ -450,7 +524,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
       <div className="map-ctrl">
         <button onClick={() => zoom(1 / 1.3)}>＋</button>
         <button onClick={() => zoom(1.3)}>－</button>
-        <button onClick={() => setVb([0, 0, world.W, world.H])}>⤢</button>
+        <button onClick={() => setVb(fitView())}>⤢</button>
       </div>
     </div>
   );

@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, doMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
-  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, governorOf, doRelocate,
+  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
 } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
 
@@ -209,6 +209,20 @@ export function aiActions(s, world, nid) {
     const civs = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && g.role === 'civ' && n.ruler !== g.id && governorOf(s, g.region)?.id !== g.id);
     const spot = nationRegions(s, nid).filter((r) => governorOf(s, r)?.role !== 'civ').sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
     if (civs.length && spot !== undefined) doRelocate(s, nid, civs[0].id, spot);
+  }
+  // 천도: 수도가 적 대군과 맞닿아 위험하면, 안쪽의 큰 고을로 (드물게)
+  if (n.capital !== null && n.ap >= 5 && stateRng(s)() < 0.3) {
+    const cap = n.capital;
+    let enemy = 0;
+    for (const x of world.regions[cap].neighbors) {
+      const t = s.regions[x.id];
+      if (t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner)) enemy += t.troops;
+    }
+    if (enemy > s.regions[cap].troops * 2) {
+      const safe = nationRegions(s, nid).filter((r) => r !== cap && !world.regions[r].neighbors.some((x) => { const t = s.regions[x.id]; return t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner); }) && !capitalMoveCheck(s, world, nid, r));
+      const best = safe.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
+      if (best !== undefined) doMoveCapital(s, world, nid, best);
+    }
   }
   // 오래된 속국 병합 (패권국은 항상, 나머지는 가끔)
   for (const o of s.nations) {
