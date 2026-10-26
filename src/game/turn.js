@@ -6,6 +6,7 @@ import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, na
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
+import { riseNations } from './rise.js';
 import { updateExplored, encodeOwners } from './fog.js';
 import { hashString } from './rng.js';
 
@@ -72,8 +73,6 @@ function balanceOfPower(s, world) {
       const me = front.find((o) => o.isPlayer);
       if (me && share > 0) log(s, `💰 대동맹 후방국들이 ${me.name}에 군자금 ${fmtGold(share)}금을 보냈습니다.`, [me.id], 'diplo');
     }
-    // 패권국의 민심 불안: 민심 60 미만 지역은 매 턴 1씩 더 흔들림(반란 유도)
-    for (const r of nationRegions(s, top.id)) if ((s.regions[r].loyalty ?? 100) < 60) s.regions[r].loyalty = Math.max(0, s.regions[r].loyalty - 1);
   } else if (prev !== undefined && threat(prev) < 2) {
     log(s, `🕊️ ${s.nations[prev].name}에 대한 대동맹이 해체되었습니다.`, s.nations.map((x) => x.id), 'diplo');
     delete s.coalition;
@@ -231,6 +230,7 @@ export function endTurn(s, world) {
     aiActions(s, world, id);
   }
   upkeep(s, world);
+  riseNations(s, world, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
   s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);

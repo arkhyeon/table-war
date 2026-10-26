@@ -359,6 +359,25 @@ export function aiActions(s, world, nid) {
       if (moveCheck(s, world, nid, r, nb.id, reg.troops - 1000, gens)) continue;
       opts.push({ score: 14 + (reg.troops / 1000) * 0.4, run: () => doMove(s, world, nid, r, nb.id, reg.troops - 1000, gens, { engines: reg.engines || 0 }) });
     }
+    // 원군: 위협받는 동맹국 땅에 여유 병력을 보냄
+    for (const r of mine) {
+      const reg = s.regions[r];
+      if (reg.troops < 15000 || threat[r] > 0 || n.capital === r) continue;
+      for (const x of world.regions[r].neighbors) {
+        const t = s.regions[x.id];
+        if (t.sea || t.owner === null || t.owner === nid || getRel(s, nid, t.owner).type !== 'alliance') continue;
+        let enemy = 0;
+        for (const y of world.regions[x.id].neighbors) {
+          const e = s.regions[y.id];
+          if (e.owner !== null && e.owner !== t.owner && e.owner !== nid && getRel(s, t.owner, e.owner).type === 'none') enemy += e.troops;
+        }
+        if (enemy < t.troops * 1.3 || enemy < 10000) continue;
+        const cnt = Math.round(reg.troops / 3 / 100) * 100;
+        if (moveCheck(s, world, nid, r, x.id, cnt, [])) continue;
+        opts.push({ score: 16 + Math.min(20, (enemy - t.troops) / 3000), run: () => doMove(s, world, nid, r, x.id, cnt, []) });
+        break;
+      }
+    }
     if (!opts.length) break;
     opts.sort((a, b) => b.score - a.score);
     const res = opts[0].run();

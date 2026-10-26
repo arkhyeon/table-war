@@ -229,6 +229,8 @@ export function doAnnex(s, world, lord, vassal) {
     r.owner = lord;
     r.loyalty = Math.min(r.loyalty ?? 100, 45);
   }
+  const king = s.generals[V.ruler];
+  if (king) Object.assign(king, { exKing: V.name, joined: s.turn });
   // 속국 장수는 종주국에 귀순(충성 낮음)
   for (const g of Object.values(s.generals)) {
     if (g.nation !== vassal || g.status !== 'active') continue;

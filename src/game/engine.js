@@ -356,7 +356,11 @@ export function moveCheck(s, world, nid, from, to, count, genIds = []) {
   if (count < 1 || count > maxCount) return fr.sea ? '이동 병력이 올바르지 않습니다.' : '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
   if (tr.owner !== null && tr.owner !== nid) {
     const rel = getRel(s, nid, tr.owner);
-    if (rel.type === 'alliance') return '동맹국은 공격할 수 없습니다. 먼저 동맹을 파기해야 합니다.';
+    // 동맹국 땅으로는 원군(병사만)을 보낼 수 있음
+    if (rel.type === 'alliance') {
+      if (tr.sea) return '동맹 함대와는 합류할 수 없습니다.';
+      if (genIds.length) return '원군에는 장수를 보낼 수 없습니다. (장수 선택 해제)';
+    }
   }
   return canAct(s, nid, moveCost(world, from, to, s));
 }
@@ -396,16 +400,29 @@ function transferRegion(s, world, rid, newOwner) {
       const rest = nationRegions(s, old);
       n.capital = rest.length ? rest.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0] : null;
     }
-    checkElimination(s, world, old);
+    checkElimination(s, world, old, newOwner);
   }
 }
 
-export function checkElimination(s, world, nid) {
+export function checkElimination(s, world, nid, by = null) {
   const n = s.nations[nid];
   if (!n.alive) return;
   if (nationRegions(s, nid).length > 0) return;
   n.alive = false;
   n.capital = null;
+  // 정복으로 멸망: 살아 있는 군주는 정복국의 장수로 귀순
+  const king = s.generals[n.ruler];
+  const conq = by !== null ? s.nations[by] : null;
+  if (king && conq?.alive && (king.status === 'active' || king.status === 'prisoner')) {
+    king.status = 'active';
+    king.captor = null;
+    king.nation = by;
+    king.region = conq.capital ?? nationRegions(s, by)[0];
+    king.loyalty = 45;
+    king.exKing = n.name;
+    king.joined = s.turn;
+    log(s, `🙇 ${n.name}의 군주 ${king.name}이(가) ${conq.name}에 귀순해 장수가 되었습니다.`, [by, nid], 'general');
+  }
   for (const r of s.regions) {
     if (r.owner === nid && r.sea) {
       r.owner = null;
@@ -468,6 +485,15 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const cost = moveCost(world, from, to, s);
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from);
   const engines = Math.min(opts.engines || 0, fr.engines || 0);
+  // 원군: 병사를 동맹국에 넘겨줌
+  if (tr.owner !== null && tr.owner !== nid && getRel(s, nid, tr.owner).type === 'alliance') {
+    n.ap -= cost;
+    fr.troops -= count;
+    tr.troops += count;
+    s.opinion[tr.owner][nid] += Math.min(20, count / 2000);
+    log(s, `🤝 ${n.name}이(가) 동맹국 ${s.nations[tr.owner].name}의 ${tr.name}에 원군 ${fmtTroops(count)}을 보냈습니다.`, [nid, tr.owner], 'diplo');
+    return { ok: true, msg: `${tr.name}에 원군 ${fmtTroops(count)} 파견.` };
+  }
   const leaveSea = () => {
     if (fr.sea && fr.troops <= 0) {
       fr.troops = 0;

@@ -6,7 +6,7 @@ import { addGeneral, computeMaxAp } from './engine.js';
 import { rollWeather } from './weather.js';
 import { updateExplored, encodeOwners } from './fog.js';
 
-const colorFor = (i) => `hsl(${Math.round((i * 137.508 + 20) % 360)}, ${58 + (i % 3) * 10}%, ${46 + ((i * 7) % 3) * 6}%)`;
+export const colorFor = (i) => `hsl(${Math.round((i * 137.508 + 20) % 360)}, ${58 + (i % 3) * 10}%, ${46 + ((i * 7) % 3) * 6}%)`;
 
 // 시나리오/시드 → 국가 목록(미리보기용)
 export function planNations(world, scn, seed, opts = {}) {

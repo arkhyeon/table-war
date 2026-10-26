@@ -3,7 +3,7 @@ import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
-import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck } from '../game/engine.js';
+import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck, getRel } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
@@ -125,8 +125,9 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     const probe = fr.sea ? fr.troops : fr.troops - 1;
     for (const nb of world.regions[selected].neighbors) {
       const t = game.regions[nb.id];
-      let kind = t.owner === pid || (t.sea && (t.owner === null || t.troops <= 0)) ? 'move' : 'attack';
-      const why = moveCheck(game, world, pid, selected, nb.id, Math.max(1, probe), gens);
+      const ally = t.owner !== null && t.owner !== pid && !t.sea && getRel(game, pid, t.owner).type === 'alliance';
+      let kind = ally || t.owner === pid || (t.sea && (t.owner === null || t.troops <= 0)) ? 'move' : 'attack';
+      const why = moveCheck(game, world, pid, selected, nb.id, Math.max(1, probe), ally ? [] : gens);
       if (why && !why.startsWith('행동력') && !why.startsWith('이동 병력')) kind = 'blocked';
       m.set(nb.id, kind);
     }

@@ -45,11 +45,12 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const myGens = gensIn(game, from, pid);
   const maxCount = fr.sea ? fr.troops : fr.troops - 1;
   const [count, setCount] = useState(fr.sea ? fr.troops : Math.max(1, fr.troops - 1000));
-  const [sel, setSel] = useState(() => myGens.map((g) => g.id));
+  const aid = tr.owner !== null && tr.owner !== pid && getRel(game, pid, tr.owner).type === 'alliance';
+  const [sel, setSel] = useState(() => (aid ? [] : myGens.map((g) => g.id)));
   const walls = !tr.sea && (tr.buildings.walls || 0) > 0;
   const [mode, setMode] = useState('siege');
   const [engines, setEngines] = useState(Math.min(2, fr.engines || 0));
-  const isAttack = tr.owner !== pid && !(tr.sea && (tr.owner === null || tr.troops <= 0));
+  const isAttack = !aid && tr.owner !== pid && !(tr.sea && (tr.owner === null || tr.troops <= 0));
   const opts = walls ? { mode, engines } : { engines };
   const err = moveCheck(game, world, pid, from, to, count, sel);
   const est = useMemo(() => (isAttack && !err ? estimateBattle(game, world, pid, from, to, count, sel, opts) : null), [game, world, pid, from, to, count, sel, isAttack, err, mode, engines]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,7 +60,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const defGens = isAttack && tr.owner !== null ? gensIn(game, to, tr.owner) : [];
   const canDuel = isAttack && sel.length > 0 && defGens.length > 0;
   const [wantDuel, setWantDuel] = useState(true);
-  const verb = edge.type === 'coast' ? '승선' : edge.type === 'landing' ? '상륙' : edge.type === 'cliff' ? '절벽 상륙' : edge.type === 'sea' ? '항해' : '이동';
+  const verb = aid ? '원군 파견' : edge.type === 'coast' ? '승선' : edge.type === 'landing' ? '상륙' : edge.type === 'cliff' ? '절벽 상륙' : edge.type === 'sea' ? '항해' : '이동';
   const title = isAttack ? (tr.sea ? `⚓ ${tr.name} 해전` : edge.type === 'landing' || edge.type === 'cliff' ? `⚔️ ${tr.name} ${edge.type === 'cliff' ? '절벽 ' : ''}상륙 공격` : `⚔️ ${tr.name} 공격`) : `🚩 ${tr.name} ${verb}`;
 
   return (
@@ -84,7 +85,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
           병력 {count.toLocaleString('ko-KR')} / {maxCount.toLocaleString('ko-KR')}명
           <input type="range" min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={(e) => setCount(Math.min(maxCount, +e.target.value))} style={{ width: '100%' }} />
         </label>
-        {myGens.length > 0 && (
+        {myGens.length > 0 && !aid && (
           <div>
             동행 장수
             {myGens.map((g) => (
