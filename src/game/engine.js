@@ -394,6 +394,10 @@ export function canSail(s, nid, from, genIds) {
   return !!s.regions[from].buildings?.port || genIds.some((id) => tv([s.generals[id]].filter(Boolean), '수군'));
 }
 
+// 이번 턴에 움직일 수 있는 병력: 이번 턴에 도착한(이미 움직인) 병력은 제외
+export const movable = (s, rid) => Math.max(0, s.regions[rid].troops - (s.regions[rid].moved || 0));
+const arrive = (r, n) => (r.moved = Math.min(r.troops, (r.moved || 0) + n));
+
 export function moveCheck(s, world, nid, from, to, count, genIds = []) {
   const fr = s.regions[from], tr = s.regions[to];
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
@@ -403,7 +407,8 @@ export function moveCheck(s, world, nid, from, to, count, genIds = []) {
   const seaMove = e.type === 'coast' || e.type === 'sea' || e.type === 'landing' || e.type === 'cliff';
   const sailor = genIds.some((id) => (s.generals[id]?.traits || []).some(([t, l]) => t === '항해' && l >= 3));
   if (seaMove && !sailor && (weatherOf(s, from).noSea || weatherOf(s, to).noSea)) return '폭풍·용오름으로 항해할 수 없습니다. (항해Ⅲ 장수는 가능)';
-  const maxCount = fr.sea ? fr.troops : fr.troops - 1;
+  const maxCount = fr.sea ? movable(s, from) : Math.min(fr.troops - 1, movable(s, from));
+  if (count > maxCount && count <= (fr.sea ? fr.troops : fr.troops - 1)) return `이번 턴에 이미 움직인 병력은 다시 움직일 수 없습니다 (이동 가능 ${maxCount.toLocaleString('ko-KR')}명).`;
   if (count < 1 || count > maxCount) return fr.sea ? '이동 병력이 올바르지 않습니다.' : '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
   if (tr.owner !== null && tr.owner !== nid) {
     const rel = getRel(s, nid, tr.owner);
@@ -549,6 +554,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     n.ap -= cost;
     fr.troops -= count;
     tr.troops += count;
+    arrive(tr, count);
     s.opinion[tr.owner][nid] += Math.min(20, count / 2000);
     log(s, `🤝 ${n.name}이(가) 동맹국 ${s.nations[tr.owner].name}의 ${tr.name}에 원군 ${fmtTroops(count)}을 보냈습니다.`, [nid, tr.owner], 'diplo');
     trackMove(s, from, to, nid, count, 'aid');
@@ -566,6 +572,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     fr.troops -= count;
     tr.owner = nid;
     tr.troops += count;
+    arrive(tr, count);
     for (const g of gens) g.region = to;
     if (engines && !tr.sea && !fr.sea) {
       fr.engines -= engines;
@@ -693,6 +700,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     if (mode === 'assault') tr.buildings.walls = Math.max(0, tr.buildings.walls - 1);
     transferRegion(s, world, to, nid);
     tr.troops = survivors;
+    tr.moved = survivors;
     if (!tr.sea) {
       tr.loyalty = defender === null ? 35 : 15;
       tr.conscripted = true;
@@ -717,6 +725,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   report.defLoss = Math.max(0, Math.min(tr.troops - 1, Math.round((tr.troops * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
   tr.troops -= report.defLoss;
   fr.troops += back;
+  arrive(fr, back);
   if (engines) fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + Math.floor(engines / 2));
   for (const g of atkGens) {
     const r = rng();

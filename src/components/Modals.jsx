@@ -8,7 +8,7 @@ import { TRAITS, TIER, traitDesc, traitLabel } from '../game/traits.js';
 import { CIVS } from '../game/civs.js';
 import {
   estimateBattle, moveCheck, moveCost, doMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
-  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT,
+  doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT, movable,
 } from '../game/engine.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
@@ -45,8 +45,8 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const fr = game.regions[from], tr = game.regions[to];
   const edge = edgeBetween(world, from, to);
   const myGens = gensIn(game, from, pid);
-  const maxCount = fr.sea ? fr.troops : fr.troops - 1;
-  const [count, setCount] = useState(fr.sea ? fr.troops : Math.max(1, fr.troops - 1000));
+  const maxCount = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, from));
+  const [count, setCount] = useState(fr.sea ? maxCount : Math.max(1, Math.min(maxCount, fr.troops - 1000)));
   const aid = tr.owner !== null && tr.owner !== pid && getRel(game, pid, tr.owner).type === 'alliance';
   const [sel, setSel] = useState(() => (aid ? [] : myGens.map((g) => g.id)));
   const walls = !tr.sea && (tr.buildings.walls || 0) > 0;
@@ -85,6 +85,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
       <div className="col">
         <label>
           병력 {count.toLocaleString('ko-KR')} / {maxCount.toLocaleString('ko-KR')}명
+          {(fr.moved || 0) > 0 && <small className="muted"> · 이번 턴 도착 {fmtTroops(Math.min(fr.moved, fr.troops))}은 이동 불가</small>}
           <Slider min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={setCount} style={{ width: '100%' }} />
         </label>
         {myGens.length > 0 && !aid && (
@@ -792,7 +793,7 @@ export function HelpModal({ onClose }) {
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
           <li><b>시간</b>: 2턴이 한 계절, 8턴이 1년. 날씨는 매 턴 바뀝니다.</li>
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7, 큰 지도는 더 많음) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
-          <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(우클릭으로 바로 열기). 육지는 최소 1명을 남겨야 합니다.</li>
+          <li><b>이동·공격</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(우클릭으로 바로 열기). 육지는 최소 1명을 남겨야 합니다. 한 번 이동·공격을 마친 병력은 그 턴에 다시 움직일 수 없습니다(예: A→B로 7,500 이동 시 B의 원래 병력 2,500만 계속 이동 가능).</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 험산 +50%·진입 AP+1, 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드에서 세율 일괄 설정, 지역마다 개별 설정 가능(높음=세수↑ 민심↓ 인구 정체).</li>

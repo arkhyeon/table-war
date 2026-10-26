@@ -8,7 +8,7 @@ import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
   doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN,
+  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN,
 } from '../game/engine.js';
 
 export function relTag(game, a, b) {
@@ -103,40 +103,51 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           <span className="chip" style={{ background: me.color }} />
           {spectator ? `👁️ 관전 중 (기준: ${me.name})` : <EditableName value={me.name} onSave={(t) => act((s) => ((s.nations[pid].name = t), { ok: true, msg: `국호를 ${t}(으)로 바꿨습니다.` }))} />}
         </h3>
+        <div className="quick">
+          <span title="국고 (턴당 순수입)">
+            💰 <b>{fmtGold(me.gold)}</b> <small style={{ color: inc.net < 0 ? 'var(--danger)' : 'var(--muted)' }}>({inc.net >= 0 ? '+' : ''}{fmtGold(inc.net)}/턴)</small>
+          </span>
+          <span title="영토">🗺️ {myRegions.length}곳</span>
+          <span title="총 병력">🪖 {fmtTroops(inc.troops)}</span>
+          {cut > 0 && <span style={{ color: 'var(--danger)' }}>✂ 보급 끊김 {cut}</span>}
+          {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
+        </div>
+        <details className="more">
+          <summary>자세히 (수입·세율·장수·승리 조건)</summary>
         <div className="kv">
-          <span>군주</span>
-          <span>{ruler ? ruler.name : '없음'}</span>
-          <span>영토</span>
-          <span>
-            {myRegions.length}지역 / 전체 {landCount(game)}
-            {cut > 0 && <span style={{ color: 'var(--danger)' }}> · 보급 끊김 {cut}</span>}
-          </span>
-          <span>병력</span>
-          <span>{fmtTroops(inc.troops)}</span>
-          <span>수입</span>
-          <span>
-            세금 +{fmtGold(inc.gross)} − 병력 유지비 {fmtGold(inc.army)} − 장수 녹봉 {fmtGold(inc.salary)}{inc.admin ? ` − 통치비 ${fmtGold(inc.admin)}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{fmtGold(inc.net)}</b>금/턴
-          </span>
-          <span>세율 일괄</span>
-          <span>
-            <TaxButtons value={me.taxRate || 'normal'} onPick={setBulk} />
-            {overrides > 0 && <small className="muted"> 개별 설정 {overrides}곳 (일괄 선택 시 초기화)</small>}
-          </span>
-          <span>장수</span>
-          <span>
-            {nationGenerals(game, pid).length}명 · 출현확률 {Math.round(appearChance(game, pid) * 100)}%
-          </span>
-          {lord && (
-            <>
-              <span>종주국</span>
-              <span>{lord.name} (수입 25% 조공)</span>
-            </>
-          )}
-        </div>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          {game.coalition && <div style={{ color: 'var(--danger)' }}>⚔️ 대동맹 결성: {game.nations[game.coalition.target].name}이(가) 공공의 적</div>}
-          승리: 전체 육지의 {Math.round((game.winShare || 0.6) * 100)}% 점령 또는 모든 국가 멸망·속국화.
-        </div>
+            <span>군주</span>
+            <span>{ruler ? ruler.name : '없음'}</span>
+            <span>영토</span>
+            <span>
+              {myRegions.length}지역 / 전체 {landCount(game)}
+              {cut > 0 && <span style={{ color: 'var(--danger)' }}> · 보급 끊김 {cut}</span>}
+            </span>
+            <span>병력</span>
+            <span>{fmtTroops(inc.troops)}</span>
+            <span>수입</span>
+            <span>
+              세금 +{fmtGold(inc.gross)} − 병력 유지비 {fmtGold(inc.army)} − 장수 녹봉 {fmtGold(inc.salary)}{inc.admin ? ` − 통치비 ${fmtGold(inc.admin)}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{fmtGold(inc.net)}</b>금/턴
+            </span>
+            <span>세율 일괄</span>
+            <span>
+              <TaxButtons value={me.taxRate || 'normal'} onPick={setBulk} />
+              {overrides > 0 && <small className="muted"> 개별 설정 {overrides}곳 (일괄 선택 시 초기화)</small>}
+            </span>
+            <span>장수</span>
+            <span>
+              {nationGenerals(game, pid).length}명 · 출현확률 {Math.round(appearChance(game, pid) * 100)}%
+            </span>
+            {lord && (
+              <>
+                <span>종주국</span>
+                <span>{lord.name} (수입 25% 조공)</span>
+              </>
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            승리: 전체 육지의 {Math.round((game.winShare || 0.6) * 100)}% 점령 또는 모든 국가 멸망·속국화.
+          </div>
+        </details>
       </div>
 
       {r && view === 'hidden' && (
@@ -196,8 +207,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             {owner && owner.capital === selected && ' ♛'}
             {view === 'known' && <small className="muted"> (시야 밖)</small>}
           </h3>
-          <div className="kv">
-            <span>소유</span>
+          {/* 핵심 정보: 한눈에 */}
+          <div className="quick">
             <span>
               {owner ? (
                 <>
@@ -208,81 +219,32 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 '중립 세력'
               )}
             </span>
-            <span>지형</span>
-            <span>
-              {TERRAIN[wr.terrain].name} <small className="muted">{TERRAIN[wr.terrain].desc}</small>
+            <span title="병사 (이번 턴 이동 가능)">
+              🪖 <b>{showT ? fmtTroops(r.troops) : '?'}</b>
+              {mine && (r.moved || 0) > 0 && <small className="muted"> (이동 가능 {fmtTroops(movable(game, selected))})</small>}
             </span>
-            <span>날씨</span>
-            <span>
-              {w.icon} {w.name} {w.desc && <small className="muted">{w.desc}</small>}
-            </span>
-            <span>병사</span>
-            <span>{showT ? <><b>{r.troops.toLocaleString('ko-KR')}</b>명</> : '?'}</span>
             {r.owner !== null && view === 'visible' && (
-              <>
-                <span>민심</span>
-                <span style={{ color: r.loyalty < 25 ? 'var(--danger)' : r.loyalty < 50 ? 'var(--accent)' : undefined }}>
-                  {Math.round(r.loyalty ?? 100)} {r.loyalty < 25 && '⚠️ 반란 위험'}
-                </span>
-                <span>보급</span>
-                <span style={{ color: supplied(game, world, r.owner).has(selected) ? undefined : 'var(--danger)' }}>
-                  {supplied(game, world, r.owner).has(selected) ? '연결됨' : '끊김 (병력 -8%/턴, 전투력 -20%)'}
-                </span>
-                <span>세수</span>
-                <span>
-                  {fmtGold(regionTax(game, selected))}금/턴 <small className="muted">세율 {TAX[effTax(game, selected)].name}</small>
-                </span>
-              </>
+              <span title="민심" style={{ color: r.loyalty < 25 ? 'var(--danger)' : r.loyalty < 50 ? 'var(--accent)' : undefined }}>
+                ❤️ {Math.round(r.loyalty ?? 100)}
+                {r.loyalty < 25 && ' 반란 위험'}
+              </span>
             )}
-            <span>인구</span>
-            <span>{Math.round(r.pop)}천</span>
-            {r.owner !== null && governorOf(game, selected) && (
-              <>
-                <span>태수</span>
-                <span>
-                  {(() => {
-                    const gv = governorOf(game, selected), b = governorBonus(gv);
-                    return `${gv.name} (정${gv.pol}${gv.role === 'civ' ? '' : ', 무관 절반'}) · 세수 +${Math.round(b.tax * 100)}%${b.loyalty ? ` · 민심 +${b.loyalty}/턴` : ''}`;
-                  })()}
-                </span>
-              </>
+            <span title={TERRAIN[wr.terrain].desc}>⛰️ {TERRAIN[wr.terrain].name}</span>
+            <span title={w.desc}>
+              {w.icon} {w.name}
+            </span>
+            {r.owner !== null && view === 'visible' && !supplied(game, world, r.owner).has(selected) && <span style={{ color: 'var(--danger)' }}>✂ 보급 끊김</span>}
+            {Object.entries(r.buildings).filter(([, v]) => v).length > 0 && (
+              <span>
+                {Object.entries(r.buildings)
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => `${BUILDINGS[k].icon}${k === 'walls' ? v : ''}`)
+                  .join(' ')}
+              </span>
             )}
-            <span>특징</span>
-            <span>{[wr.coastal && '해안', wr.river && '강 유역'].filter(Boolean).join(' · ') || '-'}</span>
-            <span>건물</span>
-            <span>
-              {Object.entries(r.buildings)
-                .filter(([, v]) => v)
-                .map(([k, v]) => `${BUILDINGS[k].icon}${BUILDINGS[k].name}${k === 'walls' ? ` ${v}/${WALL_MAX}` : ''}`)
-                .join(' ') || '없음'}
-              {r.engines ? ` · 🛠️공성병기 ${r.engines}` : ''}
-            </span>
-            <span>인접</span>
-            <span style={{ fontSize: 12 }}>
-              {wr.neighbors.map((n) => (
-                <span key={n.id} style={{ marginRight: 6, whiteSpace: 'nowrap' }}>
-                  {game.regions[n.id].name}
-                  {n.type !== 'land' && <small className="muted">({EDGE[n.type].name})</small>}
-                </span>
-              ))}
-            </span>
           </div>
           {mine && (
             <>
-              <div className="row" style={{ marginTop: 8, fontSize: 13 }}>
-                <span className="muted">지역 세율</span>
-                <TaxButtons
-                  value={r.tax || null}
-                  withDefault
-                  onPick={(k) =>
-                    act((s) => {
-                      if (k) s.regions[selected].tax = k;
-                      else delete s.regions[selected].tax;
-                      return { ok: true };
-                    })
-                  }
-                />
-              </div>
               <div className="actions" style={{ marginTop: 10 }}>
                 <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)} disabled={r.troops < 2}>
                   🚩 이동·공격 (M)
@@ -326,6 +288,81 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               </div>
             </>
           )}
+          <details className="more">
+            <summary>자세히</summary>
+            <div className="kv">
+              <span>지형</span>
+              <span>
+                {TERRAIN[wr.terrain].name} <small className="muted">{TERRAIN[wr.terrain].desc}</small>
+              </span>
+              <span>날씨</span>
+              <span>
+                {w.icon} {w.name} {w.desc && <small className="muted">{w.desc}</small>}
+              </span>
+              {r.owner !== null && view === 'visible' && (
+                <>
+                  <span>보급</span>
+                  <span style={{ color: supplied(game, world, r.owner).has(selected) ? undefined : 'var(--danger)' }}>
+                    {supplied(game, world, r.owner).has(selected) ? '연결됨' : '끊김 (병력 -8%/턴, 전투력 -20%)'}
+                  </span>
+                  <span>세수</span>
+                  <span>
+                    {fmtGold(regionTax(game, selected))}금/턴 <small className="muted">세율 {TAX[effTax(game, selected)].name}</small>
+                  </span>
+                </>
+              )}
+              <span>인구</span>
+              <span>{Math.round(r.pop)}천</span>
+              {r.owner !== null && governorOf(game, selected) && (
+                <>
+                  <span>태수</span>
+                  <span>
+                    {(() => {
+                      const gv = governorOf(game, selected), b = governorBonus(gv);
+                      return `${gv.name} (정${gv.pol}${gv.role === 'civ' ? '' : ', 무관 절반'}) · 세수 +${Math.round(b.tax * 100)}%${b.loyalty ? ` · 민심 +${b.loyalty}/턴` : ''}`;
+                    })()}
+                  </span>
+                </>
+              )}
+              <span>특징</span>
+              <span>{[wr.coastal && '해안', wr.river && '강 유역'].filter(Boolean).join(' · ') || '-'}</span>
+              <span>건물</span>
+              <span>
+                {Object.entries(r.buildings)
+                  .filter(([, v]) => v)
+                  .map(([k, v]) => `${BUILDINGS[k].icon}${BUILDINGS[k].name}${k === 'walls' ? ` ${v}/${WALL_MAX}` : ''}`)
+                  .join(' ') || '없음'}
+                {r.engines ? ` · 🛠️공성병기 ${r.engines}` : ''}
+              </span>
+              <span>인접</span>
+              <span style={{ fontSize: 12 }}>
+                {wr.neighbors.map((n) => (
+                  <span key={n.id} style={{ marginRight: 6, whiteSpace: 'nowrap' }}>
+                    {game.regions[n.id].name}
+                    {n.type !== 'land' && <small className="muted">({EDGE[n.type].name})</small>}
+                  </span>
+                ))}
+              </span>
+              {mine && (
+                <>
+                  <span>지역 세율</span>
+                  <span>
+                    <TaxButtons
+                      value={r.tax || null}
+                      withDefault
+                      onPick={(k) =>
+                        act((s) => {
+                          if (k) s.regions[selected].tax = k;
+                          else delete s.regions[selected].tax;
+                          return { ok: true };
+                        })
+                      }
+                    />
+                  </span>
+                </>
+              )}
+            </div>
+          </details>
           {view === 'visible' && (
             <>
               <h4 style={{ marginTop: 10 }}>주둔 장수</h4>

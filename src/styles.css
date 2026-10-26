@@ -16,7 +16,10 @@
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
-body { background: var(--bg); overflow: hidden; }
+/* 아티팩트 등 바깥 페이지가 body에 글자색·배경을 넣어도 다크 테마 유지 */
+html, body, #root { color: var(--text) !important; background: var(--bg) !important; }
+#root { font-family: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+body { overflow: hidden; }
 button {
   font: inherit;
   color: var(--text);
@@ -98,6 +101,11 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .gen:last-child { border-bottom: 0; }
 .stats4 { color: var(--muted); font-size: 12px; }
 .sheet-bar, .sheet-fab { display: none; }
+.menu-wrap { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; display: flex; flex-direction: column; gap: 4px; min-width: 170px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #000a; }
+.menu button { text-align: left; background: transparent; border-color: transparent; }
+.menu button:hover { background: var(--panel2); }
+.end-turn { position: absolute; right: 14px; bottom: 14px; z-index: 6; padding: 12px 20px; font-size: 16px; border-radius: 12px; box-shadow: 0 6px 18px #000a; }
 .log { position: absolute; left: 10px; bottom: 10px; width: min(460px, 60%); max-height: 34%; overflow: auto; background: #15171bdd; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; padding: 6px 8px; }
 .log div { padding: 2px 0; border-bottom: 1px solid #ffffff10; }
 .log .me { color: #ffe3a0; }
@@ -147,8 +155,9 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
   .side .sheet-bar { order: -1; }
   .sheet-bar { display: flex; position: sticky; top: 0; z-index: 1; justify-content: space-between; align-items: center; padding: 8px 2px 6px; background: var(--panel); }
   .sheet-bar .grip { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin-left: calc(50% - 22px); }
-  .sheet-fab { display: block; position: fixed; right: 12px; bottom: 14px; z-index: 7; width: 48px; height: 48px; border-radius: 50%; font-size: 20px; padding: 0; background: var(--panel2); border-color: var(--accent); box-shadow: 0 4px 12px #0008; }
-  .log { max-height: 30%; width: calc(100% - 80px); }
+  .sheet-fab { display: block; position: fixed; left: 12px; bottom: 14px; z-index: 7; width: 48px; height: 48px; border-radius: 50%; font-size: 20px; padding: 0; background: var(--panel2); border-color: var(--accent); box-shadow: 0 4px 12px #0008; }
+  .log { max-height: 30%; width: calc(100% - 24px); bottom: 74px; }
+  .topbar .opt { display: none; }
 }
 /* 폰: 상단바를 한두 줄로 압축 (버튼은 아이콘만) */
 @media (max-width: 600px) {
@@ -219,3 +228,12 @@ button.ghost { background: transparent; border-color: transparent; padding: 0 4p
 .live .banner { animation: wave 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
 @keyframes wave { 0%, 100% { transform: skewY(0deg) scaleX(1); } 50% { transform: skewY(8deg) scaleX(0.85); } }
 @media (prefers-reduced-motion: reduce) { .live .soldier, .live .banner, .flash { animation: none; } }
+
+/* 정보 패널: 핵심 한 줄 + 접는 '자세히' */
+.quick { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; margin: 4px 0 6px; }
+.quick b { font-size: 15px; }
+details.more { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
+details.more > summary::before { content: '▸ '; }
+details.more[open] > summary::before { content: '▾ '; }
+details.more > .kv { margin-top: 6px; }

@@ -257,6 +257,7 @@ export function endTurn(s, world) {
   s.turnEvents = [];
   s.battles = [];
   s.moves = [];
+  for (const r of s.regions) delete r.moved;
   const rng = stateRng(s);
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {
@@ -267,6 +268,8 @@ export function endTurn(s, world) {
     aiActions(s, world, id);
   }
   upkeep(s, world);
+  // 새 턴: 모든 부대가 다시 움직일 수 있음
+  for (const r of s.regions) delete r.moved;
   riseNations(s, world, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;

@@ -3,7 +3,7 @@ import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
 import { endTurn } from '../game/turn.js';
-import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck, getRel } from '../game/engine.js';
+import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck, getRel, movable } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -20,6 +20,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
   const [moveMode, setMoveModeRaw] = useState(false);
   // 모바일: 정보 패널을 바텀시트로 (이동 대상 고를 땐 내려감)
   const [sheet, setSheet] = useState(false);
+  const [menu, setMenu] = useState(false);
   const setMoveMode = useCallback((v) => {
     setMoveModeRaw(v);
     if (v) setSheet(false);
@@ -133,7 +134,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     const m = new Map();
     const fr = game.regions[selected];
     const gens = gensIn(game, selected, pid).map((g) => g.id);
-    const probe = fr.sea ? fr.troops : fr.troops - 1;
+    const probe = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, selected));
     for (const nb of world.regions[selected].neighbors) {
       const t = game.regions[nb.id];
       const ally = t.owner !== null && t.owner !== pid && !t.sea && getRel(game, pid, t.owner).type === 'alliance';
@@ -243,7 +244,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             ))}
           </div>
         </div>
-        <div className="stat">
+        <div className="stat opt">
           <small>평판</small>
           <b>{me.reputation}</b>
         </div>
@@ -267,19 +268,19 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         )}
         <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
         <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>
-        <button onClick={() => setShowLog((v) => !v)} title="기록">📜<span className="lbl"> 기록</span></button>
-        <button onClick={() => setModal({ type: 'chronicle' })} title="연대기">📽️</button>
-        <button onClick={() => setModal({ type: 'help' })}>❓</button>
-        <button
-          onClick={() => {
-            confirmIt('메인 화면으로 나갈까요? (자동 저장됨)', onExit);
-          }}
-        >
-          ☰
-        </button>
-        <button className="primary" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
-          <span className="lbl">턴 종료 </span>⏭
-        </button>
+        <div className="menu-wrap">
+          <button onClick={() => setMenu((v) => !v)} title="메뉴" className={menu ? 'primary' : ''}>
+            ☰
+          </button>
+          {menu && (
+            <div className="menu" onClick={() => setMenu(false)}>
+              <button onClick={() => setShowLog((v) => !v)}>📜 기록 {showLog ? '숨기기' : '보기'}</button>
+              <button onClick={() => setModal({ type: 'chronicle' })}>📽️ 연대기</button>
+              <button onClick={() => setModal({ type: 'help' })}>❓ 게임 방법</button>
+              <button onClick={() => confirmIt('메인 화면으로 나갈까요? (자동 저장됨)', onExit)}>🚪 메인 화면으로</button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="main">
         <div style={{ position: 'relative', minHeight: 0 }}>
@@ -305,6 +306,9 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             onContext={onRegionContext}
           />
           {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} delay={replayDelay} onSpeed={toggleReplaySpeed} />}
+          <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
+            턴 종료 ⏭
+          </button>
           {moveMode && <div className="map-hint">이동/공격할 인접 지역을 누르세요<span className="lbl"> (Esc 취소)</span> · 노랑=이동 빨강=공격</div>}
           {showLog && (
             <div className="log">
