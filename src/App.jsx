@@ -25,7 +25,7 @@ export default function App() {
     if (!save) return false;
     const scn = getScenario(save.scenarioId);
     if (!scn || save.state?.version !== 5) return false;
-    const world = generateWorld(scn, save.seed);
+    const world = generateWorld(scn, save.seed, save.state.opts?.detail || 'normal');
     if (world.regions.length !== save.state.regions.length) return false;
     start(world, scn, save.state);
     return true;

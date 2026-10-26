@@ -95,7 +95,9 @@ export function income(s, nid) {
   // 병사 1명당 1금, 장수 녹봉 1인당 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금
   const army = Math.round(troops * (1 - nationTrait(s, nid, '병참')));
   const salary = nationGenerals(s, nid).length * G;
-  const admin = Math.max(0, nationRegions(s, nid).length - 15) * (G / 2);
+  // 세분화한 지도에서는 지역당 통치비를 나눔 (s.df = 세분화 배율)
+  const df = s.df || 1;
+  const admin = Math.round((Math.max(0, nationRegions(s, nid).length - 15 * df) * (G / 2)) / df);
   return { gross: inc, upkeep: army + salary + admin, army, salary, admin, net: inc - army - salary - admin, troops };
 }
 

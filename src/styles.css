@@ -53,6 +53,14 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .setup { height: 100%; overflow: auto; padding: 24px; }
 .setup-inner { max-width: 1200px; margin: 0 auto; }
 .title { font-size: 34px; letter-spacing: 2px; color: var(--accent); }
+.scn-head { margin: 14px 0 6px; font-size: 15px; }
+.timeline { position: relative; display: flex; gap: 6px; overflow-x: auto; padding: 14px 4px 6px; }
+.timeline::before { content: ''; position: absolute; left: 10px; right: 10px; top: 21px; height: 2px; background: var(--line); }
+.tl-item { position: relative; flex: 1 0 118px; display: flex; flex-direction: column; align-items: center; gap: 2px; background: transparent; border: 1px solid transparent; padding: 0 6px 6px; text-align: center; }
+.tl-item .tl-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--panel2); border: 2px solid var(--muted); margin-bottom: 6px; z-index: 1; }
+.tl-item.sel { border-color: var(--accent); background: var(--panel); }
+.tl-item.sel .tl-dot { background: var(--accent); border-color: var(--accent); }
+.tl-item small { color: var(--muted); font-size: 11px; }
 .scn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
 .scn { text-align: left; padding: 12px; background: var(--panel); border-radius: 10px; }
 .scn.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
@@ -136,6 +144,10 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
   .modal { max-height: 92vh; overflow: auto; }
   .map-hint { font-size: 11px; max-width: 70%; }
   .map-hint .lbl { display: none; }
+  .scn-grid { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .scn { padding: 8px; }
+  .scn b { font-size: 14px; }
+  .scn > div.muted { display: none; }
 }
 .replay { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: min(520px, 92%); background: #15171bf2; border: 1px solid var(--danger); border-radius: 10px; padding: 10px 12px; font-size: 13px; z-index: 5; }
 .setup-opts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; margin-bottom: 12px; }

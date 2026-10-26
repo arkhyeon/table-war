@@ -755,10 +755,25 @@ function buildGeometry(g) {
   g.paths = { regionPath: outline, outline, pairSegs, borders, peaks, land, glyph, seaBorders };
 }
 
-export function generateWorld(scn0, seed) {
-  const rng = makeRng(`${scn0.id}:${seed}`);
-  const scn = { ...scn0, cols: scn0.cols * FINE, rows: scn0.rows * FINE, regionSize: scn0.regionSize * FINE * FINE, seaReach: (scn0.seaReach || 4) * FINE };
-  const size = HEX / FINE;
+// 지도 세분화: grid = 격자 해상도 배율, region = 지역 하나의 칸 수 배율 → 지역 수 ≈ grid² / region 배
+export const MAP_DETAIL = {
+  coarse: { name: '큼직하게', grid: 1, region: 1.7 },
+  normal: { name: '보통', grid: 1, region: 1 },
+  fine: { name: '잘게', grid: 1.35, region: 0.8 },
+  ultra: { name: '아주 잘게', grid: 1.7, region: 0.7 },
+};
+export const detailFactor = (d) => {
+  const m = MAP_DETAIL[d] || MAP_DETAIL.normal;
+  return (m.grid * m.grid) / m.region;
+};
+
+export function generateWorld(scn0, seed, detail = 'normal') {
+  const dm = MAP_DETAIL[detail] || MAP_DETAIL.normal;
+  // 보통은 예전 시드와 같은 지도가 나오도록 rng 키를 유지
+  const rng = makeRng(detail === 'normal' || !MAP_DETAIL[detail] ? `${scn0.id}:${seed}` : `${scn0.id}:${seed}:${detail}`);
+  const gc = Math.round(scn0.cols * dm.grid), gr = Math.round(scn0.rows * dm.grid);
+  const scn = { ...scn0, cols: gc * FINE, rows: gr * FINE, regionSize: Math.max(2, Math.round(scn0.regionSize * dm.region)) * FINE * FINE, seaReach: Math.max(2, Math.round((scn0.seaReach || 4) * dm.grid)) * FINE };
+  const size = HEX / FINE / dm.grid;
   const cols = scn.cols, rows = scn.rows, N = cols * rows;
   const [W, H] = mapSize(size, cols, rows);
   const centers = new Float32Array(N * 2);
@@ -768,7 +783,7 @@ export function generateWorld(scn0, seed) {
     centers[i * 2 + 1] = y;
   }
   const g = {
-    scenarioId: scn.id, seed, cols, rows, N, size, unit: HEX, W, H, rng,
+    scenarioId: scn.id, seed, detail, cols, rows, N, size, unit: HEX / dm.grid, W, H, rng,
     terrain: new Uint8Array(N),
     river: new Uint8Array(N),
     center: (i) => [centers[i * 2], centers[i * 2 + 1]],

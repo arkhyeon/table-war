@@ -4,7 +4,12 @@ export const SEASONS = ['봄', '여름', '가을', '겨울'];
 // 2턴 = 한 계절, 8턴 = 1년
 export const TURNS_PER_SEASON = 2;
 export const seasonOf = (turn) => Math.floor((turn - 1) / TURNS_PER_SEASON) % 4;
-export const yearOf = (turn, start = 1) => start + Math.floor((turn - 1) / (TURNS_PER_SEASON * 4));
+// 기원전(음수)에서 출발하면 0년을 건너뜀 (BC 1 다음은 AD 1)
+export const yearOf = (turn, start = 1) => {
+  const y = start + Math.floor((turn - 1) / (TURNS_PER_SEASON * 4));
+  return start < 0 && y >= 0 ? y + 1 : y;
+};
+export const fmtYear = (y) => (y < 0 ? `기원전 ${-y}년` : `${y}년`);
 
 // 날씨 효과: att=공격력 배율(전장 기준), ap=진입 행동력 추가, tax=세수 배율, loyalty=민심 변화, noSea=항해 불가
 export const WEATHER = {

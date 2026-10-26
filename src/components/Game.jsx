@@ -7,7 +7,7 @@ import { edgeBetween, income, doMove, gensIn, supplied, nationRegions, moveCheck
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
-import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON } from '../game/weather.js';
+import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON, fmtYear } from '../game/weather.js';
 import { spawnGeneral } from '../game/engine.js';
 import { stateRng } from '../game/rng.js';
 import { G } from '../game/rules.js';
@@ -217,7 +217,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
         <div className="stat">
           <small>턴 {game.turn}</small>
           <b>
-            {year}년 {SEASONS[seasonOf(game.turn)]} <small className="muted">{((game.turn - 1) % TURNS_PER_SEASON) + 1}/{TURNS_PER_SEASON}</small>
+            {fmtYear(year)} {SEASONS[seasonOf(game.turn)]} <small className="muted">{((game.turn - 1) % TURNS_PER_SEASON) + 1}/{TURNS_PER_SEASON}</small>
           </b>
         </div>
         <div className="stat">

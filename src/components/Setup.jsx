@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
 import { SCENARIOS } from '../game/scenarios.js';
-import { generateWorld } from '../game/mapgen.js';
+import { generateWorld, MAP_DETAIL } from '../game/mapgen.js';
+import { fmtYear } from '../game/weather.js';
 import { createGame } from '../game/setup.js';
 import { CIVS } from '../game/civs.js';
 import { nationRegions } from '../game/engine.js';
@@ -15,6 +16,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [scnId, setScnId] = useState('threekingdoms200');
   const [seed, setSeed] = useState(randomSeed);
   const [nationCount, setNationCount] = useState(8);
+  const [detail, setDetail] = useState('normal');
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
   const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
@@ -25,21 +27,26 @@ export default function Setup({ onStart, onResume, hasSave }) {
 
   const world = useMemo(() => {
     try {
-      return generateWorld(scn, seed);
+      return generateWorld(scn, seed, detail);
     } catch (e) {
       console.error(e);
       return null;
     }
-  }, [scn, seed]);
+  }, [scn, seed, detail]);
 
   const preview = useMemo(() => (world ? createGame(world, scn, seed, 0, opts) : null), [world, scn, seed, opts]);
   const pid = preview && player < preview.nations.length ? player : 0;
 
   const start = (spectator = false) => {
-    const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator }, loadHistory());
+    const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator, detail }, loadHistory());
     onStart(world, scn, state);
   };
   const nameOf = (n) => names[n.id] || n.name;
+  const pick = (id) => {
+    setScnId(id);
+    setPlayer(0);
+    setNames({});
+  };
 
   return (
     <div className="setup">
@@ -62,29 +69,48 @@ export default function Setup({ onStart, onResume, hasSave }) {
         </div>
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         <h3 style={{ marginTop: 18 }}>1. 시나리오</h3>
+        <h4 className="scn-head">🌍 연도별 세계사</h4>
+        <div className="timeline">
+          {SCENARIOS.filter((s) => s.group === 'world')
+            .sort((a, b) => a.startYear - b.startYear)
+            .map((s) => (
+              <button key={s.id} className={'tl-item' + (s.id === scnId ? ' sel' : '')} onClick={() => pick(s.id)} title={s.desc}>
+                <span className="tl-dot" />
+                <b>{fmtYear(s.startYear)}</b>
+                <small>{s.era}</small>
+              </button>
+            ))}
+        </div>
+        {scn.group === 'world' && <p className="muted" style={{ fontSize: 13, margin: '4px 0 0' }}>{scn.desc}</p>}
+        <h4 className="scn-head">🗺️ 지역사</h4>
         <div className="scn-grid">
-          {SCENARIOS.map((s) => (
-            <button
-              key={s.id}
-              className={'scn' + (s.id === scnId ? ' sel' : '')}
-              onClick={() => {
-                setScnId(s.id);
-                setPlayer(0);
-                setNames({});
-              }}
-            >
-              <b>{s.name}</b>
-              <small>{s.era}</small>
-              <div style={{ fontSize: 12, marginTop: 6 }} className="muted">
-                {s.desc}
-              </div>
-            </button>
-          ))}
+          {SCENARIOS.filter((s) => s.group !== 'world')
+            .sort((a, b) => (a.group === 'random' ? -1 : b.group === 'random' ? 1 : a.startYear - b.startYear))
+            .map((s) => (
+              <button key={s.id} className={'scn' + (s.id === scnId ? ' sel' : '')} onClick={() => pick(s.id)}>
+                <b>{s.name}</b>
+                <small>
+                  {s.group === 'random' ? '' : `${fmtYear(s.startYear)} · `}
+                  {s.era}
+                </small>
+                <div style={{ fontSize: 12, marginTop: 6 }} className="muted">
+                  {s.desc}
+                </div>
+              </button>
+            ))}
         </div>
         <div className="row" style={{ marginBottom: 12 }}>
           <span>시드</span>
           <input value={seed} onChange={(e) => setSeed(e.target.value || '0')} style={{ width: 120 }} />
           <button onClick={() => setSeed(randomSeed())}>🎲 랜덤</button>
+          <span style={{ marginLeft: 12 }} title="지역을 얼마나 잘게 나눌지. 잘게 할수록 지역·나라 영토가 많아지고 한 판이 길어집니다.">🧩 지역 크기</span>
+          <select value={detail} onChange={(e) => setDetail(e.target.value)}>
+            {Object.entries(MAP_DETAIL).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v.name}
+              </option>
+            ))}
+          </select>
           {scn.procedural && (
             <>
               <span style={{ marginLeft: 12 }}>국가 수 {nationCount}</span>

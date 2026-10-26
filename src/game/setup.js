@@ -4,6 +4,7 @@ import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
 import { addGeneral, computeMaxAp, nationPower } from './engine.js';
 import { rollWeather } from './weather.js';
+import { detailFactor } from './mapgen.js';
 import { updateExplored, encodeOwners } from './fog.js';
 
 export const colorFor = (i) => `hsl(${Math.round((i * 137.508 + 20) % 360)}, ${58 + (i % 3) * 10}%, ${46 + ((i * 7) % 3) * 6}%)`;
@@ -62,7 +63,9 @@ export function planNations(world, scn, seed, opts = {}) {
         const d = (cx - x) ** 2 + (cy - y) ** 2;
         if (!best.has(r) || d < best.get(r)) best.set(r, d);
       }
-      [...best.entries()].sort((a, b) => a[1] - b[1]).slice(0, 12).forEach(([r, d]) => pairs.push([d, i, r]));
+      // 가장 가까운 칸까지 거리 + 지역 중심까지 거리(큰 지역 하나에 두 수도가 몰릴 때 중심에 가까운 쪽이 차지)
+      const score = ([r, d]) => Math.sqrt(d) + 0.6 * Math.hypot(world.regions[r].cx - x, world.regions[r].cy - y);
+      [...best.entries()].map((e) => [e[0], score(e)]).sort((a, b) => a[1] - b[1]).slice(0, 12).forEach(([r, d]) => pairs.push([d, i, r]));
     });
     pairs.sort((a, b) => a[0] - b[0]);
     const capOf = new Array(scn.nations.length).fill(-1);
@@ -88,13 +91,17 @@ export function planNations(world, scn, seed, opts = {}) {
 export function createGame(world, scn, seed, playerId, opts = {}, appearHistory = {}) {
   const rng = makeRng(`game:${scn.id}:${seed}`);
   const plan = planNations(world, scn, seed, opts);
+  // 지도가 잘게 나뉠수록 나라가 처음 차지하는 지역 수도 비례해서 늘림
+  const df = detailFactor(world.detail);
+  for (const n of plan) n.size0 = n.size;
+  if (df !== 1) for (const n of plan) n.size = Math.max(1, Math.round(n.size * df));
   for (const [i, nm] of Object.entries(opts.names || {})) if (plan[i] && nm.trim()) plan[i].name = nm.trim().slice(0, 16);
   const R = world.regions.length;
   const owner = new Array(R).fill(null);
   plan.forEach((n) => (owner[n.region] = n.id));
   // 라운드 로빈으로 영토 확장
   const counts = plan.map(() => 1);
-  for (let round = 0; round < 12; round++) {
+  for (let round = 0; round < 12 * Math.max(1, Math.ceil(df)); round++) {
     let grew = false;
     for (const n of plan) {
       if (counts[n.id] >= n.size) continue;
@@ -132,12 +139,12 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       }
     }
     const isCap = plan.find((n) => n.region === i);
-    const troops = (owner[i] === null ? rng.int(20, 70) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90)) * 100;
+    const troops = Math.max(5, Math.round((owner[i] === null ? rng.int(20, 70) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : namer(civ),
       owner: owner[i],
       troops,
-      pop: wr.pop,
+      pop: Math.round((wr.pop / df) * 10) / 10,
       buildings: { market: 0, walls: 0, port: 0, barracks: 0 },
       conscripted: false,
       loyalty: owner[i] === null ? 50 : 80,
@@ -157,6 +164,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     seed,
     opts,
     winShare: scn.winShare || 0.6,
+    df,
     turn: 1,
     rs: hashString(`play:${scn.id}:${seed}`) | 0,
     playerId,
@@ -178,7 +186,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   };
   for (const n of plan) {
     const capReg = regions[n.region];
-    capReg.troops = Math.round(((12 + n.size * 2) * 1000 * (n.id === playerId && !opts.spectator ? 1 : DIFFICULTY[opts.difficulty]?.troops || 1)) / 100) * 100;
+    capReg.troops = Math.round(((12 + n.size0 * 2) * 1000 * (n.id === playerId && !opts.spectator ? 1 : DIFFICULTY[opts.difficulty]?.troops || 1)) / 100) * 100;
     capReg.loyalty = 100;
     capReg.buildings.walls = 3;
     capReg.buildings.market = 1;

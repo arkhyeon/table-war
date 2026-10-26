@@ -7,6 +7,33 @@ import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
 import { riseNations } from './rise.js';
+import { getScenario } from './scenarios.js';
+import { yearOf, fmtYear } from './weather.js';
+
+// 실제 역사 연표: 그 해가 되면 '실제로는 이랬다' 카드와 이 세계의 같은 나라 형편을 비교해서 보여줌
+function historyNotes(s) {
+  const scn = getScenario(s.scenarioId);
+  if (!scn?.chronicle) return;
+  const year = yearOf(s.turn, scn.startYear ?? 1);
+  const list = [...scn.chronicle].sort((a, b) => a[0] - b[0]);
+  const land = landCount(s);
+  while ((s.chronIdx || 0) < list.length && list[s.chronIdx || 0][0] <= year) {
+    const [y, text, who] = list[s.chronIdx || 0];
+    s.chronIdx = (s.chronIdx || 0) + 1;
+    const n = s.nations.find((x) => x.name === who) || s.nations.find((x) => x.name.includes(who));
+    let now = '';
+    if (n) {
+      if (!n.alive) now = `이 세계의 ${n.name}: 이미 멸망했습니다.`;
+      else {
+        const cnt = nationRegions(s, n.id).length;
+        const rank = s.nations.filter((o) => o.alive && nationRegions(s, o.id).length > cnt).length + 1;
+        now = `이 세계의 ${n.name}: 영토 ${cnt}곳(${Math.round((cnt / land) * 100)}%, ${rank}위)${n.id === s.playerId ? ' — 당신의 나라' : ''}`;
+      }
+    }
+    (s.turnEvents = s.turnEvents || []).push({ icon: '📜', title: `${fmtYear(y)} 실제 역사`, story: text, effect: now || '이 세계는 다른 길을 걷고 있습니다.', nations: n ? [n.id] : [], global: true, history: true });
+    log(s, `📜 [실제 역사 ${fmtYear(y)}] ${text}`, n ? [n.id] : [], 'event');
+  }
+}
 import { trackStats, checkAchievements } from './achievements.js';
 import { updateExplored, encodeOwners } from './fog.js';
 import { hashString } from './rng.js';
@@ -143,13 +170,14 @@ function upkeep(s, world) {
     }
     const tax = r.owner === null ? TAX.normal : TAX[effTax(s, i)];
     const gens = r.owner === null ? [] : gensIn(s, i, r.owner);
-    const cap = (TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0);
-    if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth * (1 + tv(gens, '농정'))) + 0.3 * tax.growth);
+    const df = s.df || 1;
+    const cap = ((TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0)) / df;
+    if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth * (1 + tv(gens, '농정'))) + (0.3 * tax.growth) / df);
     if (r.buildings.walls > 0 && r.buildings.walls < WALL_MAX && r.siegedTurn !== s.turn) r.buildings.walls = Math.min(WALL_MAX, r.buildings.walls + 1 + (tv(gens, '축성') ? 1 : 0));
     r.pop = Math.round(r.pop * 10) / 10;
     r.conscripted = false;
     if (r.owner === null) {
-      if (s.turn % 3 === 0 && r.troops < 12000) r.troops += 1000;
+      if (s.turn % 3 === 0 && r.troops < 12000 / (s.df || 1)) r.troops += Math.max(100, Math.round(1000 / (s.df || 1) / 100) * 100);
       continue;
     }
     // 민심: 매 턴 회복, 세율·주둔군·수도·인덕 장수 반영
@@ -244,6 +272,7 @@ export function endTurn(s, world) {
   s.turn += 1;
   s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
   runEvents(s, world, stateRng(s));
+  historyNotes(s);
   updateExplored(s, world);
   s.gameOver = s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
   if (!s.spectator) {
