@@ -745,7 +745,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     else if (duel.winner === 2) { duelMult = 1 / 1.15; gainExp(s, dg, 40); dg.duelWins = (dg.duelWins || 0) + 1; }
     if (duel.winner === 1 && nid === s.playerId) (s.stats = s.stats || {}).duels = (s.stats.duels || 0) + 1;
     const loser = duel.winner === 1 ? dg : duel.winner === 2 ? ag : null;
-    if (duel.ko && loser && rng() < 0.5) {
+    if (duel.ko && loser && rng() < 0.4) {
       loser.status = 'dead';
       battle.duel.killed = loser.name;
     }

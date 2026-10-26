@@ -145,7 +145,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             )}
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-            승리: 전체 육지의 {Math.round((game.winShare || 0.6) * 100)}% 점령 또는 모든 국가 멸망·속국화.
+            승리: 모든 육지(100%) 점령 또는 모든 국가 멸망·속국화.
           </div>
         </details>
       </div>

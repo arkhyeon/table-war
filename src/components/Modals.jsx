@@ -705,7 +705,7 @@ function ShareChart({ game }) {
   const peak = series.map((sr) => Math.max(...sr));
   const show = [...new Set([game.playerId, ...peak.map((p, k) => [p, k]).sort((x, y) => y[0] - x[0]).slice(0, 5).map(([, k]) => k)])];
   const W = 320, H = 120, T = Math.max(1, frames.length - 1);
-  const ws = game.winShare || 0.6;
+  const ws = 1;
   const top = Math.max(ws, ...show.map((k) => peak[k]));
   const pt = (v, i) => `${((i / T) * W).toFixed(1)},${(H - (v / top) * H).toFixed(1)}`;
   return (
@@ -794,7 +794,7 @@ export function HelpModal({ onClose }) {
     <Modal title="❓ 게임 방법" onClose={onClose} wide>
       <div className="help">
         <ul>
-          <li><b>목표</b>: 전체 육지의 60%(세계사 30%, 동아시아 45%, 임진왜란 50%)를 차지하거나 다른 모든 나라를 멸망·속국화하세요.</li>
+          <li><b>목표</b>: 모든 육지(100%)를 차지하거나 다른 모든 나라를 멸망·속국화하세요.</li>
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
           <li><b>시간</b>: 2턴이 한 계절, 8턴이 1년. 날씨는 매 턴 바뀝니다.</li>
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7, 큰 지도는 더 많음) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>

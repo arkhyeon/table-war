@@ -207,6 +207,8 @@ export default function MapView({ world, regions, nations, selected, targets, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world, ownerKey]);
 
+  // 최대 확대: 세계판 지역사는 무대가 잘게 나뉘어 훨씬 더 확대 가능
+  const minW = world.W / (world.focusBox ? 64 : world.cols > 100 ? 24 : 12);
   useEffect(() => {
     const el = svgRef.current;
     if (!el) return;
@@ -218,18 +220,18 @@ export default function MapView({ world, regions, nations, selected, targets, on
         const ox = x - (rect.width / scale - w) / 2, oy = y - (rect.height / scale - h) / 2;
         const mx = ox + (e.clientX - rect.left) / scale, my = oy + (e.clientY - rect.top) / scale;
         const k = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-        const nw = Math.max(world.W / 12, Math.min(world.W * 1.2, w * k));
+        const nw = Math.max(minW, Math.min(world.W * 1.2, w * k));
         const nh = nw * (h / w);
         return [mx - (mx - x) * (nw / w), my - (my - y) * (nh / h), nw, nh];
       });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [world]);
+  }, [world, minW]);
 
   const zoom = (k) =>
     setVb(([x, y, w, h]) => {
-      const nw = Math.max(world.W / 12, Math.min(world.W * 1.2, w * k)), nh = nw * (h / w);
+      const nw = Math.max(minW, Math.min(world.W * 1.2, w * k)), nh = nw * (h / w);
       return [x + (w - nw) / 2, y + (h - nh) / 2, nw, nh];
     });
 
@@ -259,7 +261,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
       const [[ax, ay], [bx, by]] = [...pointers.current.values()];
       const pc = pinch.current;
       const [x, y, w, h] = pc.vb;
-      const nw = Math.max(world.W / 12, Math.min(world.W * 1.2, (w * pc.dist) / Math.max(10, Math.hypot(ax - bx, ay - by))));
+      const nw = Math.max(minW, Math.min(world.W * 1.2, (w * pc.dist) / Math.max(10, Math.hypot(ax - bx, ay - by))));
       const nh = nw * (h / w);
       const [mx, my] = pc.mid;
       setVb([mx - (mx - x) * (nw / w), my - (my - y) * (nh / h), nw, nh]);
@@ -526,7 +528,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const army = showArmy && own !== null && known && reg.troops > 0;
               const ib = s * 0.95; // 아이콘 배지 크기
               return (
-                <g key={r.id} transform={`translate(${r.cx},${r.cy})`}>
+                <g key={r.id} transform={`translate(${r.cx},${r.cy})${r.mk < 1 ? ` scale(${r.mk.toFixed(2)})` : ''}`}>
                   {army && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.5} y={-s * 0.78} />}
                   <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill={known ? '#fffdf6' : '#e9e4d6'} stroke={col} strokeWidth={s * 0.22} />
                   <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill={known ? '#1d1d1d' : '#55524a'}>
@@ -601,8 +603,9 @@ export default function MapView({ world, regions, nations, selected, targets, on
         </g>
       </svg>
       <div className="map-ctrl">
-        <button onClick={() => zoom(1 / 1.3)}>＋</button>
-        <button onClick={() => zoom(1.3)}>－</button>
+        <span className="zoom-lv" title="전체 지도 대비 확대 배율">×{(world.W / vb[2]).toFixed(1)}</span>
+        <button onClick={() => zoom(1 / 1.5)}>＋</button>
+        <button onClick={() => zoom(1.5)}>－</button>
         <button onClick={() => setVb(fitView())}>⤢</button>
       </div>
     </div>

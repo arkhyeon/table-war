@@ -464,7 +464,7 @@ function densityScale(scn, g, cells, minD) {
     if (scn.focus) {
       const [lon, lat] = g.geo.toLL(...g.center(c));
       const [w, s, e, n] = scn.focus;
-      if (lon >= w && lon <= e && lat >= s && lat <= n) { sc[c] = 0.5; continue; }
+      if (lon >= w && lon <= e && lat >= s && lat <= n) { sc[c] = scn.focusSpacing ? scn.focusSpacing / minD : 0.5; continue; }
     }
     sc[c] = Math.max(0.5, Math.min(1.35, k));
   }
@@ -558,7 +558,7 @@ function buildRegions(scn, g) {
   for (let i = 0; i < N; i++) if (region[i] >= 0) lists[region[i]].push(i);
   const minSize = Math.max(2, Math.round(S * 0.3));
   for (let r = 0; r < next; r++) {
-    if (!lists[r].length || lists[r].length >= (scale ? Math.max(2, Math.round(minSize * scale[lists[r][0]] ** 2)) : minSize)) continue;
+    if (!lists[r].length || lists[r].length >= (scale ? Math.max(scale[lists[r][0]] < 0.25 ? 1 : 2, Math.round(minSize * scale[lists[r][0]] ** 2)) : minSize)) continue;
     const adj = new Map();
     for (const c of lists[r]) {
       for (let d = 0; d < 6; d++) {
@@ -1053,6 +1053,12 @@ export function generateWorld(scn0, seed, detail = 'normal') {
   buildSeaZones(scn, g);
   buildGeometry(g);
   g.toPx = g.geo ? g.geo.toPx : null;
+  // 지역 표시(병력 배지·이름) 크기: 잘게 나뉜 작은 지역은 작게
+  {
+    const sz = g.regions.filter((r) => !r.sea).map((r) => r.cells.length).sort((a, b) => a - b);
+    const med = sz[sz.length >> 1] || 1;
+    for (const r of g.regions) r.mk = r.sea ? 1 : Math.max(0.3, Math.min(1, Math.sqrt(r.cells.length / med) * 1.15));
+  }
   // 세계판 지역사: 처음 화면을 무대 쪽으로
   if (scn.focus && g.geo) {
     const [x0, y0] = g.geo.toPx(scn.focus[0], scn.focus[3]), [x1, y1] = g.geo.toPx(scn.focus[2], scn.focus[1]);

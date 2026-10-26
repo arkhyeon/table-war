@@ -490,7 +490,7 @@ export const SCENARIOS = [
   {
     id: 'korea400',
     group: 'region',
-    noWorld: true,
+    worldGrid: { cols: 288, spacing: 2 },
     winShare: 0.6,
     startYear: 400,
     name: '광개토대왕 400년',
@@ -568,7 +568,7 @@ export const SCENARIOS = [
   {
     id: 'sengoku1560',
     group: 'region',
-    noWorld: true,
+    worldGrid: { cols: 360, spacing: 1.5, size: 0.55 },
     winShare: 0.6,
     startYear: 1560,
     name: '일본 전국시대 1560년',
@@ -797,8 +797,8 @@ const eraFor = (year) => {
   const k = Object.keys(ERA).map(Number).reduce((a, b) => (Math.abs(b - year) < Math.abs(a - year) ? b : a));
   return ERA[k];
 };
-// 세계판이 되는 지역사 (너무 좁은 지도는 세계 격자에서 나라가 들어갈 자리가 없음)
-export const canWorld = (scn) => scn.group === 'region' && !scn.noWorld;
+// 세계판이 되는 지역사 (좁은 무대는 worldGrid로 격자를 촘촘히)
+export const canWorld = (scn) => scn.group === 'region';
 
 const WORLD_BASE = { bbox: [-180, -56, 180, 83], cols: 216, rows: 111, regionSize: 13, seaReach: 5 };
 const variants = {};
@@ -809,13 +809,19 @@ export function worldVariant(base) {
   // 세계 격자에서 무대 안에 들어갈 지역 수(대략)에 맞게 나라 크기를 줄임
   const room = (area * 0.55) / 6.5;
   const total = base.nations.reduce((a, x) => a + x.size, 0);
-  const f = Math.max(0.25, Math.min(0.8, room / total));
+  const f = base.worldGrid?.size || Math.max(0.25, Math.min(0.8, room / total));
   const inside = (x) => x.lon >= w - 2 && x.lon <= e + 2 && x.lat >= s - 2 && x.lat <= n + 2;
   const near = (x) => base.nations.some((y) => Math.hypot(x.lon - y.lon, x.lat - y.lat) < 6 || x.name === y.name);
   const fill = eraFor(base.startYear).filter((x) => !inside(x) && !near(x));
+  // 무대가 좁은 시나리오는 세계 격자 자체를 더 촘촘히 (바깥 지역 수는 그대로)
+  const wg = base.worldGrid;
+  const grid = wg
+    ? { cols: wg.cols, rows: Math.round((wg.cols * WORLD_BASE.rows) / WORLD_BASE.cols), regionSize: Math.round(WORLD_BASE.regionSize * (wg.cols / WORLD_BASE.cols) ** 2), focusSpacing: wg.spacing }
+    : {};
   const v = {
     ...base,
     ...WORLD_BASE,
+    ...grid,
     id: `${base.id}@world`,
     baseId: base.id,
     scope: 'world',

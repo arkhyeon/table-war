@@ -107,7 +107,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             <button className={scope !== 'world' || !canWorld(baseScn) ? 'primary' : ''} onClick={() => setScope('region')}>🗺️ 이 지역만</button>
             <button className={scope === 'world' && canWorld(baseScn) ? 'primary' : ''} disabled={!canWorld(baseScn)} onClick={() => { setScope('world'); setPlayer(0); }}>🌍 전 세계</button>
             <span className="muted" style={{ fontSize: 12 }}>
-              {canWorld(baseScn) ? '전 세계: 무대는 잘게 나뉘고, 바깥은 같은 시대의 다른 나라들로 채워집니다(뒤가 비지 않음).' : '이 시나리오는 지역이 좁아 세계판이 없습니다.'}
+              전 세계: 무대는 잘게 나뉘고, 바깥은 같은 시대의 다른 나라들로 채워집니다(뒤가 비지 않음).
             </span>
           </div>
         )}

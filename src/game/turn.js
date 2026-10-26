@@ -245,8 +245,8 @@ export function checkGameOver(s) {
   const p = s.nations[s.playerId];
   if (!p.alive) return { win: false, text: `${p.name}이(가) 멸망했습니다.` };
   const owned = nationRegions(s, s.playerId).length;
-  const ws = s.winShare || 0.6;
-  if (owned / landCount(s) >= ws) return { win: true, text: `전 지역의 ${Math.round(ws * 100)}% 이상을 차지해 천하를 통일했습니다!` };
+  // 승리: 육지 100% (s.winShare는 컴퓨터의 견제·확장 속도 기준으로만 씀)
+  if (owned >= landCount(s)) return { win: true, text: '모든 땅을 차지해 천하를 통일했습니다!' };
   const rivals = s.nations.filter((n) => n.alive && n.id !== s.playerId && !isVassalOf(s, n.id, s.playerId));
   if (!rivals.length) return { win: true, text: '모든 국가가 멸망하거나 당신의 속국이 되었습니다!' };
   return null;
@@ -285,6 +285,8 @@ export function endTurnPlan(s, world) {
 export function endTurnFinish(s, world) {
   s.orders = [];
   s.resolveQueue = [];
+  // 전투 직후 100%를 채웠다면 턴 끝 반란·부흥과 상관없이 승리
+  const early = s.spectator || s.sandbox ? null : checkGameOver(s);
   upkeep(s, world);
   // 새 턴: 모든 부대가 다시 움직일 수 있음
   for (const r of s.regions) delete r.moved;
@@ -295,7 +297,7 @@ export function endTurnFinish(s, world) {
   runEvents(s, world, stateRng(s));
   historyNotes(s);
   updateExplored(s, world);
-  s.gameOver = s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
+  s.gameOver = early?.win ? early : s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
   if (!s.spectator) {
     trackStats(s);
     s.newAchieve = checkAchievements(s, !!s.gameOver?.win);
