@@ -1,0 +1,139 @@
+import { useMemo, useState } from 'react';
+import MapView from './MapView.jsx';
+import { SCENARIOS } from '../game/scenarios.js';
+import { generateWorld } from '../game/mapgen.js';
+import { createGame } from '../game/setup.js';
+import { CIVS } from '../game/civs.js';
+import { nationRegions } from '../game/engine.js';
+import { loadHistory } from '../storage.js';
+
+const randomSeed = () => Math.random().toString(36).slice(2, 8);
+
+export default function Setup({ onStart, onResume, hasSave }) {
+  const [scnId, setScnId] = useState('threekingdoms200');
+  const [seed, setSeed] = useState(randomSeed);
+  const [nationCount, setNationCount] = useState(8);
+  const [player, setPlayer] = useState(0);
+  const [error, setError] = useState('');
+  const scn = SCENARIOS.find((s) => s.id === scnId);
+  const opts = useMemo(() => (scn.procedural ? { nationCount } : {}), [scn, nationCount]);
+
+  const world = useMemo(() => {
+    try {
+      return generateWorld(scn, seed);
+    } catch (e) {
+      console.error(e);
+      return null;
+    }
+  }, [scn, seed]);
+
+  const preview = useMemo(() => (world ? createGame(world, scn, seed, 0, opts) : null), [world, scn, seed, opts]);
+  const pid = preview && player < preview.nations.length ? player : 0;
+
+  const start = () => {
+    const state = createGame(world, scn, seed, pid, opts, loadHistory());
+    onStart(world, scn, state);
+  };
+
+  return (
+    <div className="setup">
+      <div className="setup-inner">
+        <div className="row" style={{ justifyContent: 'space-between' }}>
+          <div>
+            <div className="title">⚔️ TABLE WAR</div>
+            <div className="muted">역사 속 문명과 장수로 펼치는 턴제 땅따먹기 전략 게임</div>
+          </div>
+          {hasSave && (
+            <button
+              className="primary"
+              onClick={() => {
+                if (!onResume()) setError('저장된 게임을 불러올 수 없습니다.');
+              }}
+            >
+              ▶ 이어하기
+            </button>
+          )}
+        </div>
+        {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+        <h3 style={{ marginTop: 18 }}>1. 시나리오</h3>
+        <div className="scn-grid">
+          {SCENARIOS.map((s) => (
+            <button
+              key={s.id}
+              className={'scn' + (s.id === scnId ? ' sel' : '')}
+              onClick={() => {
+                setScnId(s.id);
+                setPlayer(0);
+              }}
+            >
+              <b>{s.name}</b>
+              <small>{s.era}</small>
+              <div style={{ fontSize: 12, marginTop: 6 }} className="muted">
+                {s.desc}
+              </div>
+            </button>
+          ))}
+        </div>
+        <div className="row" style={{ marginBottom: 12 }}>
+          <span>시드</span>
+          <input value={seed} onChange={(e) => setSeed(e.target.value || '0')} style={{ width: 120 }} />
+          <button onClick={() => setSeed(randomSeed())}>🎲 랜덤</button>
+          {scn.procedural && (
+            <>
+              <span style={{ marginLeft: 12 }}>국가 수 {nationCount}</span>
+              <input type="range" min={4} max={14} value={nationCount} onChange={(e) => setNationCount(+e.target.value)} />
+            </>
+          )}
+          <span className="muted" style={{ fontSize: 12 }}>
+            같은 시드는 같은 지도를 만듭니다. {scn.procedural ? '' : '역사 시나리오는 실제 지형·국가 배치를 쓰고, 시드는 지역 구획과 세부를 바꿉니다.'}
+          </span>
+        </div>
+        <h3>2. 국가 선택</h3>
+        <div className="setup-body">
+          <div className="preview">
+            {world && preview ? (
+              <MapView
+                world={world}
+                regions={preview.regions}
+                nations={preview.nations}
+                selected={preview.nations[pid]?.capital}
+                compact
+                onClick={(rid) => {
+                  const o = preview.regions[rid].owner;
+                  if (o !== null) setPlayer(o);
+                }}
+              />
+            ) : (
+              <p style={{ padding: 20 }}>지도를 생성하지 못했습니다.</p>
+            )}
+          </div>
+          <div className="nation-list">
+            {preview?.nations.map((n) => {
+              const ruler = preview.generals[n.ruler];
+              return (
+                <button key={n.id} className={'nation-item' + (n.id === pid ? ' sel' : '')} onClick={() => setPlayer(n.id)}>
+                  <span>
+                    <span className="chip" style={{ background: n.color }} />
+                    {n.name}
+                    <small className="muted"> · {ruler?.name}</small>
+                  </span>
+                  <small className="muted">
+                    {CIVS[n.civ]?.name} · {nationRegions(preview, n.id).length}지역
+                  </small>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+          <span className="muted">
+            {world ? `${world.regions.length}개 지역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview?.nations[pid]?.name}</b>
+          </span>
+          <button className="primary" disabled={!world} onClick={start}>
+            게임 시작 ▶
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
