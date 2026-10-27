@@ -80,7 +80,7 @@ function FiefOrder({ world, game, fid, act }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet, openFormArmy, selectArmy }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet, openFormArmy, selectArmy, openPlot }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -458,6 +458,9 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                     </button>
                   )}
                   {!armiesIn(game, selected).length && !freeGens(game, pid, selected).length && <div className="muted" style={{ fontSize: 12 }}>장수가 있어야 출진할 수 있습니다 (장수 창에서 재배치·모집).</div>}
+                  {gensIn(game, selected, pid).some((g) => g.intel >= 50) && (
+                    <button style={{ width: '100%', marginBottom: 6 }} onClick={openPlot} title="화계·유언비어·매복 (지력 50 이상 장수)">🧠 계략</button>
+                  )}
                 </>
               )}
               <h4 style={{ marginTop: 10 }}>주둔 장수</h4>

@@ -6,7 +6,7 @@ import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, na
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests, generalDrama } from './rise.js';
+import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests, generalDrama, allyRequests } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -315,6 +315,7 @@ export function endTurnFinish(s, world) {
   promoteHordes(s, world, stateRng(s));
   hordeDemands(s, world, stateRng(s));
   fiefRequests(s, world, stateRng(s));
+  allyRequests(s, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
   arriveReinforcements(s);

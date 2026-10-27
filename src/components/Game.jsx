@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal } from './Modals.jsx';
-import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal, PlotModal } from './Modals.jsx';
+import { endTurn, endTurnPlan, endTurnFinish, playerStat } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -31,6 +31,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const [pick, setPick] = useState(null);
   // 고른 부대: 지도에서 목적지를 누르면 진군
   const [selArmy, setSelArmy] = useState(null);
+  // 빠른 진행: 내게 일이 생길 때까지 턴을 넘김 (남은 턴 수)
+  const [fast, setFast] = useState(0);
   const [toasts, setToasts] = useState([]);
   const [showLog, setShowLog] = useState(() => window.innerWidth > 860);
   const [ask, setAsk] = useState(null); // { text, onYes }
@@ -117,6 +119,15 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   };
   const afterTurn = (s, before) => {
     setGame(s);
+    // 빠른 진행 멈춤: 내 땅이 바뀌었거나, 내가 싸웠거나, 고를 일이 생기면 (계속 가는 중엔 다시보기·소식 창을 띄우지 않음)
+    if (fast) {
+      const mine = (s.battles || []).some((b) => b.attacker === pid || b.defender === pid);
+      const ask = (s.proposals || []).length || (s.choices || []).length || (s.levelChoices || []).length || (s.turnEvents || []).some((e) => e.nations?.includes(pid) && e.global);
+      const changed = s.prevStat && playerStat(s).regions !== s.prevStat.regions;
+      const stop = mine || ask || changed || fast <= 1;
+      setFast(stop ? 0 : fast - 1);
+      if (!stop) return;
+    }
     for (const id of s.newAchieve || []) {
       const a = ACHIEVEMENTS.find((x) => x.id === id);
       if (a) toast(`🏅 업적 달성: ${a.icon} ${a.name}`);
@@ -128,6 +139,12 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     if (!s.nations[s.playerId].alive) setSelected(null);
   };
 
+  // 빠른 진행: 창이 없을 때 다음 턴으로
+  useEffect(() => {
+    if (!fast || spect || modal || replay || busy || game.gameOver || (game.proposals || []).length || (game.choices || []).length || (game.levelChoices || []).length) return;
+    const t = setTimeout(doEndTurn, 250);
+    return () => clearTimeout(t);
+  });
   // 관전 자동 진행
   useEffect(() => {
     if (!spect || !auto || modal || game.gameOver) return;
@@ -320,6 +337,10 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     }
     return out;
   }, [game.armies, game.generals, game.regions, game.nations, pid, me.color, vis]);
+  // 이번 턴 챙길 것
+  const riskGens = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && g.id !== me.ruler && (g.loyalty ?? 60) < 40);
+  const idleArmies = Object.values(game.armies || {}).filter((a) => a.n === pid && (a.target === null || a.target === undefined) && !(game.orders || []).some((o) => o.opts?.army === a.id));
+  const canDraft = me.alive && !draftCheck(game, pid);
   const landmarks = useMemo(() => new Set(game.landmarks || []), [game.landmarks]);
   const proposal = game.proposals[0];
   const showLevel = (game.levelChoices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
@@ -459,6 +480,20 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
             턴 종료 ⏭
           </button>
+          {!spect && me.alive && (
+            <button className={'fast-btn' + (fast ? ' primary' : '')} onClick={() => setFast(fast ? 0 : 15)} title="내게 일(전투·땅 변화·제안·사건)이 생길 때까지 최대 15턴 자동으로 넘김">
+              {fast ? `⏸ 멈춤 (${fast})` : '⏩ 빠른 진행'}
+            </button>
+          )}
+          {!spect && me.alive && !pick && !selArmy && (
+            <div className="checklist">
+              {threats.length > 0 && <button className="sm" onClick={() => { setSelected(threats[0].to); setPanTo(threats[0].to); setTimeout(() => setPanTo(null), 1500); }}>⚠️ 위협받는 땅 {threats.length}</button>}
+              {riskGens.length > 0 && <button className="sm" onClick={() => setModal({ type: 'gens' })}>😠 충성 위험 장수 {riskGens.length}</button>}
+              {idleArmies.length > 0 && <button className="sm" onClick={() => { setSelArmy(idleArmies[0].id); setSelected(idleArmies[0].rid); }}>⚔️ 쉬는 부대 {idleArmies.length}</button>}
+              {canDraft && <button className="sm" onClick={() => setModal({ type: 'draft' })}>💂 징병 가능</button>}
+              {me.ap > 0 && <span className="muted">행동력 {me.ap} 남음</span>}
+            </div>
+          )}
           {selArmy && game.armies?.[selArmy] && (
             <div className="map-hint">
               ⚔️ {game.generals[game.armies[selArmy].gids[0]]?.name} 부대 {fmtTroops(game.armies[selArmy].troops)} — 목적지를 누르세요 (매 턴 내 땅으로 3칸씩, 닿으면 공격) <button className="sm" onClick={() => setSelArmy(null)}>취소</button>
@@ -510,6 +545,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           openCall={() => setModal({ type: 'call', rid: selected })}
           openDisband={() => setModal({ type: 'disband', rid: selected })}
           openFormArmy={() => setModal({ type: 'form', rid: selected })}
+          openPlot={() => setModal({ type: 'plot', rid: selected })}
           selectArmy={(id) => { setSelArmy(id); setSheet(false); }}
         />
       </div>
@@ -530,6 +566,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
       {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
+      {modal?.type === 'plot' && <PlotModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'form' && <FormArmyModal game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} onDone={(id) => { setModal(null); setSelArmy(id); setSheet(false); }} />}
       {modal?.type === 'draft' && (
         <DraftModal

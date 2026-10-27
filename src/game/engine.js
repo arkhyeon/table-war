@@ -315,6 +315,7 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   const defSupply = tr.owner === null || supplied(s, world, tr.owner).has(to) ? 1 : 0.8;
   let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
   if (hasBond(def)) buffD *= 1.1;
+  if (tr.ambush === s.turn) { buffD *= 1.25; mods.push('🌿 매복 수비 +25%'); }
   // 대동맹 연합군은 패권국을 칠 때 사기가 오름
   if (s.coalition && s.coalition.target === tr.owner && s.coalition.members?.includes(nid)) {
     buffA *= 1.1;
@@ -1385,6 +1386,8 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     }
     for (const g of atkGens) {
       g.region = to;
+      g.takes = (g.takes || 0) + 1;
+      if (report.captured.length) g.caught = [...(g.caught || []), ...report.captured].slice(-6);
       gainExp(s, g, 25);
     }
     const what = tr.sea ? '해전에서 승리하고 제해권을 장악' : mode === 'assault' ? '강습으로 함락' : '점령';
@@ -1512,6 +1515,67 @@ export function succession(s, nid) {
   n.ruler = gens.length ? gens[0].id : null;
   n.newRuler = s.turn; // 계승 분쟁 판정은 턴 끝에 (rise.js)
   if (gens.length) log(s, `👑 ${n.name}의 새 군주로 ${gens[0].name}이(가) 즉위했습니다.`, [nid], 'general');
+}
+
+// ───────── 계략: 지력 높은 장수가 맞닿은 적 땅에 화계·유언비어, 제 땅엔 매복 (장수마다 턴에 한 번, 행동력 1) ─────────
+export const PLOTS = {
+  fire: { name: '🔥 화계', desc: '맞닿은 적 땅에 불을 질러 병력 -15~25% (숲·구릉이면 더). 실패하면 내 병력 -5%' },
+  rumor: { name: '🗣️ 유언비어', desc: '맞닿은 적 땅의 장수들 충성 -15 (봉기·이탈 유도)' },
+  ambush: { name: '🌿 매복', desc: '이번 턴 내 땅을 지킬 때 수비 +25%' },
+};
+export function plotChance(s, g, target, kind) {
+  if (kind === 'ambush') return Math.max(0.3, Math.min(0.95, 0.35 + g.intel / 150));
+  const tr = s.regions[target];
+  const dg = tr.owner !== null ? gensIn(s, target, tr.owner) : [];
+  const dIntel = dg.length ? Math.max(...dg.map((x) => x.intel)) : 40;
+  return Math.max(0.15, Math.min(0.85, 0.35 + (g.intel - dIntel) / 100 + tv([g], '책략') * 0.5));
+}
+export function plotCheck(s, world, nid, gid, kind, target) {
+  const g = s.generals[gid];
+  if (!g || g.status !== 'active' || g.nation !== nid || g.order) return '계략을 쓸 수 있는 장수가 아닙니다.';
+  if (g.plotTurn === s.turn) return '이 장수는 이번 턴에 이미 계략을 썼습니다.';
+  if (g.intel < 50) return '지력 50 이상인 장수만 계략을 쓸 수 있습니다.';
+  if (kind === 'ambush') { if (target !== g.region || s.regions[target].owner !== nid) return '매복은 장수가 있는 내 땅에만.'; }
+  else {
+    const tr = s.regions[target];
+    if (!world.regions[g.region].neighbors.some((x) => x.id === target) || tr.sea) return '장수가 있는 곳과 맞닿은 땅이어야 합니다.';
+    if (tr.owner === null || tr.owner === nid || getRel(s, nid, tr.owner).type !== 'none') return '전쟁 중인(조약 없는) 나라의 땅에만.';
+    if (kind === 'rumor' && !gensIn(s, target, tr.owner).length) return '그 땅에 장수가 없습니다.';
+  }
+  return canAct(s, nid, 1);
+}
+export function doPlot(s, world, nid, gid, kind, target) {
+  const err = plotCheck(s, world, nid, gid, kind, target);
+  if (err) return fail(err);
+  const g = s.generals[gid], tr = s.regions[target];
+  s.nations[nid].ap -= 1;
+  g.plotTurn = s.turn;
+  const ok = stateRng(s)() < plotChance(s, g, target, kind);
+  const owner = tr.owner;
+  if (kind === 'ambush') {
+    if (ok) tr.ambush = s.turn;
+    return ok ? { ok: true, msg: `🌿 ${g.name}이(가) ${tr.name}에 복병을 숨겼습니다. (이번 턴 수비 +25%)` } : { ok: true, accepted: false, msg: `${g.name}의 매복이 들켜 효과가 없습니다.` };
+  }
+  if (!ok) {
+    if (kind === 'fire') s.regions[g.region].troops = Math.max(100, Math.round((s.regions[g.region].troops * 0.95) / 100) * 100);
+    s.opinion[owner][nid] -= 10;
+    log(s, `${PLOTS[kind].name} 실패 — ${g.name}의 계략이 ${tr.name}에서 들통났습니다.`, [nid, owner], 'warn');
+    return { ok: true, accepted: false, msg: `${PLOTS[kind].name} 실패!${kind === 'fire' ? ' 아군 병력 -5%' : ''}` };
+  }
+  gainExp(s, g, 15);
+  s.opinion[owner][nid] -= 10;
+  if (kind === 'fire') {
+    const t = world.regions[target].terrain;
+    const cut = Math.min(0.35, 0.15 + Math.max(0, g.intel - 60) / 400 + ([T.FOREST, T.HILLS].includes(t) ? 0.05 : 0) + tv([g], '화공') * 0.5);
+    const loss = Math.round((tr.troops * cut) / 100) * 100;
+    tr.troops = Math.max(100, tr.troops - loss);
+    log(s, `🔥 ${g.name}의 화계! ${tr.name}(${s.nations[owner].name}) 병력 ${fmtTroops(loss)} 불타 사라짐.`, [nid, owner], 'battle');
+    return { ok: true, msg: `🔥 화계 성공! ${tr.name} 병력 -${fmtTroops(loss)}` };
+  }
+  const names = [];
+  for (const x of gensIn(s, target, owner)) if (s.nations[owner].ruler !== x.id) { x.loyalty = Math.max(0, (x.loyalty ?? 60) - 15); names.push(x.name); }
+  log(s, `🗣️ ${g.name}의 유언비어가 ${s.nations[owner].name} 진중에 퍼졌습니다. (${names.join(', ') || '장수'} 충성 -15)`, [nid, owner], 'warn');
+  return { ok: true, msg: `🗣️ 유언비어 성공! ${names.join(', ') || '장수'} 충성 -15` };
 }
 
 // 장수 모집 (토탈워식): 금으로 새 장수를 들임. 장수가 많을수록 비싸고, 땅 4곳마다 1명 + 3명까지

@@ -280,3 +280,19 @@ details.more > .kv { margin-top: 6px; }
 .warn-box.soft { background: #e0b04f18; border-color: var(--accent); }
 .tut { position: fixed; left: 12px; bottom: 70px; z-index: 40; max-width: 360px; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 12px; box-shadow: 0 6px 24px #0008; font-size: 14px; }
 .tut h4 { margin: 0 0 6px; color: var(--accent); }
+
+/* 전투 장면 */
+.battlefield { margin-top: 6px; }
+.battlefield .bf-left { animation: bf-l 0.9s ease-out both; }
+.battlefield .bf-right { animation: bf-r 0.9s ease-out both; }
+.battlefield .bf-clash { animation: bf-c 0.9s ease-out both; transform-box: fill-box; transform-origin: center; }
+@keyframes bf-l { from { transform: translateX(-40px); } to { transform: translateX(10px); } }
+@keyframes bf-r { from { transform: translateX(40px); } to { transform: translateX(-10px); } }
+@keyframes bf-c { 0%, 55% { opacity: 0; transform: scale(0.3); } 75% { opacity: 1; transform: scale(1.3); } 100% { opacity: 0.9; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .battlefield .bf-left, .battlefield .bf-right, .battlefield .bf-clash { animation: none; } }
+
+/* 턴 체크리스트 · 빠른 진행 */
+.checklist { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100% - 90px); z-index: 5; pointer-events: auto; }
+.checklist .sm { background: var(--panel, #1d2128); opacity: 0.95; }
+.checklist .muted { background: rgba(0,0,0,0.45); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; align-self: center; }
+.fast-btn { position: absolute; right: 16px; bottom: 76px; z-index: 5; }

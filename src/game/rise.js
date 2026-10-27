@@ -597,6 +597,23 @@ export function answerRequest(s, prop, yes) {
     s.opinion[f.id][s.playerId] = -80;
     return { ok: true, msg: `${f.name}의 협박을 거절했습니다. 쳐들어올 수 있습니다.` };
   }
+  if (prop.kind === 'ally') {
+    if (yes) {
+      if (me.gold < prop.gold) return { ok: false, msg: '금이 부족합니다.' };
+      me.gold -= prop.gold;
+      f.gold += prop.gold;
+      s.opinion[f.id][s.playerId] += 20;
+      log(s, `🤝 동맹국 ${f.name}에 군자금 ${fmtGold(prop.gold)}을 보냈습니다.`, [s.playerId, f.id], 'diplo');
+      return { ok: true, msg: `${f.name}에 원조했습니다. (호감 +20)` };
+    }
+    s.opinion[f.id][s.playerId] -= 25;
+    if (s.opinion[f.id][s.playerId] < -15 && getRel(s, f.id, s.playerId).type === 'alliance') {
+      setRel(s, f.id, s.playerId, null);
+      log(s, `💔 위기에 외면당한 ${f.name}이(가) 동맹을 끊었습니다.`, [s.playerId, f.id], 'diplo');
+      return { ok: true, accepted: false, msg: `${f.name}이(가) 실망해 동맹을 끊었습니다.` };
+    }
+    return { ok: true, accepted: false, msg: `${f.name}의 원군 요청을 거절했습니다. (호감 -25)` };
+  }
   return { ok: false, msg: '알 수 없는 요청' };
 }
 
@@ -720,5 +737,19 @@ export function generalDrama(s, world, rng) {
     log(s, `⚔️ ${g.name}이(가) ${n.name}에 반기를 들고 ${m.name}을(를) 세웠습니다!`, [n.id, m.id], 'warn');
     if (n.isPlayer) for (const x of nationGenerals(s, n.id)) if ((x.loyalty ?? 60) < 40) log(s, `⚠️ ${x.name}의 충성도 위태롭습니다 (${Math.round(x.loyalty)}). 포상을 고려하세요.`, [n.id], 'warn');
     break;
+  }
+}
+
+// 동맹국의 원군 요청: 이번 턴 땅을 빼앗긴 동맹국이 플레이어에게 군자금을 청함 (거절하면 동맹이 식고, 심하면 끊김)
+export function allyRequests(s, rng) {
+  if (s.spectator) return;
+  const pid = s.playerId;
+  const lost = new Set((s.battles || []).filter((b) => b.win && b.defender !== null && b.attacker !== pid).map((b) => b.defender));
+  for (const n of s.nations) {
+    if (!n.alive || n.isPlayer || !lost.has(n.id) || getRel(s, n.id, pid).type !== 'alliance') continue;
+    if ((n.allyAsk ?? -99) > s.turn - 6 || rng() >= 0.5 || (s.proposals || []).length >= 2) continue;
+    n.allyAsk = s.turn;
+    const gold = Math.round(Math.max(20 * G, s.nations[pid].gold * 0.08) / 1000) * 1000;
+    (s.proposals = s.proposals || []).push({ from: n.id, kind: 'ally', gold, text: `동맹국 ${n.name}이(가) 적에게 땅을 빼앗기고 원군을 청합니다: "군자금 ${fmtGold(gold)}을 보내 주십시오!" (보내면 호감 +20, 거절하면 호감 -25·동맹이 깨질 수 있음)` });
   }
 }

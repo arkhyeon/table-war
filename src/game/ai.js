@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -403,6 +403,18 @@ export function aiActions(s, world, nid) {
         if (moveCheck(s, world, nid, r, z.id, cnt, [])) continue;
         opts.push({ score: island ? 22 : 11, run: () => { const res = planMove(s, world, nid, r, z.id, cnt, []); if (res.ok) s.regions[z.id].guard = nid; return res; } });
         break;
+      }
+    }
+    // 계략: 지력 높은 장수가 맞닿은 적 대군에 화계, 장수 많은 적진엔 유언비어
+    if (n.ap >= 3) {
+      for (const g of Object.values(s.generals)) {
+        if (g.nation !== nid || g.status !== 'active' || g.order || g.intel < 70 || g.plotTurn === s.turn) continue;
+        let best = null, bt = 0;
+        for (const x of world.regions[g.region]?.neighbors || []) {
+          const t = s.regions[x.id];
+          if (!t.sea && t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner) && !s.nations[t.owner].horde && t.troops > bt) { bt = t.troops; best = x.id; }
+        }
+        if (best !== null && bt >= 8000 && !plotCheck(s, world, nid, g.id, 'fire', best)) { opts.push({ score: 20 + Math.min(10, bt / 5000) + (g.intel - 70) / 5, run: () => doPlot(s, world, nid, g.id, 'fire', best) }); break; }
       }
     }
     // 징병: 나라 전체 한 번에 (수입이 남거나 금이 쌓였거나 위협받을 때)

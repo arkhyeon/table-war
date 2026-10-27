@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import MapView from './MapView.jsx';
+import MapView, { Army, armyTier } from './MapView.jsx';
 import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp, readChance, bestResponse } from '../game/duel.js';
 import { decodeOwners } from '../game/fog.js';
 import { makeRng, stateRng } from '../game/rng.js';
@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -621,14 +621,14 @@ export function ProposalModal({ world, game, act }) {
         return res;
       });
     return (
-      <Modal title={p.kind === 'fief' ? `🏯 ${from.name}의 요청` : `🏴 ${from.name}의 협박`}>
+      <Modal title={p.kind === 'fief' ? `🏯 ${from.name}의 요청` : p.kind === 'ally' ? `🆘 동맹국 ${from.name}의 원군 요청` : `🏴 ${from.name}의 협박`}>
         <p>{fixJosa(p.text)}</p>
         <WhereMap world={world} game={game} ids={[p.from]} />
         <p className="muted" style={{ fontSize: 13 }}>보유 금 {fmtGold(game.nations[game.playerId].gold)}</p>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button onClick={() => answer(false)}>거절</button>
           <button className="primary" disabled={game.nations[game.playerId].gold < p.gold} onClick={() => answer(true)}>
-            {p.kind === 'fief' ? `금 ${fmtGold(p.gold)} 보내기` : `금 ${fmtGold(p.gold)} 주기`}
+            {p.kind === 'fief' || p.kind === 'ally' ? `금 ${fmtGold(p.gold)} 보내기` : `금 ${fmtGold(p.gold)} 주기`}
           </button>
         </div>
       </Modal>
@@ -778,7 +778,14 @@ const KEY_EVENT = /^(🔥|🌱|👑|☠️|💢|⚔️ .*대동맹|🙇)/;
 export function GameOverModal({ result, game, onNew, onContinue, onChronicle }) {
   const me = game.nations[game.playerId];
   const st = game.stats || {};
-  const heroes = Object.values(game.generals).filter((g) => g.wins).sort((a, b) => b.wins - a.wins).slice(0, 5);
+  const heroes = Object.values(game.generals).filter((g) => g.wins).sort((a, b) => b.wins + (b.takes || 0) * 2 - (a.wins + (a.takes || 0) * 2)).slice(0, 6);
+  // 열전 한 줄: 소속·칭호, 전적, 사로잡은 장수, 최후
+  const bio = (g) => {
+    const nat = game.nations[g.nation]?.name || '';
+    const bits = [`${g.wins}승`, g.takes ? `성 ${g.takes}곳 함락` : null, g.duelWins ? `일기토 ${g.duelWins}승` : null, g.caught?.length ? `${g.caught.slice(-2).join('·')}을(를) 사로잡음` : null].filter(Boolean);
+    const end = g.status === 'dead' ? ' 끝내 전장에서 쓰러졌다.' : g.status === 'prisoner' ? ' 포로가 되어 생을 마쳤다.' : '';
+    return fixJosa(`${nat}의 ${g.title || (g.role === 'civ' ? '모사' : '장수')}. ${bits.join(', ')}.${end}`);
+  };
   const events = game.log.filter((l) => KEY_EVENT.test(l.text)).slice(0, 10).reverse();
   const fresh = game.newAchieve || [];
   return (
@@ -804,10 +811,11 @@ export function GameOverModal({ result, game, onNew, onContinue, onChronicle }) 
       <ShareChart game={game} />
       <div className="diplo" style={{ marginTop: 10 }}>
         <div className="card col" style={{ fontSize: 13 }}>
-          <b>🎖️ 최다 전공 장수</b>
+          <b>📜 장수 열전</b>
           {heroes.map((g) => (
-            <div key={g.id}>
-              <span className="chip" style={{ background: game.nations[g.nation]?.color }} /> {g.name} <GradeTag g={g} /> {g.wins}승{g.duelWins ? ` · 일기토 ${g.duelWins}승` : ''} <small className="muted">Lv{g.level || 1}{g.status === 'dead' ? ' ✝' : ''}</small>
+            <div key={g.id} style={{ marginBottom: 4 }}>
+              <span className="chip" style={{ background: game.nations[g.nation]?.color }} /> <b>{g.name}</b> <GradeTag g={g} /> <small className="muted">Lv{g.level || 1}{g.status === 'dead' ? ' ✝' : ''}</small>
+              <div className="muted" style={{ fontSize: 12 }}>{bio(g)}</div>
             </div>
           ))}
           {!heroes.length && <span className="muted">기록 없음</span>}
@@ -854,6 +862,9 @@ export function HelpModal({ onClose }) {
           <li><b>토착 세력</b>: 빈 땅에도 수비병이 있고(4.5천~1만), 15%는 2~3배 강한 토호의 산채입니다.</li>
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
           <li><b>부대 (삼국지14식)</b>: 지역을 눌러 ⚔️출진 → 장수와 병력을 고르면 지도에 부대 말이 생깁니다. 부대 말을 누르고 목적지를 누르면 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다(불리하면 국경에서 대기, ⚔️무리해서 공격 가능). 지역 패널에서 ➕보충·⏹멈춤·🏠귀환.</li>
+          <li><b>계략 🧠</b>: 지역 패널의 🧠계략 — 화계(맞닿은 적 땅 병력 -15~25%)·유언비어(적 장수 충성 -15)·매복(이번 턴 수비 +25%). 지력 50↑ 장수, 장수마다 턴에 한 번, 행동력 1.</li>
+          <li><b>병력 상한</b>: 나라 인구의 35%까지만 병사를 둘 수 있습니다(징병·자원병). 땅을 넓히거나 인구가 늘어야 더 뽑습니다.</li>
+          <li><b>⏩ 빠른 진행·체크리스트</b>: 내게 일이 생길 때까지 자동으로 턴을 넘기고, 지도 왼쪽 위에 이번 턴 챙길 것을 보여 줍니다.</li>
           <li><b>요격·협공</b>: 공격받는 땅과 맞닿은 같은 나라 땅에 장수가 있으면 그 부대가 달려와 함께 싸웁니다(병력 절반). 한 턴에 두 곳 이상에서 같은 땅을 치면 협공 +15%. 적 부대도 지도에 부대 말로 보입니다.</li>
           <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(4천+통솔×300, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
           <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
@@ -1093,9 +1104,57 @@ export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 120
         )}{' '}
         · {game.regions[b.to].name} · {b.kind && <span className="tag">{BATTLE_KIND[b.kind]}</span>} <b style={{ color: b.result === 'win' ? 'var(--accent)' : undefined }}>{res}</b>
       </div>
+      <BattleField key={index} b={b} att={att} def={def} />
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         {b.msg}
       </div>
+    </div>
+  );
+}
+
+// 전투 장면: 양쪽 군세(병력만큼 병사 그림)가 맞붙고, 일기토·요격·협공 같은 효과를 배지로
+function BattleField({ b, att, def }) {
+  const tags = [];
+  if (b.duel) tags.push(`⚔️ 일기토 ${b.duel.a} vs ${b.duel.b}${b.duel.killed ? ` — ${b.duel.killed} 전사` : ''}`);
+  if (/요격/.test(b.msg || '')) tags.push('🛡️ ' + (b.msg.match(/요격: ([^\]/]+)/)?.[1] || '요격').trim());
+  if (/협공/.test(b.msg || '')) tags.push('🗡️ 협공 +15%');
+  if (/용병/.test(b.msg || '')) tags.push('💰 용병 참전');
+  if (b.siege) tags.push(`🏰 성벽 ${b.siege.before}→${b.siege.after}`);
+  if (/성벽 붕괴/.test(b.msg || '')) tags.push('💥 성벽 붕괴');
+  const win = b.result === 'win';
+  return (
+    <div className="battlefield">
+      <svg viewBox="0 0 300 92" width="100%" height="92">
+        <rect x="0" y="62" width="300" height="30" fill="#7a8a4a" opacity="0.35" />
+        <g className="bf-left">
+          <g transform="translate(70,74)">
+            <Army tier={armyTier(b.count)} color={att.color} u={9} />
+          </g>
+          <text x="70" y="88" textAnchor="middle" fontSize="10" fontWeight="700" fill="currentColor">{fmtTroops(b.count)}</text>
+        </g>
+        <g className="bf-right">
+          <g transform="translate(230,74) scale(-1,1)">
+            <Army tier={armyTier(b.defTroops)} color={def ? def.color : '#8a8577'} u={9} />
+          </g>
+          <text x="230" y="88" textAnchor="middle" fontSize="10" fontWeight="700" fill="currentColor">{fmtTroops(b.defTroops)}</text>
+        </g>
+        <text className="bf-clash" x="150" y="50" textAnchor="middle" fontSize="26">💥</text>
+        <text x="150" y="16" textAnchor="middle" fontSize="11" fontWeight="800" fill={win ? '#e8a33a' : '#e2655a'}>
+          {win ? '점령!' : b.result === 'siege' ? '포위 공격' : '격퇴'}
+        </text>
+        {(b.attLoss || b.defLoss) && (
+          <text x="150" y="30" textAnchor="middle" fontSize="9" fill="currentColor" opacity="0.8">
+            손실 {fmtTroops(b.attLoss || 0)} : {fmtTroops(b.defLoss || 0)}
+          </text>
+        )}
+      </svg>
+      {tags.length > 0 && (
+        <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+          {tags.map((t, i) => (
+            <span key={i} className="tag">{t}</span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1546,6 +1605,53 @@ export function FormArmyModal({ game, rid, act, onClose, onDone }) {
           <button className="primary" disabled={!sel.length || n < 500} onClick={() => { const res = act((s) => formArmy(s, pid, rid, sel, n)); if (res?.ok) onDone(res.army); }}>
             출진
           </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// 계략: 장수를 골라 화계·유언비어(맞닿은 적 땅)·매복(제 땅)
+export function PlotModal({ world, game, rid, act, onClose }) {
+  const pid = game.playerId;
+  const gens = gensIn(game, rid, pid).filter((g) => g.intel >= 50 && !g.order);
+  const [gid, setGid] = useState(gens.sort((a, b) => b.intel - a.intel)[0]?.id);
+  const g = game.generals[gid];
+  const foes = world.regions[rid].neighbors.map((x) => x.id).filter((x) => { const t = game.regions[x]; return !t.sea && t.owner !== null && t.owner !== pid && getRel(game, pid, t.owner).type === 'none'; });
+  const [kind, setKind] = useState('fire');
+  const [target, setTarget] = useState(foes[0]);
+  const tgt = kind === 'ambush' ? rid : target;
+  const err = !g ? '지력 50 이상인 장수가 없습니다.' : tgt === undefined ? '맞닿은 적 땅이 없습니다.' : plotCheck(game, world, pid, gid, kind, tgt);
+  return (
+    <Modal title={`🧠 ${game.regions[rid].name}에서 계략`} onClose={onClose}>
+      <div className="col">
+        <div className="gen-picks">
+          {gens.map((x) => (
+            <button key={x.id} className={'gen-pick' + (x.id === gid ? ' on' : '')} onClick={() => setGid(x.id)}>
+              <span>{x.id === gid ? '✅' : '⬜'} <b>{x.name}</b></span>
+              <small>지{x.intel} {x.plotTurn === game.turn ? '· 이번 턴 사용함' : ''}</small>
+            </button>
+          ))}
+        </div>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {Object.entries(PLOTS).map(([k, p]) => (
+            <button key={k} className={'sm' + (kind === k ? ' primary' : '')} title={p.desc} onClick={() => setKind(k)}>{p.name}</button>
+          ))}
+        </div>
+        <small className="muted">{PLOTS[kind].desc}</small>
+        {kind !== 'ambush' && (
+          <label>
+            대상{' '}
+            <select value={target} onChange={(e) => setTarget(+e.target.value)}>
+              {foes.map((x) => <option key={x} value={x}>{game.regions[x].name} ({game.nations[game.regions[x].owner].name} · {fmtTroops(game.regions[x].troops)})</option>)}
+            </select>
+          </label>
+        )}
+        {g && tgt !== undefined && <div>성공률 <b>{Math.round(plotChance(game, g, tgt, kind) * 100)}%</b> · 행동력 1</div>}
+        {err && <small style={{ color: 'var(--danger)' }}>{err}</small>}
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>닫기</button>
+          <button className="primary" disabled={!!err} onClick={() => act((s) => doPlot(s, world, pid, gid, kind, tgt))}>계략 실행</button>
         </div>
       </div>
     </Modal>
