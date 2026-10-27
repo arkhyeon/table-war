@@ -365,7 +365,7 @@ export function conscriptCost(s, rid, amount, mode = 'draft') {
   };
 }
 
-// 후방 징병 → 다른 내 지역으로 보냄: 내 땅으로 이어진 거리 2칸에 1턴
+// 후방 징병 → 다른 내 지역으로 보냄: 내 땅으로 이어진 거리 3칸에 1턴 (직접 행군과 같은 속도)
 export function ownDistances(s, world, nid, from, parent) {
   const dist = new Map([[from, 0]]);
   const q = [from];
@@ -379,7 +379,8 @@ export function ownDistances(s, world, nid, from, parent) {
   }
   return dist;
 }
-export const reinforceTurns = (d) => Math.max(1, Math.ceil(d / 2));
+export const MARCH_PER_TURN = 3;
+export const reinforceTurns = (d) => Math.max(1, Math.ceil(d / MARCH_PER_TURN));
 
 export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = rid) {
   const r = s.regions[rid];
@@ -411,37 +412,48 @@ export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = r
   return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 ${CONSCRIPT[mode].name}했습니다${sent}. (금 -${fmtGold(c.gold)}${c.loyalty ? `, 민심 -${c.loyalty}` : ''})` };
 }
 
-// 일괄 징병: 민심이 깎이지 않는 만큼(인구 5%)만 여러 지역에서 한꺼번에, 행동력 1
+// 일괄 징병: 민심이 깎이지 않는 만큼(인구 5%, 병영 있으면 8%)을 모든 지역에서 한꺼번에 — 행동력 2
+// dest를 주면 뽑은 병사를 그곳으로 행군시킴 (내 땅으로 이어진 곳만, 3칸에 1턴)
+export const BULK_DRAFT_AP = 2;
+export const draftFree = (r) => (r.buildings.barracks ? 0.08 : 0.05);
 export function bulkDraftPlan(s, nid) {
   return nationRegions(s, nid)
     .filter((rid) => !s.regions[rid].conscripted && (s.regions[rid].loyalty ?? 100) >= 50)
     .map((rid) => {
       const r = s.regions[rid];
-      const amt = Math.min(conscriptMax(s, rid, nid), Math.floor((r.pop * 1000 * 0.05) / 100) * 100);
+      const amt = Math.min(conscriptMax(s, rid, nid), Math.floor((r.pop * 1000 * draftFree(r)) / 100) * 100);
       return { rid, amt, gold: amt * CONSCRIPT.draft.gold };
     })
     .filter((x) => x.amt >= 500);
 }
-export function doBulkDraft(s, nid) {
+export function doBulkDraft(s, nid, world, dest = null) {
   const n = s.nations[nid];
-  const err = canAct(s, nid, COST.conscript);
+  const err = canAct(s, nid, BULK_DRAFT_AP);
   if (err) return fail(err);
-  let men = 0, spent = 0, k = 0;
-  // 지역마다 행동력 1 (많이 뽑을 수 있는 곳부터, 행동력이 남는 만큼)
+  const parent = new Map();
+  const dist = dest !== null && world ? ownDistances(s, world, nid, dest, parent) : null;
+  let men = 0, spent = 0, k = 0, sent = 0;
+  // 많이 뽑을 수 있는 곳부터, 금이 닿는 만큼
   for (const x of bulkDraftPlan(s, nid).sort((a, b) => b.amt - a.amt)) {
-    if (n.gold - spent < x.gold || k >= Math.floor(n.ap / COST.conscript)) break;
+    if (n.gold - spent < x.gold) continue;
     const r = s.regions[x.rid];
-    r.troops += x.amt;
     r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
     r.conscripted = true;
+    if (dist && x.rid !== dest && dist.has(x.rid)) {
+      const path = [x.rid];
+      while (path[path.length - 1] !== dest) path.push(parent.get(path[path.length - 1]));
+      (s.reinforce = s.reinforce || []).push({ n: nid, from: x.rid, to: dest, count: x.amt, start: s.turn, arrive: s.turn + reinforceTurns(dist.get(x.rid)), path });
+      sent += x.amt;
+    } else r.troops += x.amt;
     men += x.amt;
     spent += x.gold;
     k++;
   }
   if (!k) return fail('징병할 수 있는 지역이 없거나 금이 부족합니다.');
   n.gold -= spent;
-  n.ap -= COST.conscript * k;
-  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다. (행동력 -${k}) (금 -${fmtGold(spent)}, 민심 영향 없음)` };
+  n.ap -= BULK_DRAFT_AP;
+  const to = sent ? ` 그중 ${fmtTroops(sent)}은 ${s.regions[dest].name}(으)로 행군합니다.` : '';
+  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다.${to} (행동력 -${BULK_DRAFT_AP}, 금 -${fmtGold(spent)}, 민심 영향 없음)` };
 }
 
 // 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
@@ -778,13 +790,13 @@ export function autoMarch(s, world, nid) {
     const keep = Math.max(n.capital === r ? RALLY_KEEP * 3 : RALLY_KEEP, Math.round(enemyNear(r) * (n.capital === r ? 1.2 : 0.9)));
     const cnt = Math.floor((Math.min(movable(s, r), reg.troops - keep)) / 100) * 100;
     if (cnt < 1000) continue;
-    // 2칸 앞으로 갈 수 있으면 2칸, 아니면 1칸
-    let to = null;
-    for (const a of world.regions[r].neighbors) {
-      if (dist.get(a.id) !== d - 1) continue;
-      to = a.id;
-      const far = world.regions[a.id].neighbors.find((b) => dist.get(b.id) === d - 2 && marchVia(world, s, r, b.id) !== null);
-      if (far) { to = far.id; break; }
+    // 내 땅으로 이어진 3칸 안에서 목표에 가장 가까운 곳까지 (직접 행군과 같은 속도)
+    let to = null, best = d;
+    for (const [x, dx] of dist) {
+      if (dx >= best || dx < d - MARCH_HOPS) continue;
+      if (!edgeBetween(world, r, x) && marchVia(world, s, r, x) === null) continue;
+      best = dx;
+      to = x;
     }
     if (to === null) continue;
     if (planMove(s, world, nid, r, to, cnt, [], { auto: true }).ok) sent += cnt;
@@ -863,7 +875,7 @@ export function doBribe(s, world, nid, rid, gid) {
   return { ok: true, failed: true, accepted: false, msg: `매수 실패 (성공률 ${Math.round(chance * 100)}%) — 금 ${fmtGold(cost)}을 잃었습니다.` };
 }
 
-// 병력 불러오기: 여러 지역에서 정한 만큼 한 곳으로 (내 땅 2칸에 1턴, 행동력 1)
+// 병력 불러오기: 여러 지역에서 정한 만큼 한 곳으로 (내 땅 3칸에 1턴, 행동력 1)
 export function callTroops(s, world, nid, dest, list) {
   const err = canAct(s, nid, 1);
   if (err) return fail(err);
@@ -897,12 +909,12 @@ export function doDisband(s, nid, rid, count) {
 }
 
 // 후방에서 징병해 보낸 증원 도착 (도착지를 잃었으면 출발지로, 둘 다 잃었으면 흩어짐)
-// 가는 길(2칸에 1턴)에 내 땅이 아닌 곳이 생기면 그 앞 내 땅에서 멈춤 → 집결·전선 자동 행군이 이어받음
+// 가는 길(3칸에 1턴)에 내 땅이 아닌 곳이 생기면 그 앞 내 땅에서 멈춤 → 집결·전선 자동 행군이 이어받음
 export function arriveReinforcements(s) {
   const left = [];
   for (const o of s.reinforce || []) {
     const path = o.path || [o.from, o.to];
-    const reach = o.arrive <= s.turn ? path.length - 1 : Math.min(path.length - 1, (s.turn - (o.start ?? s.turn)) * 2);
+    const reach = o.arrive <= s.turn ? path.length - 1 : Math.min(path.length - 1, (s.turn - (o.start ?? s.turn)) * MARCH_PER_TURN);
     let k = 0;
     while (k < reach && s.regions[path[k + 1]].owner === o.n) k++;
     const blocked = k < reach;

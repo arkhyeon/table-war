@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
@@ -27,6 +27,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     if (v) setSheet(false);
   }, []);
   const [modal, setModal] = useState(null);
+  // 지도에서 고르기: { hint, valid: Set, onPick(rid) }
+  const [pick, setPick] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [showLog, setShowLog] = useState(() => window.innerWidth > 860);
   const [ask, setAsk] = useState(null); // { text, onYes }
@@ -124,7 +126,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
 
   // 관전 자동 진행
   useEffect(() => {
-    if (!spect || !auto || modal) return;
+    if (!spect || !auto || modal || game.gameOver) return;
     const t = setTimeout(doEndTurn, autoSpeed);
     return () => clearTimeout(t);
   });
@@ -163,6 +165,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       if (e.key === 'Escape') {
         setMoveMode(false);
         if (modal && modal.type !== 'over') setModal(null);
+        setPick(null);
       }
       if (e.target.tagName === 'INPUT') return;
       if (e.key === 'm' && selected !== null && game.regions[selected]?.owner === game.playerId) setMoveMode((v) => !v);
@@ -172,6 +175,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   }, [modal, selected, game]);
 
   const targets = useMemo(() => {
+    if (pick) return new Map([...pick.valid].map((r) => [r, 'move']));
     if (!moveMode || selected === null || game.regions[selected].owner !== game.playerId) return null;
     const m = new Map();
     const fr = game.regions[selected];
@@ -204,7 +208,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       }
     }
     return m;
-  }, [moveMode, selected, game, world, pid]);
+  }, [moveMode, selected, game, world, pid, pick]);
 
   const genCount = useMemo(() => {
     const c = {};
@@ -218,6 +222,13 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   };
 
   const onRegionClick = (rid) => {
+    if (pick) {
+      if (!pick.valid.has(rid)) return toast('여기는 고를 수 없습니다. 노랗게 표시된 내 땅(길이 이어진 곳)을 누르세요.', true);
+      const f = pick.onPick;
+      setPick(null);
+      f(rid);
+      return;
+    }
     if (targets && targets.has(rid)) {
       if (targets.get(rid) === 'blocked') {
         const fr = game.regions[selected];
@@ -316,6 +327,9 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             </button>
           </div>
         )}
+        {!spect && me.alive && (
+          <button onClick={() => setModal({ type: 'draft' })} title="모든 지역에서 한꺼번에 징병해 한 곳으로 보냄">🪖<span className="lbl"> 징병</span></button>
+        )}
         <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
         <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>
         <div className="menu-wrap">
@@ -387,7 +401,12 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
             턴 종료 ⏭
           </button>
-          {moveMode && <div className="map-hint">이동/공격할 인접 지역을 누르세요<span className="lbl"> (Esc 취소)</span> · 노랑=이동 빨강=공격</div>}
+          {pick && (
+            <div className="map-hint">
+              {pick.hint} <button className="sm" onClick={() => setPick(null)}>취소</button>
+            </div>
+          )}
+          {moveMode && !pick && <div className="map-hint">이동/공격할 인접 지역을 누르세요<span className="lbl"> (Esc 취소)</span> · 노랑=이동 빨강=공격</div>}
           {showLog && (
             <div className="log">
               {game.log.slice(0, 60).map((l, i) => (
@@ -446,7 +465,37 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
       {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
-      {modal?.type === 'conscript' && <ConscriptModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
+      {modal?.type === 'conscript' && (
+        <ConscriptModal
+          key={modal.init?.dest ?? 'c'}
+          world={world}
+          game={game}
+          rid={modal.rid}
+          init={modal.init}
+          act={act}
+          onClose={() => setModal(null)}
+          onPickDest={({ mode, amount, valid }) => {
+            const rid = modal.rid;
+            setModal(null);
+            setSheet(false);
+            setPick({ hint: '징병한 병사를 보낼 내 땅을 누르세요', valid: new Set(valid), onPick: (d) => setModal({ type: 'conscript', rid, init: { mode, amount, dest: d } }) });
+          }}
+        />
+      )}
+      {modal?.type === 'draft' && (
+        <DraftModal
+          world={world}
+          game={game}
+          init={modal.init}
+          act={act}
+          onClose={() => setModal(null)}
+          onPickDest={() => {
+            setModal(null);
+            setSheet(false);
+            setPick({ hint: '징병한 병사들을 모을 내 땅을 누르세요', valid: new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea)), onPick: (d) => setModal({ type: 'draft', init: { dest: d } }) });
+          }}
+        />
+      )}
       {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
       {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}

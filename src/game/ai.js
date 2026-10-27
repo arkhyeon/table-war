@@ -4,7 +4,7 @@ import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, bulkDraftPlan, doBulkDraft, BULK_DRAFT_AP } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -384,6 +384,12 @@ export function aiActions(s, world, nid) {
       while (amount > 1000 && bad(amount)) amount -= 500;
       if (amount >= 1000 && conscriptCost(s, c, amount, mode).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 * G ? 12 : 0) + (dist[c] === 0 ? 6 : 0) + (building ? 8 : 0) + drive * 10, run: () => doConscript(s, world, nid, c, amount, mode) });
     }
+    // 금이 쌓였으면 일괄 징병 (돈을 쌓아두기만 하다 교착되는 것 방지)
+    if (n.ap >= BULK_DRAFT_AP && n.gold > 200 * G && net > 0) {
+      const plan = bulkDraftPlan(s, nid);
+      const cost = plan.reduce((a, x) => a + x.gold, 0);
+      if (plan.length >= 3 && cost < n.gold - 80 * G) opts.push({ score: 26 + Math.min(24, n.gold / (150 * G)) + drive * 10, run: () => doBulkDraft(s, nid, world, null) });
+    }
     // 진휼: 반란 위험 지역
     const sad = mine.filter((r) => (s.regions[r].loyalty ?? 100) < 28 && (s.regions[r].reliefTurn === undefined || s.turn - s.regions[r].reliefTurn >= RELIEF_COOLDOWN)).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty)[0];
     if (sad !== undefined && n.gold >= reliefCost(s, sad) + 40 * G) opts.push({ score: 27, run: () => doRelief(s, nid, sad) });
@@ -496,8 +502,9 @@ function breakOut(s, world, nid, rng) {
   for (const r of nationRegions(s, nid)) for (const x of world.regions[r].neighbors) {
     const t = s.regions[x.id];
     if (t.sea || t.owner === nid) continue;
-    if (t.owner === null || hostile(s, nid, t.owner)) open++;
-    else nbs.set(t.owner, (nbs.get(t.owner) || 0) + 1);
+    // 빈 땅·도적만 남았으면 '싸울 나라가 없는' 것으로 봄 (끝까지 서로 동맹만 하고 멈추는 것 방지)
+    if (t.owner !== null && !s.nations[t.owner].horde && hostile(s, nid, t.owner)) open++;
+    else if (t.owner !== null && !hostile(s, nid, t.owner)) nbs.set(t.owner, (nbs.get(t.owner) || 0) + 1);
   }
   if (open > 0 || !nbs.size || !rng.chance(0.35)) return false;
   // 속국은 병합 대상이므로 제외, 국력이 가장 약한 조약국을 고름

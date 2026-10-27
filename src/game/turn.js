@@ -202,7 +202,7 @@ function upkeep(s, world) {
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;
     if (r.loyalty >= minLoy && !cut && !s.nations[r.owner].horde) {
-      const rate = (r.loyalty >= 80 ? 0.004 : 0.0025) * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병'));
+      const rate = (r.loyalty >= 80 ? 0.004 : 0.0025) * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병')) * (r.buildings.barracks ? 2 : 1);
       const v = Math.floor((r.pop * 1000 * rate) / 100) * 100;
       if (v > 0) {
         r.troops += v;
@@ -262,6 +262,21 @@ export function checkGameOver(s) {
   return null;
 }
 
+// 관전: 한 나라(속국 포함)가 모든 땅을 갖거나 맞설 나라가 없으면 끝 (도적은 셈하지 않음)
+function spectatorOver(s) {
+  if (s.spectatorDone) return null;
+  const alive = s.nations.filter((n) => n.alive && !n.horde);
+  for (const n of alive) {
+    const bloc = alive.filter((m) => m.id === n.id || isVassalOf(s, m.id, n.id));
+    const owned = bloc.reduce((a, m) => a + nationRegions(s, m.id).length, 0);
+    if (owned >= landCount(s) || bloc.length === alive.length) {
+      s.spectatorDone = true;
+      return { win: true, spectator: true, text: `${n.name}이(가) 천하를 통일했습니다! (${s.turn - 1}턴)` };
+    }
+  }
+  return null;
+}
+
 // 턴 종료 1단계: 컴퓨터들도 이동 계획을 세움 (플레이어 계획으로 빠져나간 병력은 모르는 채로)
 // 턴 요약용: 플레이어의 영토·병력·국고
 export function playerStat(s) {
@@ -307,6 +322,14 @@ export function endTurnPlan(s, world) {
 export function endTurnFinish(s, world) {
   s.orders = [];
   s.resolveQueue = [];
+  // 장수 정리: 남은 이동 표시를 지우고, 남의 땅에 남은 장수는 수도로 (지역을 눌러도 안 보이던 문제)
+  for (const g of Object.values(s.generals)) {
+    if (g.status !== 'active') continue;
+    delete g.order;
+    const r = s.regions[g.region];
+    const cap = s.nations[g.nation]?.capital;
+    if ((!r || r.owner !== g.nation) && cap !== null && cap !== undefined) g.region = cap;
+  }
   // 전투 직후 100%를 채웠다면 턴 끝 반란·부흥과 상관없이 승리
   const early = s.spectator || s.sandbox ? null : checkGameOver(s);
   upkeep(s, world);
@@ -327,7 +350,7 @@ export function endTurnFinish(s, world) {
   runEvents(s, world, stateRng(s));
   historyNotes(s);
   updateExplored(s, world);
-  s.gameOver = early?.win ? early : s.spectator || (s.sandbox && s.nations[s.playerId].alive) ? null : checkGameOver(s);
+  s.gameOver = early?.win ? early : s.spectator ? spectatorOver(s) : s.sandbox && s.nations[s.playerId].alive ? null : checkGameOver(s);
   if (!s.spectator) {
     trackStats(s);
     s.newAchieve = checkAchievements(s, !!s.gameOver?.win);

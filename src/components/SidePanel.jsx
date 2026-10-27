@@ -86,7 +86,9 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
   const showT = r && troopsShown(game, view);
   const mine = r && r.owner === pid && !spectator;
   const owner = r && r.owner !== null ? game.nations[r.owner] : null;
-  const gens = r && view === 'visible' ? gensIn(game, selected) : [];
+  // 주둔 장수: 이번 턴 이동 계획에 묶인 장수도 보여줌 (출발 전까지는 이곳에 있음)
+  const gens = r && view === 'visible' ? Object.values(game.generals).filter((g) => g.status === 'active' && g.region === selected) : [];
+  const orderTo = (g) => (g.order ? (game.orders || []).find((o) => o.id === g.order) : null);
   const w = r ? WEATHER[game.weather?.[selected] || 'clear'] : null;
 
   const setBulk = (k) =>
@@ -347,7 +349,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 >
                   🚩 {me.rally?.to === selected ? '집결 해제' : '집결지로'}
                 </button>
-                <button onClick={openCall} title="다른 내 지역에서 정한 만큼 이곳으로 불러옴 (내 땅 2칸에 1턴, 행동력 1)">📯 병력 불러오기</button>
+                <button onClick={openCall} title="다른 내 지역에서 정한 만큼 이곳으로 불러옴 (내 땅 3칸에 1턴, 행동력 1)">📯 병력 불러오기</button>
                 <button onClick={openDisband} title="병사를 집으로 돌려보냄 (유지비 절감, 행동력 없음)">🏳️ 해산</button>
                 {me.capital !== selected && (
                   <button onClick={openFief} title="장수에게 이 일대를 맡겨 스스로 다스리게 함 (언제든 회수)">🏯 분봉</button>
@@ -445,7 +447,9 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   key={g.id}
                   g={g}
                   extra={
-                    g.nation !== pid && (
+                    orderTo(g) ? (
+                      <small className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발 예정</small>
+                    ) : g.nation !== pid && (
                       <button className="sm" style={{ marginTop: 4 }} onClick={() => act((s) => doPoach(s, pid, g.id))} disabled={me.ap < COST.poach || me.gold < COST.poachGold || poachChance(game, pid, g) === 0}>
                         회유 ({fmtGold(COST.poachGold)}금·{COST.poach}AP · {poachChance(game, pid, g)}%)
                       </button>

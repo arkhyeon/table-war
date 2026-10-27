@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT, movable,
   doRelief, reliefCost, canRelief, RELIEF_COOLDOWN, ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, bulkDraftPlan, doBulkDraft, callTroops, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, bulkDraftPlan, doBulkDraft, BULK_DRAFT_AP, draftFree, callTroops, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -191,12 +191,12 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
 }
 
 // ───────── 징병 ─────────
-export function ConscriptModal({ world, game, rid, act, onClose }) {
+export function ConscriptModal({ world, game, rid, act, onClose, init = {}, onPickDest }) {
   const pid = game.playerId;
   const r = game.regions[rid];
-  const [mode, setMode] = useState('draft');
+  const [mode, setMode] = useState(init.mode || 'draft');
   const max = conscriptMax(game, rid, pid, mode);
-  const [amount, setAmount] = useState(Math.min(max, Math.max(100, Math.round(max / 2 / 100) * 100)));
+  const [amount, setAmount] = useState(init.amount ?? Math.min(max, Math.max(100, Math.round(max / 2 / 100) * 100)));
   const amt = Math.min(amount, max);
   const c = conscriptCost(game, rid, amt, mode);
   const me = game.nations[pid];
@@ -205,7 +205,9 @@ export function ConscriptModal({ world, game, rid, act, onClose }) {
   const dist = useMemo(() => ownDistances(game, world, pid, rid), [game, world, pid, rid]);
   const front = useMemo(() => frontierOf(game, world, pid), [game, world, pid]);
   const dests = [...dist.entries()].filter(([x]) => x !== rid).sort((a, b) => (front.has(b[0]) - front.has(a[0])) || a[1] - b[1]);
-  const [dest, setDest] = useState(rid);
+  // 기본 도착지: 지도에서 고른 곳 → 집결지 → 이곳
+  const rally = game.nations[pid].rally?.to;
+  const [dest, setDest] = useState(init.dest ?? (rally != null && dist.has(rally) ? rally : rid));
   return (
     <Modal title={`🪖 ${r.name} 징병`} onClose={onClose}>
       <div className="col">
@@ -241,6 +243,11 @@ export function ConscriptModal({ world, game, rid, act, onClose }) {
           <span>{COST.conscript} AP</span>
           <span>보낼 곳</span>
           <span>
+            {onPickDest && (
+              <button className="sm" style={{ marginRight: 6 }} onClick={() => onPickDest({ mode, amount: amt, valid: [...dist.keys()] })}>
+                🗺️ 지도에서 고르기
+              </button>
+            )}
             <select value={dest} onChange={(e) => setDest(+e.target.value)} style={{ maxWidth: '100%' }}>
               <option value={rid}>{r.name} (이곳에 바로)</option>
               {dests.map(([x, d]) => (
@@ -669,6 +676,7 @@ export function ProposalModal({ world, game, act }) {
     return (
       <Modal title={p.kind === 'fief' ? `🏯 ${from.name}의 요청` : `🏴 ${from.name}의 협박`}>
         <p>{fixJosa(p.text)}</p>
+        <WhereMap world={world} game={game} ids={[p.from]} />
         <p className="muted" style={{ fontSize: 13 }}>보유 금 {fmtGold(game.nations[game.playerId].gold)}</p>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button onClick={() => answer(false)}>거절</button>
@@ -683,6 +691,7 @@ export function ProposalModal({ world, game, act }) {
   return (
     <Modal title={`📨 ${from.name}의 제안`}>
       <p>{fixJosa(p.text)}</p>
+      <WhereMap world={world} game={game} ids={[p.from, ...game.nations.filter((n) => n.alive && n.id !== p.from && n.id !== game.playerId && p.text.includes(n.name)).map((n) => n.id)]} />
       <p className="muted" style={{ fontSize: 13 }}>
         {from.name}의 나에 대한 호감: {Math.round(game.opinion[p.from][game.playerId])}
         {p.deal.get.gold > 0 && !p.deal.treaty && ' · 거절하면 원한을 품고 공격해 올 수 있습니다.'}
@@ -826,11 +835,11 @@ export function GameOverModal({ result, game, onNew, onContinue, onChronicle }) 
   const events = game.log.filter((l) => KEY_EVENT.test(l.text)).slice(0, 10).reverse();
   const fresh = game.newAchieve || [];
   return (
-    <Modal title={result.partial ? '🏆 천하의 8할!' : result.win ? '🏆 승리!' : '💀 패배'} wide>
+    <Modal title={result.spectator ? '🏁 관전 종료' : result.partial ? '🏆 천하의 8할!' : result.win ? '🏆 승리!' : '💀 패배'} wide>
       <p>{fixJosa(result.text)}</p>
-      <p className="muted">
+      {!result.spectator && <p className="muted">
         {me.name} · {game.turn}턴 · 영토 {nationRegions(game, game.playerId).length} · 전투 {st.won || 0}승 {st.lost || 0}패 · 일기토 {st.duels || 0}승 · 최소 영토 {st.minRegions ?? '-'}곳
-      </p>
+      </p>}
       {fresh.length > 0 && (
         <div className="card" style={{ marginBottom: 10 }}>
           <b>🎉 새 업적</b>{' '}
@@ -892,7 +901,7 @@ export function HelpModal({ onClose }) {
           <li><b>내선 작전</b>: 내 땅 안 이동은 행동력이 들지 않고, 내 땅으로만 이어지면 한 번에 <b>3칸</b>까지 이동합니다.</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드 「자세히」에서 세율 설정(높음=세수↑ 민심↓ 인구 정체).</li>
           <li><b>파산</b>: 다음 턴 국고가 바닥날 것 같으면 국가 카드에 경고가 뜹니다. 지역에서 🏳️해산(행동력 없음)으로 병력을 줄이세요. 바닥나면 녹봉을 못 준 만큼(1명당 1금) 병사가 탈영합니다.</li>
-          <li><b>병력 불러오기</b>: 지역에서 📯 → 다른 내 지역마다 보낼 병력을 정함(행동력 1, 내 땅 2칸에 1턴). 🚩전선 투입은 「위협받는 국경」 또는 특정 나라 쪽 국경으로 매 턴 자동 행군.</li>
+          <li><b>병력 불러오기</b>: 지역에서 📯 → 다른 내 지역마다 보낼 병력을 정함(행동력 1, 내 땅 3칸에 1턴 — 직접 행군과 같은 속도). 🚩전선 투입은 「위협받는 국경」 또는 특정 나라 쪽 국경으로 매 턴 자동 행군.</li>
           <li><b>8할 도달</b>: 육지 80%(속국 포함)를 차지하면 통일을 선언하고 끝낼지, 100%까지 싸울지 고릅니다. 그 무렵 남은 나라들은 최후의 동맹을 맺거나 속국을 청합니다.</li>
           <li><b>중원(대평야)</b>: 수도 위치로 고른 가운데 나라(동서남북 4방향 모두에 다른 나라, 바다를 등지지 않은 내륙, 다른 수도들과 가장 가까운 곳, 나라 6개당 1곳)는 장수 +2·병력 +25%로 시작하고, 시작 땅은 🌾대평야(세금 +20%·인구 상한 +30%·민심 +1/턴, 누가 차지해도 유지).</li>
           <li><b>토착 세력</b>: 빈 땅에도 수비병이 있고(4.5천~1만), 15%는 2~3배 강한 토호의 산채입니다.</li>
@@ -900,7 +909,7 @@ export function HelpModal({ onClose }) {
           <li><b>징병</b>: 인원을 직접 정합니다. 징집은 1명당 5금이고 인구의 5%를 넘게 뽑으면 넘은 만큼 민심 하락, 모병은 1명당 12금에 민심 영향 없음(최대치 절반). 병영 +50%.</li>
           <li><b>자원병</b>: 민심 60 이상인 지역은 매 턴 백성이 스스로 입대합니다. 영토를 잃거나 수도가 위협받으면 민심 40 이상 지역에서 4배로 늘어납니다.</li>
           <li><b>민심</b>: 점령 직후 15(중립지는 35)에서 매 턴 회복. 주둔군 3천↑·수도·낮은 세율·인덕 장수로 빨라짐. <b>통치 부담은 내륙(국경에 닿지 않은 곳)만</b>: 전 육지의 1/8을 차지할 때마다 -1(최대 -5). 25 미만이면 반란. 대책: 🍚진휼(돈만 듦, 지역마다 6턴에 한 번, +7/+14 — 국가 카드의 「민심 관리」에서 민심 낮은 순으로 일괄 진휼), 계엄, 치안 장수.</li>
-          <li><b>후방 징병</b>: 징병 창의 「보낼 곳」에서 다른 내 지역을 고르면, 내 땅 2칸마다 1턴 걸려 그곳에 도착(도착지를 잃으면 출발지로).</li>
+          <li><b>후방 징병</b>: 징병 창의 「보낼 곳」에서 다른 내 지역을 고르면, 내 땅 3칸마다 1턴 걸려 그곳에 도착(🗺️ 지도에서 고르기 가능)(도착지를 잃으면 출발지로).</li>
           <li><b>천운</b>: 한 나라가 육지 25%를 넘게 차지하면 가끔(언제일지 모름, 앞설수록 잦음) 대반란·명장 망명·반패권 원조 중 하나가 일어납니다. 한 판에 최대 2번.</li>
           <li><b>용병</b>: 장수가 이끄는 공격 계획에서만 고용. 장수 통솔이 높을수록 많이, 정치가 높을수록 싸게. 그 전투만 함께 싸우고 떠남(손실도 나눠 짐).</li>
           <li><b>매수</b>: 맞닿은 내 지역에 장수가 있어야 함. 지력·정치↑·상대 민심↓일수록 성공, 수비 장수·성벽이 있으면 어려움. 실패하면 금은 상대 나라가 가짐. 수도·동맹·도적 무리는 불가.</li>
@@ -1269,19 +1278,6 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
         ))}
         <small className="muted">이름을 누르면 그 지역으로 이동</small>
       </div>
-      {(() => {
-        const plan = bulkDraftPlan(game, pid).sort((a, b) => b.amt - a.amt).slice(0, Math.floor(me.ap / COST.conscript));
-        const men = plan.reduce((a, x) => a + x.amt, 0), gold = plan.reduce((a, x) => a + x.gold, 0);
-        return (
-          <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-            <span>🪖 징병</span>
-            <button className="primary" disabled={!plan.length || me.ap < COST.conscript} onClick={() => act((s) => doBulkDraft(s, pid))}>
-              {plan.length}곳 일괄 징집 ({fmtTroops(men)} · {fmtGold(gold)}금 · {plan.length * COST.conscript}AP)
-            </button>
-            <small className="muted">많이 뽑을 수 있는 곳부터 지역마다 행동력 1 · 민심 50 이상, 인구의 5%까지만(민심 영향 없음)</small>
-          </div>
-        );
-      })()}
       <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
         <span>🍚 진휼</span>
         <span>민심</span>
@@ -1410,7 +1406,7 @@ export function CallModal({ world, game, rid, act, onClose }) {
   const total = list.reduce((a, o) => a + (want[o.x] || 0), 0);
   return (
     <Modal title={`📯 ${game.regions[rid].name}(으)로 병력 불러오기`} onClose={onClose} wide>
-      <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>각 지역에서 보낼 병력을 정하세요. 내 땅 2칸에 1턴 걸려 도착하고, 길이 끊기면 그 앞 내 땅에서 멈춥니다. (행동력 1)</div>
+      <div className="muted" style={{ fontSize: 13, marginBottom: 6 }}>각 지역에서 보낼 병력을 정하세요. 내 땅 3칸에 1턴 — 직접 행군과 같은 속도 걸려 도착하고, 길이 끊기면 그 앞 내 땅에서 멈춥니다. (행동력 1)</div>
       <div className="col" style={{ maxHeight: '50vh', overflow: 'auto', gap: 4 }}>
         {!list.length && <div className="muted">보낼 수 있는 병력이 없습니다.</div>}
         {list.map((o) => (
@@ -1472,6 +1468,77 @@ function SowBox({ game, act }) {
         이간 ({a !== b && a != null && b != null ? fmtGold(sowCost(game, a, b)) : '-'}금 · 1AP · 성공 {Math.round(sowChance(game, pid) * 100)}%)
       </button>
       <small className="muted">{err || '성공하면 두 나라 호감 -35, 절반 확률로 둘의 동맹·불가침이 깨짐. 들키면 두 나라가 나를 미워함. 지력 높은 장수가 있으면 잘 됨.'}</small>
+    </div>
+  );
+}
+
+// 일괄 징병: 모든 지역에서 민심 영향 없는 만큼 뽑아 한 곳으로 보냄 (행동력 2)
+export function DraftModal({ world, game, act, onClose, init = {}, onPickDest }) {
+  const pid = game.playerId;
+  const me = game.nations[pid];
+  const rally = me.rally?.to;
+  const [dest, setDest] = useState(init.dest !== undefined ? init.dest : rally != null && game.regions[rally]?.owner === pid ? rally : null);
+  const plan = bulkDraftPlan(game, pid);
+  const men = plan.reduce((a, x) => a + x.amt, 0), gold = plan.reduce((a, x) => a + x.gold, 0);
+  const dist = useMemo(() => (dest !== null ? ownDistances(game, world, pid, dest) : null), [game, world, pid, dest]);
+  const far = dist ? Math.max(0, ...plan.filter((x) => dist.has(x.rid)).map((x) => dist.get(x.rid))) : 0;
+  const stay = dist ? plan.filter((x) => !dist.has(x.rid)).length : 0;
+  return (
+    <Modal title="🪖 일괄 징병" onClose={onClose}>
+      <div className="col">
+        <div>
+          민심 50 이상인 <b>{plan.length}곳</b>에서 인구의 5%(병영 있으면 8%)씩 — <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {BULK_DRAFT_AP}
+          <div className="muted" style={{ fontSize: 12 }}>민심이 깎이지 않는 만큼만 뽑습니다. 금이 모자라면 많이 뽑는 곳부터.</div>
+        </div>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          <span>보낼 곳</span>
+          <button className={'sm' + (dest === null ? ' primary' : '')} onClick={() => setDest(null)}>각자 제자리</button>
+          {rally != null && game.regions[rally]?.owner === pid && (
+            <button className={'sm' + (dest === rally ? ' primary' : '')} onClick={() => setDest(rally)}>🚩 집결지 {game.regions[rally].name}</button>
+          )}
+          {onPickDest && <button className="sm" onClick={() => onPickDest()}>🗺️ 지도에서 고르기</button>}
+          {dest !== null && dest !== rally && <b>→ {game.regions[dest].name}</b>}
+        </div>
+        {dest !== null && (
+          <small className="muted">
+            내 땅 3칸에 1턴 (가장 먼 곳 {reinforceTurns(far)}턴){stay > 0 && ` · 길이 이어지지 않은 ${stay}곳은 제자리`}
+          </small>
+        )}
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>취소</button>
+          <button
+            className="primary"
+            disabled={!plan.length || me.ap < BULK_DRAFT_AP || me.gold < Math.min(...plan.map((x) => x.gold))}
+            onClick={() => {
+              const res = act((s) => doBulkDraft(s, pid, world, dest));
+              if (res?.ok) onClose();
+            }}
+          >
+            징병
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// 제안·요청한 나라가 어디인지: 그 나라(와 언급된 나라)만 색칠한 작은 지도
+export function WhereMap({ world, game, ids }) {
+  const keep = new Set([game.playerId, ...ids]);
+  const regions = game.regions.map((r) => ({ ...r, owner: keep.has(r.owner) ? r.owner : null, troops: 0 }));
+  return (
+    <div>
+      <div style={{ height: 180, borderRadius: 8, overflow: 'hidden', margin: '6px 0' }}>
+        <MapView world={world} regions={regions} nations={game.nations} compact selected={game.nations[ids[0]]?.capital} />
+      </div>
+      <div className="row" style={{ gap: 10, fontSize: 13 }}>
+        {[...keep].map((id) => (
+          <span key={id}>
+            <span className="chip" style={{ background: game.nations[id].color }} /> {game.nations[id].name}
+            {id === game.playerId && ' (나)'}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
