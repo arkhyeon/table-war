@@ -269,29 +269,25 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
-  // 중원(대평야): 2칸 안에 다른 나라가 가장 많이 몰린 '가운데' 나라들(상위 1/4, 3개국 이상)은 사방이 적인 대신
-  // 인재가 모이고(장수 +2) 병력 +25%, 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%·민심 +1/턴)
-  const around = s.nations.map((n) => {
-    const mine = s.regions.map((r, i) => i).filter((i) => s.regions[i].owner === n.id);
-    const seen = new Set(mine), others = new Set();
-    let front = mine;
-    for (let d = 0; d < 2; d++) {
-      const nxt = [];
-      for (const r of front) for (const x of world.regions[r].neighbors) {
-        if (seen.has(x.id) || s.regions[x.id].sea) continue;
-        seen.add(x.id);
-        nxt.push(x.id);
-        const o = s.regions[x.id].owner;
-        if (o !== null && o !== n.id) others.add(o);
-      }
-      front = nxt;
+  // 중원(대평야): 수도 위치로 '가운데' 나라를 고름 — 사방(4방향 중 3방향 이상)에 다른 나라가 있고,
+  // 다른 수도들까지 거리 합이 가장 작은 나라들(나라 6개당 1곳). 인재가 모이고(장수 +2) 병력 +25%,
+  // 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%·민심 +1/턴, 주인이 바뀌어도 유지)
+  const caps = s.nations.filter((n) => n.capital !== null).map((n) => ({ n, c: world.regions[n.capital] }));
+  const around = caps.map(({ n, c }) => {
+    const quad = new Set();
+    let sum = 0;
+    for (const o of caps) {
+      if (o.n.id === n.id) continue;
+      const dx = o.c.cx - c.cx, dy = o.c.cy - c.cy;
+      sum += Math.hypot(dx, dy);
+      quad.add(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'E' : 'W') : dy > 0 ? 'S' : 'N');
     }
-    return { n, mine, k: others.size };
+    return { n, mine: s.regions.map((r, i) => i).filter((i) => s.regions[i].owner === n.id), k: quad.size, sum };
   });
-  const ks = around.map((a) => a.k).sort((a, b) => b - a);
-  const cut = Math.max(3, ks[Math.max(0, Math.ceil(ks.length / 4) - 1)] || 0);
-  for (const { n, mine, k } of around) {
-    if (k < cut || mine.length < 2) continue;
+  const pickN = Math.max(1, Math.round(caps.length / 6));
+  const chosen = new Set(around.filter((a) => a.k >= 3).sort((a, b) => a.sum - b.sum).slice(0, pickN).map((a) => a.n.id));
+  for (const { n, mine } of around) {
+    if (!chosen.has(n.id) || mine.length < 2) continue;
     n.heartland = true;
     for (const i of mine) {
       const r = s.regions[i];
