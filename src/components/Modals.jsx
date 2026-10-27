@@ -669,7 +669,7 @@ function TurnSummary({ game }) {
   return (
     <div className="turn-sum">
       <span>🗺️ 영토 {b.regions}곳 {d(b.regions - a.regions, (v) => v)}</span>
-      <span>🪖 병력 {fmtTroops(b.troops)} {d(b.troops - a.troops, fmtTroops)}</span>
+      <span>💂 병력 {fmtTroops(b.troops)} {d(b.troops - a.troops, fmtTroops)}</span>
       <span>💰 국고 {fmtGold(b.gold)} {d(b.gold - a.gold, fmtGold)}</span>
       {bt.length > 0 && <span>⚔️ 전투 {bt.length}회 · {won}승 {bt.length - won}패</span>}
       {b.gens !== a.gens && <span>⭐ 장수 {b.gens}명 {d(b.gens - a.gens, (v) => v)}</span>}
@@ -837,7 +837,7 @@ export function HelpModal({ onClose }) {
           <li><b>중원(대평야)</b>: 수도 위치로 고른 가운데 나라(동서남북 4방향 모두에 다른 나라, 바다를 등지지 않은 내륙, 다른 수도들과 가장 가까운 곳, 나라 6개당 1곳)는 장수 +2·병력 +25%로 시작하고, 시작 땅은 🌾대평야(세금 +20%·인구 상한 +30%, 누가 차지해도 유지).</li>
           <li><b>토착 세력</b>: 빈 땅에도 수비병이 있고(4.5천~1만), 15%는 2~3배 강한 토호의 산채입니다.</li>
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
-          <li><b>징병</b>: 상단 🪖징병(또는 지역의 🪖여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
+          <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
           <li><b>장수 충성·성격</b>: 🔥야심가는 충성이 쉽게 떨어지고 🛡️충신은 점점 오릅니다. 충성 40 미만 장수는 지키던 땅을 들고 <b>영웅 봉기</b>로 독립할 수 있으니 장수 창에서 🎁포상하세요(금, 장수마다 6턴에 한 번). 평판·인덕 군주가 충성을 받쳐 줍니다.</li>
           <li><b>군주의 죽음·계승 분쟁</b>: 군주는 늙거나 전사·처형으로 죽을 수 있습니다. 큰 나라(8곳↑)에서 새 군주가 즉위하면 야심가나 충성 낮은 2인자가 왕위를 다투며 나라를 둘로 가를 수 있습니다.</li>
@@ -1161,8 +1161,8 @@ export function GodModal({ game, onGift, onClose }) {
         <div className="actions">
           <button onClick={() => onGift(nid, 'gold', 100 * G)}>💰 금 +{fmtGold(100 * G)}</button>
           <button onClick={() => onGift(nid, 'gold', 500 * G)}>💰 금 +{fmtGold(500 * G)}</button>
-          <button onClick={() => onGift(nid, 'troops', 10000)}>🪖 수도 병력 +1만</button>
-          <button onClick={() => onGift(nid, 'troops', 50000)}>🪖 수도 병력 +5만</button>
+          <button onClick={() => onGift(nid, 'troops', 10000)}>💂 수도 병력 +1만</button>
+          <button onClick={() => onGift(nid, 'troops', 50000)}>💂 수도 병력 +5만</button>
           <button onClick={() => onGift(nid, 'general')}>⭐ 장수 1명 출현</button>
         </div>
         <div className="muted" style={{ fontSize: 12 }}>판을 지켜보다 원하는 나라를 밀어줄 수 있습니다. 준 내역은 기록에 남습니다.</div>
@@ -1197,7 +1197,7 @@ export function LoyaltyModal({ world, game, onFocus, onClose }) {
     <Modal title="📋 지역 목록" onClose={onClose} wide>
       <div className="row" style={{ marginBottom: 8, gap: 6 }}>
         <span>정렬</span>
-        {[['troops', '🪖 병력'], ['pop', '👥 인구']].map(([k, l]) => (
+        {[['troops', '💂 병력'], ['pop', '👥 인구']].map(([k, l]) => (
           <button key={k} className={'sm' + (sort === k ? ' primary' : '')} onClick={() => setSort(k)}>{l}</button>
         ))}
         <small className="muted">이름을 누르면 그 지역으로 이동</small>
@@ -1208,7 +1208,7 @@ export function LoyaltyModal({ world, game, onFocus, onClose }) {
             <a style={{ flex: 1, cursor: 'pointer' }} onClick={() => onFocus(x.rid)}>
               {x.r.name} <small className="muted">{x.inner ? '내륙' : '국경'}{game.nations[pid].capital === x.rid ? ' · 수도' : ''}</small>
             </a>
-            <span style={{ width: 70, textAlign: 'right' }}>🪖 {fmtTroops(x.r.troops)}</span>
+            <span style={{ width: 70, textAlign: 'right' }}>💂 {fmtTroops(x.r.troops)}</span>
             <span className="muted" style={{ width: 54, textAlign: 'right' }}>👥 {Math.round(x.r.pop)}천</span>
           </div>
         ))}
@@ -1392,7 +1392,7 @@ export function DraftModal({ world, game, act, onClose, init = {}, onPickDest })
   const stay = dist ? plan.filter((x) => !dist.has(x.rid)).length : 0;
   const err = draftCheck(game, pid);
   return (
-    <Modal title="🪖 징병" onClose={onClose}>
+    <Modal title="💂 징병" onClose={onClose}>
       <div className="col">
         <div>
           내 땅 <b>{plan.length}곳</b>에서 인구의 4%(병영 8%)씩 — <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {DRAFT_AP}

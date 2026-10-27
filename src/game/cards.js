@@ -94,7 +94,7 @@ const GENERIC = [
     id: 'doctor',
     when: (s, w, nid) => s.generals[s.nations[nid].ruler]?.status === 'active' && !(s.nations[nid].healthy > s.turn),
     make: (s, w, nid) => ({
-      icon: '🩺', title: '이름난 의원', story: `떠돌던 명의가 ${s.generals[s.nations[nid].ruler].name}의 건강을 돌보겠다고 합니다.`,
+      icon: '💊', title: '이름난 의원', story: `떠돌던 명의가 ${s.generals[s.nations[nid].ruler].name}의 건강을 돌보겠다고 합니다.`,
       options: [
         { label: '모신다', desc: `금 -${fmtGold(25 * G)}, 40턴 동안 군주가 병으로 죽지 않음`, ai: 1, run: () => { s.nations[nid].gold = Math.max(0, s.nations[nid].gold - 25 * G); s.nations[nid].healthy = s.turn + 40; return '군주가 강건해졌습니다.'; } },
         { label: '돌려보낸다', desc: '아무 일 없음', ai: 1, run: () => '의원이 떠났습니다.' },

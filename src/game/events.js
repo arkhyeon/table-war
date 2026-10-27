@@ -72,7 +72,7 @@ const EVENTS = [
       const r = s.regions[c];
       ruin(s, [c], 0.1, 0.05);
       if (r.buildings.walls) r.buildings.walls = Math.max(1, r.buildings.walls - 2);
-      announce(s, { icon: '🫨', title: '지진', story: `${r.name}의 땅이 크게 흔들렸습니다.`, effect: '인구 -10%, 성벽 내구 -2', nations: [r.owner] });
+      announce(s, { icon: '🌋', title: '지진', story: `${r.name}의 땅이 크게 흔들렸습니다.`, effect: '인구 -10%, 성벽 내구 -2', nations: [r.owner] });
     },
   },
   {

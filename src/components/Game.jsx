@@ -345,7 +345,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           </div>
         )}
         {!spect && me.alive && (
-          <button onClick={() => setModal({ type: 'draft' })} title="모든 지역에서 한꺼번에 징병해 한 곳으로 보냄">🪖<span className="lbl"> 징병</span></button>
+          <button onClick={() => setModal({ type: 'draft' })} title="모든 지역에서 한꺼번에 징병해 한 곳으로 보냄">💂<span className="lbl"> 징병</span></button>
         )}
         <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
         <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>

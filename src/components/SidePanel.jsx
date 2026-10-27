@@ -123,7 +123,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             💰 <b>{fmtGold(me.gold)}</b> <small style={{ color: inc.net < 0 ? 'var(--danger)' : 'var(--muted)' }}>({inc.net >= 0 ? '+' : ''}{fmtGold(inc.net)}/턴)</small>
           </span>
           <span title="영토">🗺️ {myRegions.length}곳</span>
-          <span title="총 병력">🪖 {fmtTroops(inc.troops)}</span>
+          <span title="총 병력">💂 {fmtTroops(inc.troops)}</span>
           {cut > 0 && <span style={{ color: 'var(--danger)' }}>✂ 보급 끊김 {cut}</span>}
           {!spectator && (
             <label title="집결지가 없을 때, 후방 병력이 매 턴 국경으로 자동 행군 (행동력 없음). 어느 나라 쪽으로 보낼지 고를 수 있습니다." style={{ whiteSpace: 'nowrap' }}>
@@ -159,7 +159,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               🏯 {game.generals[f.ruler]?.name} 군단 {nationRegions(game, f.id).length}곳 <FiefOrder world={world} game={game} fid={f.id} act={act} />
             </span>
           ))}
-          {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
+          {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>💂 증원 이동 중 {incoming.length}</span>}
           {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
         </div>
         {!spectator && nextGold < 0 && (
@@ -273,7 +273,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               )}
             </span>
             <span title="병사 (이번 턴 이동 가능)">
-              🪖 <b>{showT ? fmtTroops(r.troops) : '?'}</b>
+              💂 <b>{showT ? fmtTroops(r.troops) : '?'}</b>
               {mine && (r.moved || 0) > 0 && <small className="muted"> (이동 가능 {fmtTroops(movable(game, selected))})</small>}
             </span>
             <span title={TERRAIN[wr.terrain].desc}>⛰️ {TERRAIN[wr.terrain].name}</span>
@@ -329,7 +329,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   🚩 이동·공격 (M)
                 </button>
                 <button onClick={openConscript} disabled={!!draftCheck(game, pid)} title={draftCheck(game, pid) || `모든 내 땅에서 징병해 이곳으로 보냄 (행동력 ${DRAFT_AP})`}>
-                  🪖 여기로 징병
+                  💂 여기로 징병
                 </button>
                 <button
                   className={me.rally?.to === selected ? 'primary' : ''}

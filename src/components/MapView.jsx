@@ -36,39 +36,101 @@ function riverCurve(pts, amp, seed) {
 export const armyTier = (t) => (t <= 0 ? 0 : t < 3000 ? 1 : t < 10000 ? 2 : t < 30000 ? 3 : t < 80000 ? 4 : 5);
 
 // 병사 한 명 (발끝이 원점, 위로 그려짐)
-function Soldier({ u, color, x = 0, delay = 0 }) {
+// 병사 그림: 투구·갑옷·방패·창을 갖춘 보병 (나라 색 망토·방패·투구 장식)
+function Soldier({ u, color, x = 0, delay = 0, flip = false }) {
+  const k = u * 0.08;
   return (
-    <g transform={`translate(${x},0)`}>
+    <g transform={`translate(${x},0)${flip ? ' scale(-1,1)' : ''}`}>
+      <ellipse cy={u * 0.05} rx={u * 0.55} ry={u * 0.14} fill="#000" opacity={0.25} />
       <g className="soldier" style={{ animationDelay: `${delay}s` }}>
-        <line x1={u * 0.62} y1={u * 0.1} x2={u * 0.62} y2={-u * 2.35} stroke="#5a4630" strokeWidth={u * 0.13} />
-        <path d={`M${u * 0.47} ${-u * 2.2}L${u * 0.62} ${-u * 2.6}L${u * 0.77} ${-u * 2.2}Z`} fill="#cfd3d6" stroke="#222" strokeWidth={u * 0.05} />
-        <path d={`M${-u * 0.42} ${-u * 1.2}L${u * 0.42} ${-u * 1.2}L${u * 0.55} 0L${-u * 0.55} 0Z`} fill={color} stroke="#fffdf6" strokeWidth={u * 0.3} paintOrder="stroke" />
-        <path d={`M${-u * 0.42} ${-u * 1.2}L${u * 0.42} ${-u * 1.2}L${u * 0.55} 0L${-u * 0.55} 0Z`} fill="none" stroke="#1a1a1a" strokeWidth={u * 0.08} />
-        <circle cy={-u * 1.55} r={u * 0.33} fill="#f1d3a5" stroke="#1a1a1a" strokeWidth={u * 0.08} />
-        <path d={`M${-u * 0.36} ${-u * 1.6}A${u * 0.36} ${u * 0.36} 0 0 1 ${u * 0.36} ${-u * 1.6}Z`} fill="#555" />
+        {/* 창 */}
+        <line x1={u * 0.6} y1={u * 0.05} x2={u * 0.6} y2={-u * 2.75} stroke="#6b4f2e" strokeWidth={u * 0.11} strokeLinecap="round" />
+        <path d={`M${u * 0.6} ${-u * 3.15}C${u * 0.75} ${-u * 2.95} ${u * 0.73} ${-u * 2.8} ${u * 0.6} ${-u * 2.68}C${u * 0.47} ${-u * 2.8} ${u * 0.45} ${-u * 2.95} ${u * 0.6} ${-u * 3.15}Z`} fill="#e6e9ec" stroke="#2a2a2a" strokeWidth={k * 0.6} />
+        <path d={`M${u * 0.5} ${-u * 2.66}L${u * 0.7} ${-u * 2.66}`} stroke={color} strokeWidth={u * 0.12} />
+        {/* 망토 */}
+        <path d={`M${-u * 0.38} ${-u * 1.45}Q${-u * 0.75} ${-u * 0.6} ${-u * 0.55} ${-u * 0.12}L${u * 0.15} ${-u * 0.3}L${u * 0.1} ${-u * 1.45}Z`} fill={color} stroke="#1a1a1a" strokeWidth={k * 0.6} />
+        <path d={`M${-u * 0.38} ${-u * 1.45}Q${-u * 0.75} ${-u * 0.6} ${-u * 0.55} ${-u * 0.12}L${u * 0.15} ${-u * 0.3}L${u * 0.1} ${-u * 1.45}Z`} fill="#000" opacity={0.25} />
+        {/* 다리·신 */}
+        <rect x={-u * 0.27} y={-u * 0.55} width={u * 0.2} height={u * 0.55} rx={u * 0.06} fill="#3d3328" />
+        <rect x={u * 0.07} y={-u * 0.55} width={u * 0.2} height={u * 0.55} rx={u * 0.06} fill="#3d3328" />
+        <rect x={-u * 0.31} y={-u * 0.08} width={u * 0.27} height={u * 0.12} rx={u * 0.05} fill="#1f1a14" />
+        <rect x={u * 0.05} y={-u * 0.08} width={u * 0.27} height={u * 0.12} rx={u * 0.05} fill="#1f1a14" />
+        {/* 갑옷 (비늘 갑옷 줄무늬) */}
+        <path d={`M${-u * 0.36} ${-u * 1.5}L${u * 0.36} ${-u * 1.5}L${u * 0.42} ${-u * 0.5}L${-u * 0.42} ${-u * 0.5}Z`} fill="#8a8f93" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${-u * 0.38} ${-u * 1.17}H${u * 0.38}M${-u * 0.4} ${-u * 0.86}H${u * 0.4}`} stroke="#5d6266" strokeWidth={k * 0.7} />
+        <path d={`M${-u * 0.36} ${-u * 1.5}L${u * 0.36} ${-u * 1.5}L${u * 0.38} ${-u * 1.3}L${-u * 0.38} ${-u * 1.3}Z`} fill={color} />
+        <rect x={-u * 0.43} y={-u * 0.62} width={u * 0.86} height={u * 0.13} fill="#5a3d22" />
+        {/* 창 쥔 손 */}
+        <circle cx={u * 0.6} cy={-u * 1.05} r={u * 0.11} fill="#f0cfa0" stroke="#1a1a1a" strokeWidth={k * 0.6} />
+        {/* 머리·투구·장식 */}
+        <circle cy={-u * 1.78} r={u * 0.3} fill="#f0cfa0" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${-u * 0.36} ${-u * 1.8}Q${-u * 0.36} ${-u * 2.22} 0 ${-u * 2.24}Q${u * 0.36} ${-u * 2.22} ${u * 0.36} ${-u * 1.8}Z`} fill="#b9bec2" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${-u * 0.42} ${-u * 1.8}H${u * 0.42}`} stroke="#6d7276" strokeWidth={u * 0.09} strokeLinecap="round" />
+        <path d={`M0 ${-u * 2.22}Q${u * 0.05} ${-u * 2.6} ${-u * 0.25} ${-u * 2.62}Q${-u * 0.05} ${-u * 2.42} 0 ${-u * 2.22}Z`} fill={color} stroke="#1a1a1a" strokeWidth={k * 0.5} />
+        {/* 방패 */}
+        <path d={`M${-u * 0.62} ${-u * 1.35}Q${-u * 0.22} ${-u * 1.42} ${-u * 0.12} ${-u * 1.3}L${-u * 0.15} ${-u * 0.6}Q${-u * 0.37} ${-u * 0.28} ${-u * 0.62} ${-u * 0.55}Z`} fill={color} stroke="#fffdf6" strokeWidth={u * 0.16} paintOrder="stroke" />
+        <path d={`M${-u * 0.62} ${-u * 1.35}Q${-u * 0.22} ${-u * 1.42} ${-u * 0.12} ${-u * 1.3}L${-u * 0.15} ${-u * 0.6}Q${-u * 0.37} ${-u * 0.28} ${-u * 0.62} ${-u * 0.55}Z`} fill="none" stroke="#1a1a1a" strokeWidth={k} />
+        <circle cx={-u * 0.38} cy={-u * 0.92} r={u * 0.1} fill="#e8c766" stroke="#1a1a1a" strokeWidth={k * 0.5} />
       </g>
     </g>
   );
 }
 
-// 병력 규모 그림: 1~4명, 5단계는 군기까지
+// 기병: 말 탄 장수 (큰 군세에만)
+function Rider({ u, color, x = 0, delay = 0 }) {
+  const k = u * 0.08;
+  return (
+    <g transform={`translate(${x},0)`}>
+      <ellipse cy={u * 0.05} rx={u * 1.05} ry={u * 0.16} fill="#000" opacity={0.25} />
+      <g className="soldier" style={{ animationDelay: `${delay}s` }}>
+        {/* 말 다리 */}
+        {[-0.7, -0.45, 0.35, 0.6].map((lx, i) => (
+          <rect key={i} x={u * lx} y={-u * 0.75} width={u * 0.14} height={u * 0.78} rx={u * 0.05} fill={i % 2 ? '#5b3a22' : '#6e4729'} stroke="#1a1a1a" strokeWidth={k * 0.5} />
+        ))}
+        {/* 말 몸통·목·머리 */}
+        <ellipse cy={-u * 0.95} rx={u * 0.9} ry={u * 0.38} fill="#7a4e2c" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${u * 0.6} ${-u * 1.1}L${u * 0.95} ${-u * 1.75}L${u * 1.3} ${-u * 1.55}L${u * 1.05} ${-u * 1.25}L${u * 0.85} ${-u * 0.85}Z`} fill="#7a4e2c" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${u * 0.62} ${-u * 1.15}L${u * 0.9} ${-u * 1.72}`} stroke="#2a1a10" strokeWidth={u * 0.12} />
+        <path d={`M${-u * 0.88} ${-u * 1.05}Q${-u * 1.2} ${-u * 0.8} ${-u * 1.05} ${-u * 0.45}`} fill="none" stroke="#2a1a10" strokeWidth={u * 0.14} strokeLinecap="round" />
+        {/* 안장 천 */}
+        <path d={`M${-u * 0.4} ${-u * 1.3}H${u * 0.35}L${u * 0.3} ${-u * 0.75}H${-u * 0.35}Z`} fill={color} stroke="#1a1a1a" strokeWidth={k * 0.6} />
+        {/* 기수 */}
+        <path d={`M${-u * 0.25} ${-u * 2.15}H${u * 0.25}L${u * 0.3} ${-u * 1.3}H${-u * 0.3}Z`} fill="#8a8f93" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${-u * 0.25} ${-u * 2.15}H${u * 0.25}L${u * 0.27} ${-u * 1.95}H${-u * 0.27}Z`} fill={color} />
+        <circle cy={-u * 2.4} r={u * 0.25} fill="#f0cfa0" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M${-u * 0.3} ${-u * 2.42}Q${-u * 0.3} ${-u * 2.8} 0 ${-u * 2.82}Q${u * 0.3} ${-u * 2.8} ${u * 0.3} ${-u * 2.42}Z`} fill="#c9a43a" stroke="#1a1a1a" strokeWidth={k} />
+        <path d={`M0 ${-u * 2.8}Q${u * 0.1} ${-u * 3.2} ${-u * 0.3} ${-u * 3.2}`} fill="none" stroke={color} strokeWidth={u * 0.14} strokeLinecap="round" />
+        {/* 창 */}
+        <line x1={-u * 0.2} y1={-u * 1.4} x2={u * 1.5} y2={-u * 2.9} stroke="#6b4f2e" strokeWidth={u * 0.1} strokeLinecap="round" />
+        <path d={`M${u * 1.5} ${-u * 2.9}L${u * 1.78} ${-u * 3.18}L${u * 1.42} ${-u * 3.05}Z`} fill="#e6e9ec" stroke="#2a2a2a" strokeWidth={k * 0.5} />
+      </g>
+    </g>
+  );
+}
+
+// 병력 규모 그림: 1~3 보병, 4단계는 기병 합류, 5단계는 큰 군기까지
 export function Army({ tier, color, u, y = 0 }) {
   if (!tier) return null;
-  const n = Math.min(4, tier);
-  const gap = u * 1.05;
-  const x0 = -((n - 1) * gap) / 2;
+  const foot = Math.min(3, tier);
+  const gap = u * 0.95;
+  const rider = tier >= 4;
+  const w = (foot - 1) * gap + (rider ? u * 2.1 : 0);
+  const x0 = -w / 2;
   return (
     <g transform={`translate(0,${y})`} className="army">
-      <ellipse cy={-u * 0.05} rx={((n - 1) * gap) / 2 + u * (tier >= 5 ? 1.9 : 0.95)} cx={tier >= 5 ? -gap * 0.45 : 0} ry={u * 0.42} fill="#fffdf6" opacity={0.9} stroke={color} strokeWidth={u * 0.12} />
+      <ellipse cy={u * 0.02} rx={w / 2 + u * 0.95} ry={u * 0.38} fill="#fffdf6" opacity={0.85} stroke={color} strokeWidth={u * 0.12} />
       {tier >= 5 && (
-        <g transform={`translate(${x0 - gap * 0.9},0)`}>
-          <line y1={u * 0.1} y2={-u * 3.1} stroke="#3b2b1a" strokeWidth={u * 0.15} />
-          <path className="banner" d={`M0 ${-u * 3.1}L${u * 1.3} ${-u * 2.8}L0 ${-u * 2.3}Z`} fill={color} stroke="#1a1a1a" strokeWidth={u * 0.07} />
+        <g transform={`translate(${x0 - u * 0.75},0)`}>
+          <line y1={u * 0.05} y2={-u * 3.9} stroke="#3b2b1a" strokeWidth={u * 0.16} strokeLinecap="round" />
+          <circle cy={-u * 3.95} r={u * 0.12} fill="#e8c766" />
+          <path className="banner" d={`M${u * 0.08} ${-u * 3.8}Q${u * 0.9} ${-u * 3.95} ${u * 1.7} ${-u * 3.7}L${u * 1.45} ${-u * 3.25}L${u * 1.7} ${-u * 2.75}Q${u * 0.9} ${-u * 2.95} ${u * 0.08} ${-u * 2.8}Z`} fill={color} stroke="#1a1a1a" strokeWidth={u * 0.07} />
+          <path d={`M${u * 0.08} ${-u * 3.8}Q${u * 0.9} ${-u * 3.95} ${u * 1.7} ${-u * 3.7}`} fill="none" stroke="#e8c766" strokeWidth={u * 0.08} />
         </g>
       )}
-      {Array.from({ length: n }, (_, i) => (
+      {Array.from({ length: foot }, (_, i) => (
         <Soldier key={i} u={u} color={color} x={x0 + i * gap} delay={(i * 0.37) % 1.2} />
       ))}
+      {rider && <Rider u={u} color={color} x={x0 + (foot - 1) * gap + u * 1.35} delay={0.5} />}
     </g>
   );
 }
@@ -545,7 +607,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const ib = s * 0.95; // 아이콘 배지 크기
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})${r.mk < 1 ? ` scale(${r.mk.toFixed(2)})` : ''}`}>
-                  {army && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.5} y={-s * 0.78} />}
+                  {army && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.72} y={-s * 0.85} />}
                   <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill={known ? '#fffdf6' : '#e9e4d6'} stroke={col} strokeWidth={s * 0.22} />
                   <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill={known ? '#1d1d1d' : '#55524a'}>
                     {t}

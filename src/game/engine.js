@@ -892,7 +892,7 @@ export function arriveReinforcements(s) {
     const at = s.regions[path[k]].owner === o.n ? path[k] : null;
     if (at !== null) {
       s.regions[at].troops += o.count;
-      log(s, blocked ? `🪖 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 길이 막혀 ${s.regions[at].name}에 멈췄습니다.` : `🪖 증원 ${fmtTroops(o.count)}이(가) ${s.regions[at].name}에 도착했습니다.`, [o.n], 'info');
+      log(s, blocked ? `💂 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 길이 막혀 ${s.regions[at].name}에 멈췄습니다.` : `💂 증원 ${fmtTroops(o.count)}이(가) ${s.regions[at].name}에 도착했습니다.`, [o.n], 'info');
     } else log(s, `💨 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 갈 곳을 잃고 흩어졌습니다.`, [o.n], 'warn');
   }
   s.reinforce = left;
