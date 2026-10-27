@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -50,7 +50,8 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const pid = game.playerId;
   const fr = game.regions[from], tr = game.regions[to];
   const edge = edgeBetween(world, from, to) || { type: 'march' };
-  const myGens = gensIn(game, from, pid);
+  // 부대 소속 장수는 부대 말로 움직임
+  const myGens = gensIn(game, from, pid).filter((g) => !g.army);
   const aid = tr.owner !== null && tr.owner !== pid && getRel(game, pid, tr.owner).type === 'alliance';
   const [sel, setSel] = useState(() => (aid ? [] : myGens.map((g) => g.id)));
   // 공격이면 군단 지휘 한도까지만
@@ -852,6 +853,7 @@ export function HelpModal({ onClose }) {
           <li><b>중원(대평야)</b>: 수도 위치로 고른 가운데 나라(동서남북 4방향 모두에 다른 나라, 바다를 등지지 않은 내륙, 다른 수도들과 가장 가까운 곳, 나라 6개당 1곳)는 장수 +2·병력 +25%로 시작하고, 시작 땅은 🌾대평야(세금 +20%·인구 상한 +30%, 누가 차지해도 유지).</li>
           <li><b>토착 세력</b>: 빈 땅에도 수비병이 있고(4.5천~1만), 15%는 2~3배 강한 토호의 산채입니다.</li>
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
+          <li><b>부대 (삼국지14식)</b>: 지역을 눌러 ⚔️출진 → 장수와 병력을 고르면 지도에 부대 말이 생깁니다. 부대 말을 누르고 목적지를 누르면 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다(불리하면 국경에서 대기, ⚔️무리해서 공격 가능). 지역 패널에서 ➕보충·⏹멈춤·🏠귀환.</li>
           <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(4천+통솔×300, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
           <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
@@ -1503,6 +1505,47 @@ export function LevelChoiceModal({ game, act }) {
             <div style={{ fontSize: 12, opacity: 0.85 }}>{traitDesc(o.t, o.lv)}</div>
           </button>
         ))}
+      </div>
+    </Modal>
+  );
+}
+
+// 출진: 장수와 병력을 골라 부대를 만듦 (지도 위 말이 되어 클릭으로 움직임)
+export function FormArmyModal({ game, rid, act, onClose, onDone }) {
+  const pid = game.playerId;
+  const gens = freeGens(game, pid, rid);
+  const [sel, setSel] = useState(gens.length ? [gens.slice().sort((a, b) => b.lead - a.lead)[0].id] : []);
+  const cap = commandCap(game, sel);
+  const room = Math.max(0, garrisonOf(game, rid) - 100);
+  const max = Math.max(0, Math.min(cap, room));
+  const [n0, setN] = useState(max);
+  const n = Math.min(n0, max);
+  return (
+    <Modal title={`⚔️ ${game.regions[rid].name}에서 출진`} onClose={onClose}>
+      <div className="col">
+        <b>이끌 장수 <small className="muted">(통솔이 높을수록 많이 이끔, 함께 가는 장수는 절반씩 더함)</small></b>
+        <div className="gen-picks">
+          {gens.map((g) => {
+            const on = sel.includes(g.id);
+            return (
+              <button key={g.id} className={'gen-pick' + (on ? ' on' : '')} onClick={() => setSel(on ? sel.filter((x) => x !== g.id) : [...sel, g.id])}>
+                <span>{on ? '✅' : '⬜'} <b>{g.name}</b></span>
+                <small>무{g.war} 통{g.lead} 지{g.intel} <TraitTags g={g} /></small>
+              </button>
+            );
+          })}
+        </div>
+        <label>
+          병력 <b>{n.toLocaleString('ko-KR')}</b> / 지휘 한도 {cap.toLocaleString('ko-KR')} · 수비대 {garrisonOf(game, rid).toLocaleString('ko-KR')}
+          <Slider min={0} max={Math.max(500, max)} step={100} value={n} onChange={setN} style={{ width: '100%' }} />
+        </label>
+        <small className="muted">출진하면 지도에 부대가 생깁니다. 부대를 누르고 목적지를 누르면 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 부대 병력도 그 지역을 함께 지킵니다.</small>
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>취소</button>
+          <button className="primary" disabled={!sel.length || n < 500} onClick={() => { const res = act((s) => formArmy(s, pid, rid, sel, n)); if (res?.ok) onDone(res.army); }}>
+            출진
+          </button>
+        </div>
       </div>
     </Modal>
   );

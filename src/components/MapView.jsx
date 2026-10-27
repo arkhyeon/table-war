@@ -219,7 +219,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally, threats, landmarks }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally, threats, landmarks, armies, selArmy, onArmy }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -699,6 +699,34 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 );
               })}
         </g>
+        {/* 부대 말: 누르면 고르고, 지도에서 목적지를 누르면 진군 */}
+        {!compact && (armies || []).length > 0 && (
+          <g>
+            {(armies || []).map((a, k) => {
+              const r = world.regions[a.rid];
+              const same = armies.filter((b) => b.rid === a.rid);
+              const idx = same.indexOf(a);
+              const x = r.cx + s * 1.4 + idx * s * 2.6, y = r.cy - s * 1.6;
+              const on = selArmy === a.id;
+              const tgt = a.target != null ? world.regions[a.target] : null;
+              return (
+                <g key={a.id}>
+                  {tgt && <path d={`M${x} ${y}L${tgt.cx} ${tgt.cy}`} stroke={a.color} strokeWidth={s * 0.18} strokeDasharray={`${s * 0.3} ${s * 0.3}`} opacity={0.75} pointerEvents="none" />}
+                  <g transform={`translate(${x},${y})`} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onArmy?.(a.id); }}>
+                    <circle r={s * 1.35} fill={on ? '#ffe066' : '#fffdf6'} stroke={on ? '#ff9a3c' : a.color} strokeWidth={s * (on ? 0.35 : 0.22)} opacity={0.95} />
+                    <g transform={`translate(${-s * 0.35},${s * 0.75})`}>
+                      <Rider u={s * 0.5} color={a.color} />
+                    </g>
+                    <rect x={-s * 1.6} y={s * 1.15} width={s * 3.2} height={s * 1.15} rx={s * 0.5} fill={a.color} stroke="#1a1a1a" strokeWidth={s * 0.08} />
+                    <text y={s * 1.98} fontSize={s * 0.72} textAnchor="middle" fill="#fff" fontWeight="800" stroke="#1a1a1a" strokeWidth={s * 0.12} paintOrder="stroke">
+                      {a.ch.slice(0, 3)} {fmt(a.troops)}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
+          </g>
+        )}
       </svg>
       <div className="map-ctrl">
         <span className="zoom-lv" title="전체 지도 대비 확대 배율">×{(world.W / vb[2]).toFixed(1)}</span>

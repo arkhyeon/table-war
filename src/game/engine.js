@@ -799,8 +799,66 @@ export function autoMarch(s, world, nid) {
   return sent;
 }
 
-// 군단 목표 행군: 장수에게 먼 목표를 정해 두면 매 턴 내 땅으로 3칸씩 다가가고, 맞닿으면 공격
-// 경로: 내 땅(육지·강)만 지나 목표(또는 목표와 맞닿은 내 땅)까지
+// ───────── 부대 (삼국지14식): 지역에서 장수+병력으로 출진 → 지도 위 부대를 눌러 목적지를 찍으면 매 턴 진군 ─────────
+// 부대 병력은 그 지역 병력 안에 포함(수비에도 함께 싸움), 지역 병력 − 부대 병력 = 수비대
+export const armiesIn = (s, rid) => Object.values(s.armies || {}).filter((a) => a.rid === rid);
+// 이번 턴 출발한 부대(계획 있음)의 병력은 이미 지역에서 빠져 있음
+const departed = (s, a) => a.gids.some((id) => s.generals[id]?.order);
+export const garrisonOf = (s, rid) => s.regions[rid].troops - armiesIn(s, rid).filter((a) => !departed(s, a)).reduce((t, a) => t + a.troops, 0);
+export const freeGens = (s, nid, rid) => gensIn(s, rid, nid).filter((g) => !g.army);
+export function formArmy(s, nid, rid, gids, troops) {
+  const r = s.regions[rid];
+  if (r.owner !== nid || r.sea) return fail('내 지역에서만 출진할 수 있습니다.');
+  const gens = gids.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === rid && !g.army && !g.order);
+  if (!gens.length) return fail('부대를 이끌 장수를 고르세요.');
+  troops = Math.floor(troops / 100) * 100;
+  const cap = commandCap(s, gens.map((g) => g.id));
+  if (troops < 500) return fail('병력은 500명 이상이어야 합니다.');
+  if (troops > cap) return fail(`지휘 한도 ${fmtTroops(cap)}를 넘습니다.`);
+  if (troops > garrisonOf(s, rid) - 100) return fail('수비대가 모자랍니다 (100명은 남겨야 함).');
+  s.armySeq = (s.armySeq || 0) + 1;
+  const id = 'a' + s.armySeq;
+  (s.armies = s.armies || {})[id] = { id, n: nid, gids: gens.map((g) => g.id), rid, troops, target: null };
+  for (const g of gens) g.army = id;
+  return { ok: true, msg: `⚔️ ${gens[0].name} 부대 ${fmtTroops(troops)}이(가) ${r.name}에서 출진했습니다.`, army: id };
+}
+export function disbandArmy(s, nid, aid) {
+  const a = s.armies?.[aid];
+  if (!a || a.n !== nid) return fail('내 부대가 아닙니다.');
+  const o = (s.orders || []).find((x) => x.opts?.army === aid);
+  if (o) cancelOrder(s, o.id);
+  for (const id of a.gids) if (s.generals[id]) delete s.generals[id].army;
+  delete s.armies[aid];
+  return { ok: true, msg: `부대가 ${s.regions[a.rid].name}의 수비대로 돌아갔습니다.` };
+}
+export function refillArmy(s, nid, aid) {
+  const a = s.armies?.[aid];
+  if (!a || a.n !== nid) return fail('내 부대가 아닙니다.');
+  if (departed(s, a)) return fail('이번 턴에 출발한 부대는 보충할 수 없습니다.');
+  const add = Math.floor(Math.min(commandCap(s, a.gids) - a.troops, garrisonOf(s, a.rid) - 100) / 100) * 100;
+  if (add < 100) return fail('보충할 수비대가 없거나 이미 지휘 한도입니다.');
+  a.troops += add;
+  return { ok: true, msg: `부대 병력 +${fmtTroops(add)} (수비대에서 보충)` };
+}
+// 부대 정리: 장수가 모두 사라졌거나 나라를 잃은 부대는 해산, 남의 땅에 남은 부대는 수도로, 병력은 지역 병력을 넘지 않게
+export function syncArmies(s) {
+  for (const a of Object.values(s.armies || {})) {
+    a.gids = a.gids.filter((id) => { const g = s.generals[id]; return g && g.status === 'active' && g.nation === a.n && g.army === a.id; });
+    const n = s.nations[a.n];
+    if (!n?.alive || !a.gids.length) { for (const id of a.gids) delete s.generals[id].army; delete s.armies[a.id]; continue; }
+    if (s.regions[a.rid].owner !== a.n) { if (n.capital === null) { for (const id of a.gids) delete s.generals[id].army; delete s.armies[a.id]; continue; } a.rid = n.capital; }
+    for (const id of a.gids) if (!s.generals[id].order) s.generals[id].region = a.rid;
+  }
+  for (const g of Object.values(s.generals)) if (g.army && !s.armies?.[g.army]?.gids.includes(g.id)) delete g.army;
+  const by = {};
+  for (const a of Object.values(s.armies || {})) (by[a.rid] = by[a.rid] || []).push(a);
+  for (const [rid, list] of Object.entries(by)) {
+    const tot = list.reduce((t, a) => t + a.troops, 0), have = s.regions[rid].troops;
+    if (tot > have) for (const a of list) a.troops = Math.floor((a.troops * have) / tot / 100) * 100;
+    for (const a of list) if (a.troops < 100) disbandArmy(s, a.n, a.id);
+  }
+}
+// 목적지까지 경로: 내 땅(육지·강)만 지나 목표까지
 function marchPath(s, world, nid, from, target) {
   const prev = new Map([[from, null]]);
   const q = [from];
@@ -821,28 +879,56 @@ function marchPath(s, world, nid, from, target) {
   while (path[0] !== from) path.unshift(prev.get(path[0]));
   return path;
 }
+// 부대 하나의 이번 턴 행군: 내 땅으로 3칸까지, 바로 앞이 남의 땅이면 공격 (공격은 행동력 듦)
+export function planArmy(s, world, a) {
+  const nid = a.n;
+  if (a.target === null || a.target === undefined) return null;
+  if (a.gids.some((id) => s.generals[id]?.order)) return null;
+  if (a.rid === a.target) { a.target = null; return `🚩 ${s.generals[a.gids[0]].name} 부대가 목적지 ${s.regions[a.rid].name}에 닿았습니다.`; }
+  const path = marchPath(s, world, nid, a.rid, a.target);
+  if (!path) { a.target = null; return `⚠️ ${s.generals[a.gids[0]].name} 부대: 목적지까지 갈 길이 없습니다 (내 땅으로 이어진 곳까지만 진군).`; }
+  const count = Math.min(a.troops, movable(s, a.rid), s.regions[a.rid].troops - 1);
+  if (count < 100) return null;
+  let k = 0;
+  while (k + 1 < path.length && k < MARCH_HOPS && s.regions[path[k + 1]].owner === nid) k++;
+  const name = s.generals[a.gids[0]].name;
+  const to = k > 0 ? path[k] : path[1];
+  // 자동 공격은 이길 만할 때만 (불리하면 국경에서 대기 — 직접 이동 창에서는 무리해서 칠 수 있음)
+  if (k === 0 && !a.force) {
+    const est = estimateBattle(s, world, nid, a.rid, to, count, a.gids, (s.regions[to].buildings?.walls || 0) > 0 ? { mode: 'siege' } : {});
+    if (est.winChance < 0.45) return `⏸️ ${name} 부대: ${s.regions[to].name}의 적이 강해 국경에서 대기합니다 (승산 ${Math.round(est.winChance * 100)}%). 보충하거나 직접 공격하세요.`;
+  }
+  const res = planMove(s, world, nid, a.rid, to, count, a.gids, k > 0 ? { auto: true, army: a.id } : { army: a.id });
+  if (k === 0) delete a.force;
+  if (!res.ok) return `⏸️ ${name} 부대 대기: ${res.msg}`;
+  return k > 0 ? `🚩 ${name} 부대가 ${s.regions[to].name}(으)로 행군합니다.` : `⚔️ ${name} 부대가 ${s.regions[to].name}을(를) 공격합니다.`;
+}
+// 승산이 낮아도 이번 턴 바로 공격
+export function forceArmy(s, world, nid, aid) {
+  const a = s.armies?.[aid];
+  if (!a || a.n !== nid || a.target == null) return fail('목적지가 있는 내 부대가 아닙니다.');
+  const o = (s.orders || []).find((x) => x.opts?.army === aid);
+  if (o) cancelOrder(s, o.id);
+  a.force = true;
+  const msg = planArmy(s, world, a);
+  return { ok: true, msg: msg || '공격 준비' };
+}
+export function setArmyTarget(s, world, nid, aid, rid) {
+  const a = s.armies?.[aid];
+  if (!a || a.n !== nid) return fail('내 부대가 아닙니다.');
+  // 이번 턴 계획이 있으면 취소하고 다시 짬
+  const o = (s.orders || []).find((x) => x.opts?.army === aid);
+  if (o) cancelOrder(s, o.id);
+  a.target = rid;
+  const msg = planArmy(s, world, a);
+  return { ok: true, msg: msg || `부대 목적지: ${s.regions[rid].name}` };
+}
 export function armyMarch(s, world, nid) {
   const out = [];
-  for (const g of Object.values(s.generals)) {
-    if (g.nation !== nid || g.status !== 'active' || g.target === undefined || g.target === null || g.order) continue;
-    if (g.region === g.target) { delete g.target; out.push(`🚩 ${g.name} 군단이 목표 ${s.regions[g.region].name}에 닿았습니다.`); continue; }
-    const path = marchPath(s, world, nid, g.region, g.target);
-    if (!path) { out.push(`⚠️ ${g.name} 군단: ${s.regions[g.target].name}까지 갈 길이 없습니다.`); delete g.target; continue; }
-    const fr = s.regions[g.region];
-    const count = Math.min(commandCap(s, [g.id]), movable(s, g.region), fr.troops - 1);
-    if (count < 100) continue;
-    // 내 땅으로 갈 수 있는 만큼(3칸) 먼저, 바로 앞이 남의 땅이면 공격
-    let k = 0;
-    while (k + 1 < path.length && k < MARCH_HOPS && s.regions[path[k + 1]].owner === nid) k++;
-    if (k > 0) {
-      const to = path[k];
-      const res = planMove(s, world, nid, g.region, to, count, [g.id], { auto: true });
-      if (res.ok) out.push(`🚩 ${g.name} 군단 ${fmtTroops(count)}이(가) ${s.regions[to].name}(으)로 행군합니다.`);
-    } else {
-      const to = path[1];
-      const res = planMove(s, world, nid, g.region, to, count, [g.id]);
-      out.push(res.ok ? `⚔️ ${g.name} 군단 ${fmtTroops(count)}이(가) ${s.regions[to].name}을(를) 공격합니다.` : `⏸️ ${g.name} 군단 대기: ${res.msg}`);
-    }
+  for (const a of Object.values(s.armies || {})) {
+    if (a.n !== nid) continue;
+    const m = planArmy(s, world, a);
+    if (m) out.push(m);
   }
   return out;
 }
@@ -1035,6 +1121,13 @@ export function resolveStep(s, world, duel) {
   if (n.alive) {
     const dOpt = duel !== undefined ? duel : n.isPlayer && !o.opts.wantDuel ? false : undefined;
     res = doMove(s, world, o.n, o.from, o.to, o.count, o.gens, { ...o.opts, transit: true, orderId: o.id, duel: dOpt });
+  }
+  // 부대: 이긴 곳으로 옮겨 남은 병력이 곧 부대, 졌거나 포위만 했으면 출발지로 살아 돌아온 만큼
+  const a = o.opts.army && s.armies?.[o.opts.army];
+  if (a && res.ok) {
+    const rep = res.report;
+    if (!rep || rep.win) { a.rid = o.to; a.troops = rep ? s.regions[o.to].troops : o.count; }
+    else a.troops = Math.max(0, o.count - (rep.attLoss || 0));
   }
   for (const g of gens) {
     delete g.order;

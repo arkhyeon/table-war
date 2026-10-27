@@ -8,7 +8,7 @@ import { CIVS } from '../game/civs.js';
 import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
-  doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, commandCap, gensIn, nationRegions, nationGenerals, appearChance, getRel,
+  doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, commandCap, armiesIn, garrisonOf, freeGens, disbandArmy, refillArmy, forceArmy, gensIn, nationRegions, nationGenerals, appearChance, getRel,
   poachChance, doPoach, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
 import { revokeFief, pacifyCost, pacifyChance, doPacify, setFiefOrder, fiefFoes } from '../game/rise.js';
@@ -80,7 +80,7 @@ function FiefOrder({ world, game, fid, act }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet, pickTarget }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet, openFormArmy, selectArmy }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -436,6 +436,30 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           </details>
           {view === 'visible' && (
             <>
+              {mine && (
+                <>
+                  <h4 style={{ marginTop: 10 }}>⚔️ 부대 <small className="muted">수비대 {fmtTroops(garrisonOf(game, selected))}</small></h4>
+                  {armiesIn(game, selected).map((a) => (
+                    <div key={a.id} className="card" style={{ padding: 6, marginBottom: 6 }}>
+                      <b>{a.gids.map((id) => game.generals[id]?.name).join('·')} 부대</b> {fmtTroops(a.troops)} <small className="muted">/ 지휘 {fmtTroops(commandCap(game, a.gids))}</small>
+                      {a.target != null && <div style={{ fontSize: 12 }}>🎯 목적지 {game.regions[a.target].name}</div>}
+                      <div className="row" style={{ gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                        <button className="sm primary" onClick={() => selectArmy(a.id)}>🎯 목적지 지정</button>
+                        <button className="sm" onClick={() => act((s) => refillArmy(s, pid, a.id))}>➕ 보충</button>
+                        {a.target != null && !(game.orders || []).some((o) => o.opts?.army === a.id) && <button className="sm" onClick={() => act((s) => forceArmy(s, world, pid, a.id))} title="승산이 낮아도 이번 턴 바로 공격">⚔️ 무리해서 공격</button>}
+                        {a.target != null && <button className="sm" onClick={() => act((s) => ((s.armies[a.id].target = null), { ok: true, msg: '목적지를 지웠습니다.' }))}>⏹ 멈춤</button>}
+                        <button className="sm ghost" onClick={() => act((s) => disbandArmy(s, pid, a.id))}>🏠 귀환</button>
+                      </div>
+                    </div>
+                  ))}
+                  {freeGens(game, pid, selected).length > 0 && (
+                    <button className="primary" style={{ width: '100%', marginBottom: 6 }} onClick={openFormArmy}>
+                      ⚔️ 출진 (장수 {freeGens(game, pid, selected).length}명 대기)
+                    </button>
+                  )}
+                  {!armiesIn(game, selected).length && !freeGens(game, pid, selected).length && <div className="muted" style={{ fontSize: 12 }}>장수가 있어야 출진할 수 있습니다 (장수 창에서 재배치·모집).</div>}
+                </>
+              )}
               <h4 style={{ marginTop: 10 }}>주둔 장수</h4>
               {gens.length === 0 && <div className="muted">없음</div>}
               {gens.map((g) => (
@@ -448,9 +472,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                       <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap', fontSize: 12 }}>
                         <span className="muted">⚔️ 군단 지휘 {fmtTroops(commandCap(game, [g.id]))}</span>
                         {orderTo(g) && <span className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발</span>}
-                        {g.target != null && <span>🎯 목표 {game.regions[g.target].name}</span>}
-                        {pickTarget && <button className="sm" onClick={() => pickTarget(g.id)}>🎯 목표 지정</button>}
-                        {g.target != null && <button className="sm ghost" onClick={() => act((s) => (delete s.generals[g.id].target, { ok: true, msg: '목표를 지웠습니다.' }))}>✕</button>}
+                        {g.army && <span>🚩 부대 소속</span>}
                       </div>
                     ) : orderTo(g) ? (
                       <small className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발 예정</small>

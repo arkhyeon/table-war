@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -29,6 +29,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const [modal, setModal] = useState(null);
   // 지도에서 고르기: { hint, valid: Set, onPick(rid) }
   const [pick, setPick] = useState(null);
+  // 고른 부대: 지도에서 목적지를 누르면 진군
+  const [selArmy, setSelArmy] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [showLog, setShowLog] = useState(() => window.innerWidth > 860);
   const [ask, setAsk] = useState(null); // { text, onYes }
@@ -105,8 +107,9 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       setGame(s);
       return;
     }
-    // 군단 목표 행군 → 집결지·전선 자동 행군 (내 땅 안은 행동력 없음)
+    // 부대 진군 → 집결지·전선 자동 행군 (내 땅 안은 행동력 없음)
     for (const line of armyMarch(s, world, pid)) log(s, line, [pid], 'info');
+    setSelArmy(null);
     const sent = autoMarch(s, world, pid);
     endTurnPlan(s, world);
     if (sent) log(s, `🚩 후방 병력 ${fmtTroops(sent)}이(가) ${s.nations[pid].rally?.to != null ? `집결지 ${s.regions[s.nations[pid].rally.to].name}` : '전선'}(으)로 행군합니다.`, [pid], 'info');
@@ -167,6 +170,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
         setMoveMode(false);
         if (modal && modal.type !== 'over') setModal(null);
         setPick(null);
+        setSelArmy(null);
       }
       if (e.target.tagName === 'INPUT') return;
       if (e.key === 'm' && selected !== null && game.regions[selected]?.owner === game.playerId) setMoveMode((v) => !v);
@@ -180,7 +184,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     if (!moveMode || selected === null || game.regions[selected].owner !== game.playerId) return null;
     const m = new Map();
     const fr = game.regions[selected];
-    const gens = gensIn(game, selected, pid).map((g) => g.id);
+    const gens = gensIn(game, selected, pid).filter((g) => !g.army).map((g) => g.id);
     const probe = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, selected));
     for (const nb of world.regions[selected].neighbors) {
       const t = game.regions[nb.id];
@@ -229,6 +233,13 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   };
 
   const onRegionClick = (rid) => {
+    if (selArmy) {
+      const aid = selArmy;
+      setSelArmy(null);
+      if (game.regions[rid].sea) return toast('부대는 육지로만 진군합니다.', true);
+      act((s) => setArmyTarget(s, world, pid, aid, rid));
+      return;
+    }
     if (pick) {
       if (!pick.valid.has(rid)) return toast('여기는 고를 수 없습니다. 노랗게 표시된 내 땅(길이 이어진 곳)을 누르세요.', true);
       const f = pick.onPick;
@@ -239,7 +250,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     if (targets && targets.has(rid)) {
       if (targets.get(rid) === 'blocked') {
         const fr = game.regions[selected];
-        toast(moveCheck(game, world, pid, selected, rid, Math.max(1, fr.sea ? fr.troops : fr.troops - 1), gensIn(game, selected, pid).map((g) => g.id)) || '이동할 수 없습니다.', true);
+        toast(moveCheck(game, world, pid, selected, rid, Math.max(1, fr.sea ? fr.troops : fr.troops - 1), gensIn(game, selected, pid).filter((g) => !g.army).map((g) => g.id)) || '이동할 수 없습니다.', true);
         return;
       }
       openMove(selected, rid);
@@ -291,6 +302,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     }
     return out.sort((a, b) => b.k - a.k).slice(0, 8);
   }, [game, world, pid, vis, spect, me.alive]);
+  // 내 부대들 (지도 위 말)
+  const myArmies = useMemo(() => Object.values(game.armies || {}).filter((a) => a.n === pid).map((a) => ({ ...a, ch: game.generals[a.gids[0]]?.name || '?', color: me.color })), [game.armies, game.generals, pid, me.color]);
   const landmarks = useMemo(() => new Set(game.landmarks || []), [game.landmarks]);
   const proposal = game.proposals[0];
   const showLevel = (game.levelChoices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
@@ -401,6 +414,9 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             home={game.nations[pid]?.capital}
             rally={game.nations[pid]?.rally?.to}
             threats={threats}
+            armies={myArmies}
+            selArmy={selArmy}
+            onArmy={(id) => { setSelArmy((cur) => (cur === id ? null : id)); setSelected(game.armies[id].rid); setMoveMode(false); }}
             landmarks={landmarks}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}
@@ -427,6 +443,11 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
             턴 종료 ⏭
           </button>
+          {selArmy && game.armies?.[selArmy] && (
+            <div className="map-hint">
+              ⚔️ {game.generals[game.armies[selArmy].gids[0]]?.name} 부대 {fmtTroops(game.armies[selArmy].troops)} — 목적지를 누르세요 (매 턴 내 땅으로 3칸씩, 닿으면 공격) <button className="sm" onClick={() => setSelArmy(null)}>취소</button>
+            </div>
+          )}
           {pick && (
             <div className="map-hint">
               {pick.hint} <button className="sm" onClick={() => setPick(null)}>취소</button>
@@ -472,14 +493,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           openFief={() => setModal({ type: 'fief', rid: selected })}
           openCall={() => setModal({ type: 'call', rid: selected })}
           openDisband={() => setModal({ type: 'disband', rid: selected })}
-          pickTarget={(gid) => {
-            setSheet(false);
-            setPick({
-              hint: `${game.generals[gid].name} 군단의 목표를 누르세요 (매 턴 3칸씩 진군, 닿으면 공격)`,
-              valid: new Set(game.regions.map((r, i) => i).filter((i) => !game.regions[i].sea)),
-              onPick: (rid) => act((s) => { s.generals[gid].target = rid; return { ok: true, msg: `${s.generals[gid].name} 군단 목표: ${s.regions[rid].name}` }; }),
-            });
-          }}
+          openFormArmy={() => setModal({ type: 'form', rid: selected })}
+          selectArmy={(id) => { setSelArmy(id); setSheet(false); }}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
@@ -499,6 +514,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
       {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
+      {modal?.type === 'form' && <FormArmyModal game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} onDone={(id) => { setModal(null); setSelArmy(id); setSheet(false); }} />}
       {modal?.type === 'draft' && (
         <DraftModal
           world={world}

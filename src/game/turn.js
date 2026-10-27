@@ -2,7 +2,7 @@ import { stateRng } from './rng.js';
 import { TERRAIN, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, buildResolveQueue, resolveAll, arriveReinforcements } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, buildResolveQueue, resolveAll, arriveReinforcements, syncArmies } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
@@ -296,6 +296,7 @@ export function endTurnFinish(s, world) {
     const cap = s.nations[g.nation]?.capital;
     if ((!r || r.owner !== g.nation) && cap !== null && cap !== undefined) g.region = cap;
   }
+  syncArmies(s);
   // 전투 직후 100%를 채웠다면 턴 끝 반란·부흥과 상관없이 승리
   const early = s.spectator || s.sandbox ? null : checkGameOver(s);
   upkeep(s, world);
