@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
-  RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
+  RELIEF_COOLDOWN, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
   marchVia, genIndexOn, genIndexOff } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
 
@@ -272,7 +272,10 @@ export function aiActions(s, world, nid) {
         if (drive && t.owner !== null) need = Math.max(0.95, need - 0.15 - drive * 0.25);
         if (building && t.owner !== null && !sameIsle) need += 0.4; // 내실 중엔 확실한 기회만
         if (sameIsle) need -= 0.15;
-        const { est, opts: mo } = attackOption(s, world, nid, r, nb.id, count, gens, need);
+        // 돈이 넉넉하면 용병을 붙여 공격 (장수가 있을 때)
+        const mc = !t.sea && !reg.sea && gens.length && n.gold > 150 * G ? Math.max(0, Math.min(mercCap(s, gens), Math.floor((n.gold - 80 * G) / mercPrice(s, gens) / 100) * 100)) : 0;
+        const { est, opts: mo0 } = attackOption(s, world, nid, r, nb.id, count + mc, gens, need);
+        const mo = mc ? { ...mo0, merc: mc } : mo0;
         if (est.ratio < need) continue;
         const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0);
         opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? (island ? 25 : 15) : 0) + (sameIsle ? 15 : 0) + (drive && t.owner !== null ? drive * 20 : 0) - (building && t.owner !== null && !sameIsle ? 20 : 0), run: () => planMove(s, world, nid, r, nb.id, count, gens, mo) });
@@ -373,12 +376,21 @@ export function aiActions(s, world, nid) {
       if (pt !== undefined && n.gold >= (island ? 160 : 220) * G) opts.push({ score: island ? 32 : 13, run: () => doBuild(s, world, nid, pt, 'port') });
     }
     // 공성병기: 성벽 있는 적지와 맞닿은 전선
-    if (n.gold >= 130 * G) {
-      const eg = mine.find((r) => (s.regions[r].engines || 0) < ENGINE_MAX && s.regions[r].troops >= 8000 && world.regions[r].neighbors.some((x) => {
-        const t = s.regions[x.id];
-        return !t.sea && t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner) && (t.buildings.walls || 0) >= 2;
-      }));
-      if (eg !== undefined && n.gold >= engineCost(s, eg) + 60 * G) opts.push({ score: 21, run: () => doBuildEngine(s, nid, eg) });
+    // 매수: 돈이 넉넉하면 장수 곁의 민심 낮은 땅·중립지를 돈으로
+    if (n.gold >= 150 * G && n.ap >= 1) {
+      let best = null;
+      for (const g of nationGenerals(s, nid)) {
+        if (g.order || g.bribed === s.turn || s.regions[g.region].owner !== nid) continue;
+        for (const x of world.regions[g.region].neighbors) {
+          const t = s.regions[x.id];
+          if (t.sea || t.owner === nid || (t.owner !== null && (s.nations[t.owner].capital === x.id || getRel(s, nid, t.owner).type !== 'none'))) continue;
+          const c = bribeChance(s, world, nid, x.id, g), cost = bribeCost(s, x.id);
+          if (c < 0.4 || cost > n.gold - 60 * G) continue;
+          const v = c * (10 + t.pop) - cost / G / 20;
+          if (!best || v > best.v) best = { v, rid: x.id, gid: g.id, c };
+        }
+      }
+      if (best) opts.push({ score: 18 + best.c * 12, run: () => doBribe(s, world, nid, best.rid, best.gid) });
     }
     for (const r of mine) {
       const reg = s.regions[r];

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
+import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
@@ -81,6 +82,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   // 큰 지도는 턴 처리에 시간이 걸리므로 '처리 중' 표시를 먼저 그린 뒤 계산
   const [busy, setBusy] = useState(false);
   const [panTo, setPanTo] = useState(null);
+  const [tut, setTut] = useState(() => !tutorialSeen());
   const doEndTurn = () => {
     if (busy) return;
     setBusy(true);
@@ -322,6 +324,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
               <button onClick={() => setModal({ type: 'save' })}>💾 저장·불러오기</button>
               <button onClick={() => setModal({ type: 'chronicle' })}>📽️ 연대기</button>
               <button onClick={() => setModal({ type: 'help' })}>❓ 게임 방법</button>
+              <button onClick={() => setTut(true)}>🧭 처음 안내 다시 보기</button>
               <button onClick={() => confirmIt('메인 화면으로 나갈까요? (자동 저장됨)', onExit)}>🚪 메인 화면으로</button>
             </div>
           )}
@@ -410,6 +413,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           openLoyalty={() => setModal({ type: 'loyalty' })}
           openBribe={() => setModal({ type: 'bribe', rid: selected })}
           openFief={() => setModal({ type: 'fief', rid: selected })}
+          openCall={() => setModal({ type: 'call', rid: selected })}
+          openDisband={() => setModal({ type: 'disband', rid: selected })}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
@@ -433,6 +438,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
       {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
+      {tut && !spect && !modal && <Tutorial onClose={() => setTut(false)} />}
       {busy && !spect && (
         <div className="loading" style={{ position: 'fixed' }}>
           <div className="spinner" />
@@ -441,6 +447,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} act={act} onFocus={(rid) => { setSelected(rid); setPanTo(rid); setTimeout(() => setPanTo(null), 1500); setModal(null); setSheet(true); }} onClose={() => setModal(null)} />}
       {modal?.type === 'bribe' && <BribeModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
+      {modal?.type === 'call' && <CallModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
+      {modal?.type === 'disband' && <DisbandModal game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'fief' && <FiefModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'save' && (
         <SaveModal
@@ -473,7 +481,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             clearSave();
             onExit();
           }}
-          onContinue={() => setGame({ ...game, gameOver: null, sandbox: true })}
+          onContinue={() => setGame({ ...game, gameOver: null, ...(game.gameOver.partial ? { asked80: true } : { sandbox: true }) })}
           onChronicle={() => setModal({ type: 'chronicle' })}
         />
       )}

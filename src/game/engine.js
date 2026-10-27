@@ -88,7 +88,8 @@ export function computeMaxAp(s, nid) {
   const fast = Math.min(2, nationTrait(s, nid, '신속'));
   // 큰 지도(지역이 잘게 나뉨)는 행동력 상한도 비례해서 늘림
   const cap = Math.round(7 * Math.max(1, landCount(s) / 150));
-  let ap = 3 + Math.min(cap, Math.floor(regions / 6)) + fast;
+  // 행동력 1.3배 (손이 덜 모자라게)
+  let ap = Math.round((3 + Math.min(cap, Math.floor(regions / 6))) * 1.3) + fast;
   if (s.nations.some((o) => o.alive && o.id !== nid && isVassalOf(s, nid, o.id))) ap -= 1;
   return Math.max(2, ap);
 }
@@ -405,8 +406,9 @@ export function doBulkDraft(s, nid) {
   const err = canAct(s, nid, COST.conscript);
   if (err) return fail(err);
   let men = 0, spent = 0, k = 0;
-  for (const x of bulkDraftPlan(s, nid)) {
-    if (n.gold - spent < x.gold) break;
+  // 지역마다 행동력 1 (많이 뽑을 수 있는 곳부터, 행동력이 남는 만큼)
+  for (const x of bulkDraftPlan(s, nid).sort((a, b) => b.amt - a.amt)) {
+    if (n.gold - spent < x.gold || k >= Math.floor(n.ap / COST.conscript)) break;
     const r = s.regions[x.rid];
     r.troops += x.amt;
     r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
@@ -417,8 +419,8 @@ export function doBulkDraft(s, nid) {
   }
   if (!k) return fail('징병할 수 있는 지역이 없거나 금이 부족합니다.');
   n.gold -= spent;
-  n.ap -= COST.conscript;
-  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다. (금 -${fmtGold(spent)}, 민심 영향 없음)` };
+  n.ap -= COST.conscript * k;
+  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다. (행동력 -${k}) (금 -${fmtGold(spent)}, 민심 영향 없음)` };
 }
 
 // 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
@@ -715,12 +717,15 @@ export function frontierOf(s, world, nid) {
 export function autoMarch(s, world, nid) {
   const n = s.nations[nid];
   const ral = n.rally;
-  if (!ral || (!ral.front && (ral.to === null || ral.to === undefined))) return 0;
+  if (!ral || (!ral.front && ral.foe == null && (ral.to === null || ral.to === undefined))) return 0;
   if (ral.to !== null && ral.to !== undefined && s.regions[ral.to].owner !== nid) ral.to = null;
   // 전선 자동 투입: 국경 중에서도 맞닿은 적이 내 병력보다 많은(위협받는) 곳을 우선, 없으면 모든 국경
   let goals = new Set();
   if (ral.to !== null && ral.to !== undefined) goals = new Set([ral.to]);
-  else if (ral.front) {
+  else if (ral.foe != null && s.nations[ral.foe]?.alive) {
+    // 고른 나라와 맞닿은 내 국경으로
+    goals = new Set([...frontierOf(s, world, nid)].filter((r) => world.regions[r].neighbors.some((x) => s.regions[x.id].owner === ral.foe)));
+  } else if (ral.front) {
     const front = frontierOf(s, world, nid);
     const enemyNear = (r) => world.regions[r].neighbors.reduce((a, x) => {
       const t = s.regions[x.id];
@@ -801,7 +806,6 @@ export function bribeCheck(s, world, nid, rid, gid) {
   if (r.sea || r.owner === nid) return '다른 세력의 땅만 매수할 수 있습니다.';
   if (r.owner !== null && s.nations[r.owner].capital === rid) return '수도는 매수할 수 없습니다.';
   if (r.owner !== null && getRel(s, nid, r.owner).type === 'alliance') return '동맹국의 땅은 매수할 수 없습니다.';
-  if (r.owner !== null && s.nations[r.owner].horde) return '도적 무리는 돈으로 움직이지 않습니다.';
   const g = s.generals[gid];
   if (!g || !bribeAgents(s, world, nid, rid).includes(g)) return '맞닿은 내 지역(또는 그곳)에 이번 턴 매수하지 않은 장수가 있어야 합니다.';
   if (s.nations[nid].gold < bribeCost(s, rid)) return '금이 부족합니다.';
@@ -836,6 +840,39 @@ export function doBribe(s, world, nid, rid, gid) {
   }
   log(s, `💸 ${g.name}의 ${r.name} 매수가 실패했습니다.${old !== null ? ` 금 ${fmtGold(cost)}은 ${s.nations[old].name}의 손에 들어갔습니다.` : ' 금만 날렸습니다.'}`, old !== null ? [nid, old] : [nid], 'warn');
   return { ok: true, failed: true, accepted: false, msg: `매수 실패 (성공률 ${Math.round(chance * 100)}%) — 금 ${fmtGold(cost)}을 잃었습니다.` };
+}
+
+// 병력 불러오기: 여러 지역에서 정한 만큼 한 곳으로 (내 땅 2칸에 1턴, 행동력 1)
+export function callTroops(s, world, nid, dest, list) {
+  const err = canAct(s, nid, 1);
+  if (err) return fail(err);
+  const parent = new Map();
+  const dist = ownDistances(s, world, nid, dest, parent);
+  let men = 0;
+  for (const { rid, count } of list) {
+    const r = s.regions[rid];
+    const amt = Math.min(Math.floor(count / 100) * 100, movable(s, rid), r.troops - 100);
+    if (rid === dest || amt < 100 || !dist.has(rid)) continue;
+    const path = [rid];
+    while (path[path.length - 1] !== dest) path.push(parent.get(path[path.length - 1]));
+    r.troops -= amt;
+    (s.reinforce = s.reinforce || []).push({ n: nid, from: rid, to: dest, count: amt, start: s.turn, arrive: s.turn + reinforceTurns(dist.get(rid)), path });
+    men += amt;
+  }
+  if (!men) return fail('보낼 병력이 없습니다.');
+  s.nations[nid].ap -= 1;
+  return { ok: true, msg: `병력 ${fmtTroops(men)}을 ${s.regions[dest].name}(으)로 불러옵니다.` };
+}
+
+// 해산: 병사를 집으로 돌려보냄 (유지비 절감, 인구 조금 회복, 행동력 없음)
+export function doDisband(s, nid, rid, count) {
+  const r = s.regions[rid];
+  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
+  const amt = Math.min(Math.floor(count / 100) * 100, r.troops - 100);
+  if (amt < 100) return fail('해산할 병력이 없습니다.');
+  r.troops -= amt;
+  r.pop += (amt / 1000) * 0.3;
+  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amt)}을 해산했습니다. (유지비 -${fmtGold(amt)}금/턴)` };
 }
 
 // 후방에서 징병해 보낸 증원 도착 (도착지를 잃었으면 출발지로, 둘 다 잃었으면 흩어짐)

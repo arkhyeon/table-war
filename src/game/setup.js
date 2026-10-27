@@ -2,7 +2,7 @@ import { makeRng, hashString } from './rng.js';
 import { T, G, DIFFICULTY } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
-import { addGeneral, computeMaxAp, nationPower } from './engine.js';
+import { addGeneral, computeMaxAp, nationPower, relKey } from './engine.js';
 import { rollWeather } from './weather.js';
 import { detailFactor } from './mapgen.js';
 import { assignRealNames } from './places.js';
@@ -267,6 +267,22 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
+  // 사면초가 보정: 3개국 이상과 맞닿은 나라는 처음 10턴 동안 가장 약한 이웃 하나만 빼고 불가침, 병력 +20%
+  for (const n of s.nations) {
+    const nb = new Set();
+    for (let i = 0; i < s.regions.length; i++) {
+      if (s.regions[i].owner !== n.id) continue;
+      for (const x of world.regions[i].neighbors) {
+        const o = s.regions[x.id].owner;
+        if (o !== null && o !== n.id && !s.regions[x.id].sea) nb.add(o);
+      }
+    }
+    if (nb.size < 3) continue;
+    const weakest = [...nb].sort((a, b) => s.regions.filter((r) => r.owner === a).length - s.regions.filter((r) => r.owner === b).length)[0];
+    for (const o of nb) if (o !== weakest && !s.relations[relKey(n.id, o)]) s.relations[relKey(n.id, o)] = { type: 'nap', until: 10, since: 1 };
+    for (const r of s.regions) if (r.owner === n.id) r.troops = Math.round((r.troops * 1.2) / 100) * 100;
+    s.log.push({ turn: 1, text: `🛡️ ${n.name}: 사방이 적이라 이웃 ${nb.size - 1}개국과 10턴 불가침으로 시작합니다. (병력 +20%)`, nations: [n.id], kind: 'diplo' });
+  }
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다.${scn.procedural ? ` (시드: ${seed})` : ''}`, nations: [playerId], kind: 'info' });
   return s;
 }

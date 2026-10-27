@@ -10,7 +10,7 @@ import {
   doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
   poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
-import { revokeFief } from '../game/rise.js';
+import { revokeFief, pacifyCost, pacifyChance, doPacify } from '../game/rise.js';
 
 export function relTag(game, a, b) {
   if (a === b) return null;
@@ -64,13 +64,16 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, sheetOpen, onCloseSheet }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
   const lowLoy = myRegions.filter((x) => !game.regions[x].sea && (game.regions[x].loyalty ?? 100) < 40).length;
   const incoming = (game.reinforce || []).filter((o) => o.n === pid);
   const inc = income(game, pid);
+  // 맞닿은 나라들 (전선 투입 대상)
+  const foes = [...new Set(myRegions.flatMap((r) => world.regions[r].neighbors.map((x) => (game.regions[x.id].sea ? null : game.regions[x.id].owner))).filter((o) => o !== null && o !== pid && game.nations[o]?.alive && getRel(game, pid, o).type !== 'alliance'))];
+  const nextGold = me.gold + inc.net;
   const ruler = game.generals[me.ruler];
   const lord = game.nations.find((o) => o.alive && isVassalOf(game, pid, o.id));
   const overrides = myRegions.filter((r) => game.regions[r].tax).length;
@@ -114,16 +117,26 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           <span title="총 병력">🪖 {fmtTroops(inc.troops)}</span>
           {cut > 0 && <span style={{ color: 'var(--danger)' }}>✂ 보급 끊김 {cut}</span>}
           {!spectator && (
-            <label title="집결지가 없을 때, 후방 병력이 매 턴 가장 가까운 국경으로 자동 행군 (행동력 없음)" style={{ whiteSpace: 'nowrap' }}>
-              <input
-                type="checkbox"
-                checked={!!me.rally?.front}
+            <label title="집결지가 없을 때, 후방 병력이 매 턴 국경으로 자동 행군 (행동력 없음). 어느 나라 쪽으로 보낼지 고를 수 있습니다." style={{ whiteSpace: 'nowrap' }}>
+              🚩 전선 투입{' '}
+              <select
+                value={me.rally?.foe != null ? `n${me.rally.foe}` : me.rally?.front ? 'hot' : ''}
                 onChange={(e) => {
-                  const on = e.target.checked;
-                  act((s) => ((s.nations[pid].rally = { ...(s.nations[pid].rally || { to: null }), front: on }), { ok: true, msg: on ? '후방 병력이 매 턴 전선으로 자동 행군합니다.' : '전선 자동 투입을 껐습니다.' }));
+                  const v = e.target.value;
+                  act((s) => {
+                    s.nations[pid].rally = { ...(s.nations[pid].rally || { to: null }), front: v === 'hot', foe: v.startsWith('n') ? +v.slice(1) : null };
+                    return { ok: true, msg: v === '' ? '전선 자동 투입을 껐습니다.' : v === 'hot' ? '후방 병력이 위협받는 국경으로 자동 행군합니다.' : `후방 병력이 ${s.nations[+v.slice(1)].name} 쪽 국경으로 자동 행군합니다.` };
+                  });
                 }}
-              />{' '}
-              🚩 전선 자동 투입
+              >
+                <option value="">끔</option>
+                <option value="hot">위협받는 국경</option>
+                {foes.map((o) => (
+                  <option key={o} value={`n${o}`}>
+                    {game.nations[o].name} 쪽
+                  </option>
+                ))}
+              </select>
             </label>
           )}
           {me.rally?.to != null && game.regions[me.rally.to]?.owner === pid && <span>🚩 집결: {game.regions[me.rally.to].name}</span>}
@@ -135,6 +148,14 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
           {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
         </div>
+        {!spectator && nextGold < 0 && (
+          <div className="warn-box">
+            ⚠️ 다음 턴 파산 예상 — 수입 {fmtGold(inc.gross)} − 지출 {fmtGold(inc.upkeep)} = {fmtGold(inc.net)}/턴, 국고 {fmtGold(me.gold)}. 이대로면 병사 20%가 탈영합니다. 지역에서 🏳️해산하거나 세율을 올리세요. (병사 1명당 1금)
+          </div>
+        )}
+        {!spectator && nextGold >= 0 && inc.net < 0 && nextGold + inc.net * 2 < 0 && (
+          <div className="warn-box soft">💸 적자 {fmtGold(inc.net)}/턴 — 약 {Math.max(1, Math.floor(me.gold / -inc.net))}턴 뒤 파산. 병력 유지비가 {fmtGold(inc.army)}입니다.</div>
+        )}
         <details className="more">
           <summary>자세히 (수입·세율·장수·승리 조건)</summary>
         <div className="kv">
@@ -271,16 +292,29 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             if (own?.fief && own.lord === pid)
               return (
                 <div className="actions" style={{ marginTop: 10 }}>
-                  <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 수입 40% 상납</span>
+                  <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 수입 15% 상납, 필요하면 지원 요청</span>
                   <button onClick={() => act((s) => revokeFief(s, world, pid, own.id))}>🏯 군단 회수</button>
                 </div>
               );
             const agents = bribeAgents(game, world, pid, selected);
-            return agents.length > 0 && !(own && (own.horde || getRel(game, pid, own.id).type === 'alliance' || own.capital === selected)) ? (
+            const canBribe = agents.length > 0 && !(own && (getRel(game, pid, own.id).type === 'alliance' || own.capital === selected));
+            const horde = own?.horde && getRel(game, pid, own.id).type === 'none';
+            if (!canBribe && !horde) return null;
+            return (
               <div className="actions" style={{ marginTop: 10 }}>
-                <button onClick={openBribe} title="맞닿은 곳의 장수가 돈으로 이 땅을 넘어오게 함 (실패하면 돈은 상대에게)">💰 매수 ({fmtGold(bribeCost(game, selected))}금)</button>
+                {canBribe && <button onClick={openBribe} title="맞닿은 곳의 장수가 돈으로 이 땅을 넘어오게 함 (실패하면 돈은 상대에게)">💰 매수 ({fmtGold(bribeCost(game, selected))}금)</button>}
+                {horde && (
+                  <>
+                    <button disabled={me.ap < 1 || me.gold < pacifyCost(game, own.id, 'peace')} title="돈을 주고 8턴 동안 서로 치지 않기로 함 (돈만 받고 응하지 않을 수도 있음)" onClick={() => act((s) => doPacify(s, world, pid, own.id, 'peace'))}>
+                      🤝 화친 {fmtGold(pacifyCost(game, own.id, 'peace'))}금 · {Math.round(pacifyChance(game, pid, own.id, 'peace') * 100)}%
+                    </button>
+                    <button disabled={me.ap < 1 || me.gold < pacifyCost(game, own.id, 'absorb')} title="큰돈을 주고 무리 전체를 거둬들임 (땅·병력 60%·장수가 내 것으로)" onClick={() => act((s) => doPacify(s, world, pid, own.id, 'absorb'))}>
+                      🏳️ 귀순시키기 {fmtGold(pacifyCost(game, own.id, 'absorb'))}금 · {Math.round(pacifyChance(game, pid, own.id, 'absorb') * 100)}%
+                    </button>
+                  </>
+                )}
               </div>
-            ) : null;
+            );
           })()}
           {mine && (
             <>
@@ -298,9 +332,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 >
                   🍚 진휼 ({fmtGold(reliefCost(game, selected))}금)
                 </button>
-                <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
-                  🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({fmtGold(engineCost(game, selected))}금·1AP)
-                </button>
                 <button
                   className={me.rally?.to === selected ? 'primary' : ''}
                   title="후방(국경에 닿지 않은 내 땅) 병력이 매 턴 자동으로 이곳에 모입니다. 행동력 없음, 각 지역에 1천(수도 3천)은 남김."
@@ -315,6 +346,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 >
                   🚩 {me.rally?.to === selected ? '집결 해제' : '집결지로'}
                 </button>
+                <button onClick={openCall} title="다른 내 지역에서 정한 만큼 이곳으로 불러옴 (내 땅 2칸에 1턴, 행동력 1)">📯 병력 불러오기</button>
+                <button onClick={openDisband} title="병사를 집으로 돌려보냄 (유지비 절감, 행동력 없음)">🏳️ 해산</button>
                 {me.capital !== selected && (
                   <button onClick={openFief} title="장수에게 이 일대를 맡겨 스스로 다스리게 함 (언제든 회수)">🏯 분봉</button>
                 )}
@@ -400,24 +433,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   </span>
                 ))}
               </span>
-              {mine && (
-                <>
-                  <span>지역 세율</span>
-                  <span>
-                    <TaxButtons
-                      value={r.tax || null}
-                      withDefault
-                      onPick={(k) =>
-                        act((s) => {
-                          if (k) s.regions[selected].tax = k;
-                          else delete s.regions[selected].tax;
-                          return { ok: true };
-                        })
-                      }
-                    />
-                  </span>
-                </>
-              )}
             </div>
           </details>
           {view === 'visible' && (

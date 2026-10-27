@@ -5,6 +5,7 @@ import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, c
 import { fmtGold } from './format.js';
 import { emptyDeal, describeDeal, applyDeal } from './diplomacy.js';
 import { colorFor } from './setup.js';
+import { stateRng } from './rng.js';
 
 // 신흥국 출현: 몰락한 왕의 부흥, 빈 땅의 봉기, 민심이 바닥난 지역의 독립
 const MAX_IDS = 62;
@@ -152,8 +153,9 @@ function tryRise(s, world, rng) {
 // 천운: 한 나라가 크게 앞서면 가끔(언제일지 모름) 판을 흔드는 일이 생김
 // 앞설수록 잦아짐(25%부터, 최대 턴당 10%), 한 번 일어나면 8턴은 조용
 export function fortune(s, world, rng) {
-  if (s.turn < 15 || s.opts?.noRise || topShare(s).share >= ENDGAME) return;
-  if (s.fortuneTurn !== undefined && s.turn - s.fortuneTurn < 8) return;
+  // 한 판에 두 번까지만, 한 번 일어나면 10턴은 조용
+  if (s.turn < 15 || s.opts?.noRise || topShare(s).share >= ENDGAME || (s.fortuneCount || 0) >= 2) return;
+  if (s.fortuneTurn !== undefined && s.turn - s.fortuneTurn < 10) return;
   const land = s.regions.filter((r) => !r.sea).length;
   const alive = s.nations.filter((n) => n.alive);
   if (alive.length < 2) return;
@@ -181,6 +183,7 @@ export function fortune(s, world, rng) {
   kinds.push(['aid', 1.2]);
   const kind = rng.weighted(kinds, (k) => k[1])[0];
   s.fortuneTurn = s.turn;
+  s.fortuneCount = (s.fortuneCount || 0) + 1;
   const ev = (icon, title, story, effect, nations, rids) => {
     (s.turnEvents = s.turnEvents || []).push({ icon, title, story, effect, nations, global: true, rids });
     log(s, `${icon} ${title} — ${effect}`, nations, 'warn');
@@ -244,6 +247,16 @@ export function endgame(s, world, rng) {
   const { leader, share } = topShare(s);
   if (!leader || share < ENDGAME) return;
   const land = s.regions.filter((r) => !r.sea).length;
+  // 최후의 동맹: 남은 나라들이 한 번 뭉침 (속국이 되기 싫은 나라들끼리)
+  if (!s.lastStand) {
+    s.lastStand = true;
+    const rest = s.nations.filter((n) => n.alive && n.id !== leader.id && !n.horde && !n.fief && getRel(s, n.id, leader.id).type !== 'vassal');
+    if (rest.length >= 2) {
+      for (const a of rest) for (const b of rest) if (a.id < b.id) setRel(s, a.id, b.id, { type: 'alliance', since: s.turn });
+      (s.turnEvents = s.turnEvents || []).push({ icon: '🛡️', title: '최후의 동맹', story: `${leader.name}이(가) 천하의 8할을 차지하자 ${rest.map((n) => n.name).join('·')}이(가) 끝까지 맞서기로 손을 잡았습니다.`, effect: '남은 나라들이 서로 동맹', nations: [leader.id, ...rest.map((n) => n.id)], global: true });
+      log(s, `🛡️ 최후의 동맹: ${rest.map((n) => n.name).join('·')}`, [leader.id, ...rest.map((n) => n.id)], 'diplo');
+    }
+  }
   for (const n of s.nations) {
     if (!n.alive || n.id === leader.id || n.horde || n.fief || getRel(s, n.id, leader.id).type === 'vassal') continue;
     if (nationRegions(s, n.id).length > Math.max(4, Math.round(share * land * 0.1)) || rng() >= 0.15) continue;
@@ -267,7 +280,7 @@ export function riseNations(s, world, rng) {
 
 // ───────── 분봉: 장수에게 땅을 맡겨 스스로 다스리게 함 (내 나라의 일부, 언제든 회수) ─────────
 const lighten = (hsl) => hsl.replace(/hsl\((\d+), (\d+)%, (\d+)%\)/, (_, h, sat, l) => `hsl(${h}, ${Math.max(30, sat - 15)}%, ${Math.min(78, +l + 18)}%)`);
-export const FIEF_TRIBUTE = 0.4;
+export const FIEF_TRIBUTE = 0.15; // 군단은 수입 대부분을 스스로 쓰고, 필요하면 지원을 청함
 
 // 맡길 땅: 고른 지역에서 이어진 내 땅(수도 제외) n곳
 export function fiefRegions(s, world, pid, start, n) {
@@ -397,4 +410,125 @@ export function spawnHorde(s, world, rng) {
   finish(s, n, king);
   (s.turnEvents = s.turnEvents || []).push({ icon: '🏴', title: `${n.name} 봉기`, story: `${s.regions[o.rids[0]].name} 일대에서 ${king.name}이(가) 이끄는 ${n.name}이(가) 일어나 약탈을 시작했습니다. 이들과는 협상할 수 없습니다.`, effect: `${o.rids.length}개 지역 장악`, nations: o.from !== undefined ? [n.id, o.from] : [n.id], global: true, rids: o.rids });
   log(s, `🏴 ${n.name}이(가) ${s.regions[o.rids[0]].name}에서 봉기했습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
+}
+
+// 도적 무리가 6곳 이상을 차지하면 나라로 자리 잡음
+export function promoteHordes(s, world, rng) {
+  for (const n of s.nations) {
+    if (!n.alive || !n.horde || nationRegions(s, n.id).length < 6) continue;
+    const old = n.name;
+    n.horde = false;
+    n.name = freshName(s, n.civ, rng);
+    n.color = colorFor(n.id);
+    n.aggression = 0.8;
+    (s.turnEvents = s.turnEvents || []).push({ icon: '👑', title: `${old} → ${n.name}`, story: `세력을 불린 ${old}이(가) 나라를 세우고 ${n.name}(이)라 칭했습니다. 이제 외교가 가능합니다.`, effect: `${n.name} 건국 (${nationRegions(s, n.id).length}개 지역)`, nations: [n.id], global: true });
+    log(s, `👑 ${old}이(가) ${n.name}(으)로 나라를 세웠습니다!`, [n.id], 'warn');
+  }
+}
+
+// 도적 회유: 돈을 주고 화친(8턴 불가침)하거나 통째로 거둬들임. 돈만 받고 응하지 않을 수도 있음
+export function pacifyCost(s, hid, mode) {
+  const troops = s.regions.reduce((a, r) => a + (r.owner === hid ? r.troops : 0), 0);
+  return Math.round(((mode === 'absorb' ? 60 * G + troops * 10 : 20 * G + troops * 3)) / 1000) * 1000;
+}
+export function pacifyChance(s, nid, hid, mode) {
+  const best = Math.max(0, ...Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid).map((g) => g.pol));
+  const size = nationRegions(s, hid).length;
+  return Math.max(0.1, Math.min(0.9, (mode === 'absorb' ? 0.35 - size * 0.04 : 0.6) + best / 500));
+}
+export function doPacify(s, world, nid, hid, mode) {
+  const h = s.nations[hid], n = s.nations[nid];
+  if (!h?.alive || !h.horde) return { ok: false, msg: '도적 무리가 아닙니다.' };
+  const cost = pacifyCost(s, hid, mode);
+  if (n.gold < cost) return { ok: false, msg: '금이 부족합니다.' };
+  const err = canAct(s, nid, 1);
+  if (err) return { ok: false, msg: err };
+  n.gold -= cost;
+  n.ap -= 1;
+  if (stateRng(s)() >= pacifyChance(s, nid, hid, mode)) {
+    h.gold += cost;
+    log(s, `💸 ${h.name}이(가) 금 ${fmtGold(cost)}만 챙기고 응하지 않았습니다.`, [nid, hid], 'warn');
+    return { ok: true, accepted: false, msg: `${h.name}이(가) 돈만 받고 응하지 않았습니다.` };
+  }
+  if (mode === 'peace') {
+    setRel(s, nid, hid, { type: 'nap', until: s.turn + 8, since: s.turn });
+    log(s, `🤝 ${h.name}에 금 ${fmtGold(cost)}을 주고 8턴 동안 화친했습니다.`, [nid, hid], 'diplo');
+    return { ok: true, msg: `${h.name}과(와) 8턴 화친.` };
+  }
+  const me = s.nations[nid];
+  for (const rid of nationRegions(s, hid)) {
+    const r = s.regions[rid];
+    r.owner = nid;
+    r.troops = Math.max(100, Math.round((r.troops * 0.6) / 100) * 100);
+    r.loyalty = 40;
+  }
+  for (const g of Object.values(s.generals)) if (g.nation === hid && g.status === 'active') { g.nation = nid; g.loyalty = 45; }
+  log(s, `🏳️ ${h.name}이(가) 금 ${fmtGold(cost)}을 받고 ${me.name}에 귀순했습니다!`, [nid, hid], 'diplo');
+  checkElimination(s, world, hid);
+  return { ok: true, msg: `${h.name}을(를) 거둬들였습니다.` };
+}
+
+// 도적의 협박: 돈을 내면 한동안 안 치고, 거절하면 노림
+export function hordeDemands(s, world, rng) {
+  const pid = s.playerId;
+  if (s.spectator || !s.nations[pid]?.alive) return;
+  for (const h of s.nations) {
+    if (!h.alive || !h.horde || getRel(s, pid, h.id).type !== 'none') continue;
+    const touch = nationRegions(s, h.id).some((r) => world.regions[r].neighbors.some((x) => s.regions[x.id].owner === pid));
+    if (!touch || rng() >= 0.15 || (s.proposals || []).length >= 2) continue;
+    const ask = Math.round((pacifyCost(s, h.id, 'peace') * 0.8) / 1000) * 1000;
+    if (s.nations[pid].gold < ask) continue;
+    (s.proposals = s.proposals || []).push({ from: h.id, kind: 'horde', gold: ask, text: `${h.name}: "금 ${fmtGold(ask)}을 내놓으면 8턴 동안 건드리지 않겠다. 거절하면 쳐들어간다!"` });
+  }
+}
+
+// 군단의 지원 요청: 무엇에 얼마가 필요한지 청하고, 주면 충성↑ 안 주면 충성↓
+const FIEF_NEEDS = [
+  ['징병 자금', '병사를 더 모으려 합니다', 30],
+  ['성벽 보수', '국경에 성을 쌓으려 합니다', 40],
+  ['진휼 곡식', '흉흉한 민심을 달래려 합니다', 20],
+  ['원정 군자금', '새 땅을 치려 합니다', 50],
+];
+export function fiefRequests(s, world, rng) {
+  if (s.spectator) return;
+  for (const f of s.nations) {
+    if (!f.alive || !f.fief || f.lord !== s.playerId) continue;
+    if (f.askTurn !== undefined && s.turn - f.askTurn < 6) continue;
+    if (rng() >= 0.2 || (s.proposals || []).length >= 2) continue;
+    const [what, why, base] = FIEF_NEEDS[Math.floor(rng() * FIEF_NEEDS.length)];
+    const gold = Math.round((base * G * (1 + nationRegions(s, f.id).length / 10)) / 1000) * 1000;
+    f.askTurn = s.turn;
+    const g = s.generals[f.ruler];
+    (s.proposals = s.proposals || []).push({ from: f.id, kind: 'fief', gold, what, text: `${g?.name || f.name}: "${why}. ${what}로 금 ${fmtGold(gold)}이 필요합니다." (주면 충성 +6, 거절하면 -4)` });
+  }
+}
+export function answerRequest(s, prop, yes) {
+  const f = s.nations[prop.from];
+  const me = s.nations[s.playerId];
+  if (prop.kind === 'fief') {
+    const g = s.generals[f.ruler];
+    if (yes) {
+      if (me.gold < prop.gold) return { ok: false, msg: '금이 부족합니다.' };
+      me.gold -= prop.gold;
+      f.gold += prop.gold;
+      if (g) g.loyalty = Math.min(100, (g.loyalty ?? 60) + 6);
+      return { ok: true, msg: `${f.name}에 금 ${fmtGold(prop.gold)}을 보냈습니다. (충성 +6)` };
+    }
+    if (g) g.loyalty = Math.max(0, (g.loyalty ?? 60) - 4);
+    return { ok: true, msg: `${f.name}의 요청을 거절했습니다. (충성 -4)` };
+  }
+  if (prop.kind === 'horde') {
+    if (yes) {
+      if (me.gold < prop.gold) return { ok: false, msg: '금이 부족합니다.' };
+      me.gold -= prop.gold;
+      f.gold += prop.gold;
+      setRel(s, s.playerId, f.id, { type: 'nap', until: s.turn + 8, since: s.turn });
+      return { ok: true, msg: `${f.name}에 금을 주고 8턴 동안 화친했습니다.` };
+    }
+    f.goal = s.playerId;
+    f.goalSince = s.turn;
+    s.opinion[f.id][s.playerId] = -80;
+    return { ok: true, msg: `${f.name}의 협박을 거절했습니다. 쳐들어올 수 있습니다.` };
+  }
+  return { ok: false, msg: '알 수 없는 요청' };
 }

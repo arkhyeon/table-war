@@ -6,7 +6,7 @@ import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, na
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame } from './rise.js';
+import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -116,8 +116,6 @@ function upkeep(s, world) {
     if (n.lost) n.lost = n.lost < 0.3 ? 0 : Math.round(n.lost * 0.85 * 100) / 100;
     const inc = income(s, n.id);
     let net = inc.net;
-    // 도적 무리는 매 턴 4%씩 흩어짐 (오래 버티면 저절로 약해짐)
-    if (n.horde) for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.round((r.troops * 0.96) / 100) * 100);
     if (!n.isPlayer && inc.gross > 0) net += Math.round(inc.gross * (DIFFICULTY[s.opts?.difficulty]?.tax || 0));
     const lord = s.nations.find((o) => o.alive && isVassalOf(s, n.id, o.id));
     if (lord && inc.gross > 0) {
@@ -151,7 +149,6 @@ function upkeep(s, world) {
     n.lastCount = count;
   }
   const volunteers = {};
-  const overstack = {};
   const supply = {};
   const sizes = {};
   for (const r of s.regions) if (r.owner !== null && !r.sea) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
@@ -190,13 +187,6 @@ function upkeep(s, world) {
     // 보급이 끊긴 지역: 병력 1~10% 감소, 민심 하락
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
-    // 대군 보급난: 한 지역에 너무 많이 모이면 넘친 병력의 5%가 매 턴 흩어짐 (인구가 많을수록 많이 버팀)
-    const stackCap = Math.round((50000 + r.pop * 2000) / df);
-    if (r.troops > stackCap) {
-      const lost = Math.round(((r.troops - stackCap) * 0.05 * (1 - tv(gens, '보급'))) / 100) * 100;
-      r.troops -= lost;
-      if (lost > 0) overstack[r.owner] = (overstack[r.owner] || 0) + lost;
-    }
     // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
     // 통치 부담은 내륙(국경에 닿지 않은 곳)만, 상한 -5. 국경은 전쟁 중이니 민심이 덜 흔들리고, 내륙은 진휼로 관리
     const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner);
@@ -222,7 +212,6 @@ function upkeep(s, world) {
       if (govern + drill >= 1) gainExp(s, g, govern + drill);
     }
   }
-  for (const [nid, v] of Object.entries(overstack)) if (+nid === s.playerId && !s.spectator) log(s, `🍞 한 지역에 대군이 몰려 보급난으로 ${fmtTroops(v)}이(가) 흩어졌습니다. (지역당 약 ${fmtTroops(Math.round(50000 / (s.df || 1)))} + 인구에 비례해 버팀)`, [+nid], 'warn');
   for (const [nid, v] of Object.entries(volunteers)) {
     if (+nid === s.playerId && !s.spectator) log(s, `🙋 ${s.nations[nid].name}${danger[nid] ? '이(가) 위기에 처하자 백성들이 앞다퉈' : '에'} 자원 입대했습니다. (총 +${fmtTroops(v)})`, [+nid], 'info');
   }
@@ -262,6 +251,8 @@ export function checkGameOver(s) {
   const owned = s.nations.filter((n) => n.alive && (n.id === s.playerId || isVassalOf(s, n.id, s.playerId))).reduce((a, n) => a + nationRegions(s, n.id).length, 0);
   // 승리: 육지 100% (s.winShare는 컴퓨터의 견제·확장 속도 기준으로만 씀)
   if (owned >= landCount(s)) return { win: true, text: '모든 땅을 차지해 천하를 통일했습니다!' };
+  // 8할을 차지하면 여기서 끝낼지 한 번 물음
+  if (!s.asked80 && owned / landCount(s) >= 0.8) return { win: true, partial: true, text: `천하의 ${Math.floor((owned / landCount(s)) * 100)}%를 차지했습니다! 여기서 통일을 선언하고 끝낼 수도, 끝까지 싸울 수도 있습니다.` };
   const rivals = s.nations.filter((n) => n.alive && n.id !== s.playerId && !isVassalOf(s, n.id, s.playerId));
   if (!rivals.length) return { win: true, text: '모든 국가가 멸망하거나 당신의 속국이 되었습니다!' };
   return null;
@@ -322,6 +313,9 @@ export function endTurnFinish(s, world) {
   spawnHorde(s, world, stateRng(s));
   fiefLoyalty(s, world, stateRng(s));
   endgame(s, world, stateRng(s));
+  promoteHordes(s, world, stateRng(s));
+  hordeDemands(s, world, stateRng(s));
+  fiefRequests(s, world, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
   arriveReinforcements(s);
