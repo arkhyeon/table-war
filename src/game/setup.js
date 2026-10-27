@@ -298,6 +298,16 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   for (const { n, mine } of around) {
     if (!chosen.has(n.id) || mine.length < 2) continue;
     n.heartland = true;
+    // 랜덤 대륙: 가운데 나라는 둘러싸여 먹히기 쉬우니 맞닿은 빈 땅 2곳을 더 갖고 시작 (역사 시나리오는 실제 영토 그대로)
+    if (scn.procedural) {
+      for (let q = 0; q < 2; q++) {
+        const add = mine.flatMap((i) => world.regions[i].neighbors.map((x) => x.id)).find((x) => !s.regions[x].sea && s.regions[x].owner === null);
+        if (add === undefined) break;
+        s.regions[add].owner = n.id;
+        s.regions[add].loyalty = 80;
+        mine.push(add);
+      }
+    }
     n.gold = Math.round(n.gold * 1.5); // 넉넉한 금으로 초반 외교
     for (const i of mine) {
       const r = s.regions[i];
