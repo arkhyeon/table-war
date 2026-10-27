@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT, movable,
   doRelief, reliefCost, canRelief, RELIEF_COOLDOWN, ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, bulkDraftPlan, doBulkDraft,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
@@ -1244,6 +1244,19 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
         ))}
         <small className="muted">이름을 누르면 그 지역으로 이동</small>
       </div>
+      {(() => {
+        const plan = bulkDraftPlan(game, pid);
+        const men = plan.reduce((a, x) => a + x.amt, 0), gold = plan.reduce((a, x) => a + x.gold, 0);
+        return (
+          <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+            <span>🪖 징병</span>
+            <button className="primary" disabled={!plan.length || me.ap < COST.conscript} onClick={() => act((s) => doBulkDraft(s, pid))}>
+              {plan.length}곳 일괄 징집 ({fmtTroops(men)} · {fmtGold(gold)}금 · {COST.conscript}AP)
+            </button>
+            <small className="muted">민심 50 이상, 이번 턴 징병 안 한 곳에서 인구의 5%까지만(민심 영향 없음)</small>
+          </div>
+        );
+      })()}
       <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
         <span>🍚 진휼</span>
         <span>민심</span>

@@ -51,6 +51,8 @@ export function planNations(world, scn, seed, opts = {}) {
       const names = CIVS[civ].nations;
       return { name: names[Math.floor(i / civs.length) % names.length] || `${CIVS[civ].name}${i}`, civ, region: r.id, size: rng.int(3, 6), capital: null, ruler: null, pools: [civ] };
     });
+    // 섬나라는 맨 뒤로 (기본 선택이 늘 섬나라가 되지 않게)
+    if (list.length > 1) list.push(list.shift());
   } else {
     // 수도 배치: 모든 (국가, 지역) 쌍을 거리순으로 정렬해 가까운 것부터 짝지음 → 연쇄로 밀려나는 일 방지
     const pairs = [];

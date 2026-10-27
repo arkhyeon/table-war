@@ -389,6 +389,38 @@ export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = r
   return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 ${CONSCRIPT[mode].name}했습니다${sent}. (금 -${fmtGold(c.gold)}${c.loyalty ? `, 민심 -${c.loyalty}` : ''})` };
 }
 
+// 일괄 징병: 민심이 깎이지 않는 만큼(인구 5%)만 여러 지역에서 한꺼번에, 행동력 1
+export function bulkDraftPlan(s, nid) {
+  return nationRegions(s, nid)
+    .filter((rid) => !s.regions[rid].conscripted && (s.regions[rid].loyalty ?? 100) >= 50)
+    .map((rid) => {
+      const r = s.regions[rid];
+      const amt = Math.min(conscriptMax(s, rid, nid), Math.floor((r.pop * 1000 * 0.05) / 100) * 100);
+      return { rid, amt, gold: amt * CONSCRIPT.draft.gold };
+    })
+    .filter((x) => x.amt >= 500);
+}
+export function doBulkDraft(s, nid) {
+  const n = s.nations[nid];
+  const err = canAct(s, nid, COST.conscript);
+  if (err) return fail(err);
+  let men = 0, spent = 0, k = 0;
+  for (const x of bulkDraftPlan(s, nid)) {
+    if (n.gold - spent < x.gold) break;
+    const r = s.regions[x.rid];
+    r.troops += x.amt;
+    r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
+    r.conscripted = true;
+    men += x.amt;
+    spent += x.gold;
+    k++;
+  }
+  if (!k) return fail('징병할 수 있는 지역이 없거나 금이 부족합니다.');
+  n.gold -= spent;
+  n.ap -= COST.conscript;
+  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다. (금 -${fmtGold(spent)}, 민심 영향 없음)` };
+}
+
 // 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
 // 진휼 가능 여부 (일괄 진휼용)
 export const canRelief = (s, rid) => s.regions[rid].reliefTurn === undefined || s.turn - s.regions[rid].reliefTurn >= RELIEF_COOLDOWN;
