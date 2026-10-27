@@ -122,8 +122,10 @@ function frontierInfo(s, world, nid) {
   let seeds = stage.length ? [...new Set([...stage, ...queue.filter((r) => threat[r] > s.regions[r].troops / 1000)])] : queue;
   // 육지 전선이 없는 섬나라: 바다 건너편을 마주한 항구로 병력을 모음
   if (!seeds.length) {
+    // 본토를 다 먹었으면 본토에 병력을 둘 이유가 없음 → 바다 건너 상대를 마주한 항구(없으면 해안)로 모두 모음
     const ports = mine.filter((r) => s.regions[r].buildings.port && overseas(s, world, nid, r).length);
     seeds = ports.length ? ports : mine.filter((r) => s.regions[r].buildings.port);
+    if (!seeds.length) seeds = mine.filter((r) => world.regions[r].coastal && overseas(s, world, nid, r).length);
   }
   queue.length = 0;
   for (const r of seeds) {
@@ -149,6 +151,8 @@ function targetBonus(s, nid, owner) {
   if (s.joint.some((j) => (j.a === nid || j.b === nid) && j.target === owner)) b += 30;
   if (s.coalition?.target === owner) b += 20;
   if (s.nations[nid].goal === owner) b += 20;
+  // 전선이 3개 이상이면 목표 아닌 나라와는 새로 싸우지 않음 (목표 외 침공 억제)
+  else if ((s.nations[nid].fronts || 0) >= 3 && s.coalition?.target !== owner) b -= 22;
   const op = s.opinion[nid][owner];
   if (op < -20) b += Math.min(25, -op / 3);
   if (s.nations[nid].grudge === owner) b += 15;
@@ -279,7 +283,16 @@ export function aiActions(s, world, nid) {
         const { est, opts: mo0 } = attackOption(s, world, nid, r, nb.id, count + mc, gens, need);
         const mo = mc ? { ...mo0, merc: mc } : mo0;
         if (est.ratio < need) continue;
-        const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0);
+        // 점령 후 지킬 수 있나: 빼앗은 땅 둘레의 적 병력이 남을 병력보다 많으면 감점 (먹고 뺏기는 소모 방지)
+        let exposure = 0;
+        if (!t.sea) for (const y of world.regions[nb.id].neighbors) {
+          const e = s.regions[y.id];
+          if (y.id !== r && !e.sea && e.owner !== null && e.owner !== nid && hostile(s, nid, e.owner)) exposure += e.troops;
+        }
+        const left = (count + mc) * Math.max(0.2, 1 - 0.7 / Math.max(0.5, est.ratio));
+        // 사방이 적(전선 3개↑)인 나라만 적용
+        const exposed = !drive && (n.fronts || 0) >= 3 && t.owner !== null && exposure > left * 1.2 ? 10 + Math.min(10, (exposure - left) / 3000) : 0;
+        const value = (t.sea ? 10 : t.pop * 0.6) + (t.owner !== null && !t.sea && s.nations[t.owner].capital === nb.id ? 25 : 0) - exposed;
         opts.push({ score: 38 + value + Math.min(est.ratio, 4) * 5 + targetBonus(s, nid, t.owner) - cost * 4 + n.aggression * 10 + (reg.sea ? (island ? 25 : 15) : 0) + (sameIsle ? 15 : 0) + (drive && t.owner !== null ? drive * 20 : 0) - (building && t.owner !== null && !sameIsle ? 20 : 0), run: () => planMove(s, world, nid, r, nb.id, count, gens, mo) });
       }
     }
@@ -300,10 +313,11 @@ export function aiActions(s, world, nid) {
           // 나보다 약한 나라의 해안은 한 칸 더 건너서라도, 덜 확실해도 계속 상륙해 갉아먹음 (섬나라 압박)
           const weaker = (o) => s.regions[o.target].owner !== null && nationPower(s, nid) >= nationPower(s, s.regions[o.target].owner) * 1.5;
           const reach = overseas(s, world, nid, r).filter((o) => o.zone === z.id && (island || o.via === null || weaker(o)) && (o.via === null || !s.regions[o.via].troops || s.regions[o.via].owner === nid));
-          const target = reach.find((o) => {
+          // 가까운 곳이 아니라 가장 약해 보이는 해안을 노림
+          const target = reach.filter((o) => {
             const t = s.regions[o.target];
             return !(t.owner !== null && s.turn <= 3) && t.troops * (weaker(o) ? 1.05 : 1.6) < count * (o.type === 'cliff' ? 0.45 : 0.75);
-          });
+          }).sort((a, b) => s.regions[a.target].troops - s.regions[b.target].troops)[0];
           if (!target || moveCheck(s, world, nid, r, z.id, count, gens)) continue;
           opts.push({
             score: 30 + s.regions[target.target].pop * 0.4 + (island ? 25 : 0) + (s.regions[target.target].owner === n.goal ? 10 : 0) - (target.via !== null ? 5 : 0),
@@ -501,14 +515,34 @@ export function aiDiplomacy(s, world, nid) {
   if (n.fief || n.horde) return;
   if (breakOut(s, world, nid, rng)) return;
   if (seekCoalition(s, world, nid, rng)) return;
-  if (!rng.chance(0.18)) return;
   const others = s.nations.filter((o) => o.alive && o.id !== nid);
   if (!others.length) return;
   const neighbors = new Set();
   for (const r of nationRegions(s, nid)) for (const nb of world.regions[r].neighbors) {
     const o = s.regions[nb.id].owner;
-    if (o !== null && o !== nid) neighbors.add(o);
+    if (o !== null && o !== nid && !s.regions[nb.id].sea) neighbors.add(o);
   }
+  // 전선 정리: 3개국 이상과 싸우는 중이면 목표 하나만 남기고 나머지와 불가침을 청함 (금을 얹어서)
+  // 다 거절하면 → 새 전선을 열지 않고 목표만 치며 수비(n.fronts로 공격 판단에 반영)
+  const foes = [...neighbors].filter((o) => !s.nations[o].horde && getRel(s, nid, o).type === 'none');
+  n.fronts = foes.length;
+  if (foes.length >= 3 && (s.turn < 40 || (n.lost || 0) > 0) && rng.chance(0.5)) {
+    n.napTried = n.napTried || {};
+    const cand = foes.filter((o) => o !== n.goal && (n.napTried[o] ?? -99) < s.turn - 5).sort((a, b) => nationPower(s, b) - nationPower(s, a))[0];
+    if (cand !== undefined) {
+      n.napTried[cand] = s.turn;
+      const deal = emptyDeal();
+      deal.treaty = 'nap';
+      deal.give.gold = Math.min(Math.round(n.gold * 0.25), Math.round(nationPower(s, cand) * 0.1) * G);
+      if (!validateDeal(s, world, nid, cand, deal)) {
+        if (s.nations[cand].isPlayer) {
+          if (s.proposals.length < 2) s.proposals.push({ from: nid, deal, text: describeDeal(s, nid, cand, deal) + ' (사방이 적이라 화친을 청함)' });
+        } else if (evaluateDeal(s, world, nid, cand, deal) >= 0) applyDeal(s, world, nid, cand, deal);
+        return;
+      }
+    }
+  }
+  if (!rng.chance(0.18)) return;
   const pool = others.filter((o) => neighbors.has(o.id) || rng.chance(0.2));
   if (!pool.length) return;
   const o = rng.pick(pool);

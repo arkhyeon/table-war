@@ -269,9 +269,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   s.weather = rollWeather(world, 1, hashString(String(seed)) & 0xffff);
   s.history.push(encodeOwners(s));
   updateExplored(s, world);
-  // 중원(대평야): 수도 위치로 '가운데' 나라를 고름 — 사방(4방향 중 3방향 이상)에 다른 나라가 있고,
-  // 다른 수도들까지 거리 합이 가장 작은 나라들(나라 6개당 1곳). 인재가 모이고(장수 +2) 병력 +25%,
-  // 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%·민심 +1/턴, 주인이 바뀌어도 유지)
+  // 중원(대평야): 수도 위치로 '가운데' 나라를 고름 —
+  //  ① 동서남북 4방향 모두에 다른 나라가 있고 ② 내륙(수도가 해안이 아니고 땅의 절반 이상이 내륙: 바다를 등지지 않음)
+  //  ③ 그중 다른 수도들까지 거리 합이 가장 작은 나라(나라 6개당 1곳)
+  // 인재가 모이고(장수 +2) 병력 +25%, 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%·민심 +1/턴, 주인이 바뀌어도 유지)
   const caps = s.nations.filter((n) => n.capital !== null).map((n) => ({ n, c: world.regions[n.capital] }));
   const around = caps.map(({ n, c }) => {
     const quad = new Set();
@@ -282,10 +283,12 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       sum += Math.hypot(dx, dy);
       quad.add(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'E' : 'W') : dy > 0 ? 'S' : 'N');
     }
-    return { n, mine: s.regions.map((r, i) => i).filter((i) => s.regions[i].owner === n.id), k: quad.size, sum };
+    const mine = s.regions.map((r, i) => i).filter((i) => s.regions[i].owner === n.id);
+    const inland = !c.coastal && mine.filter((i) => !world.regions[i].coastal).length >= mine.length / 2;
+    return { n, mine, k: quad.size, inland, sum };
   });
   const pickN = Math.max(1, Math.round(caps.length / 6));
-  const chosen = new Set(around.filter((a) => a.k >= 3).sort((a, b) => a.sum - b.sum).slice(0, pickN).map((a) => a.n.id));
+  const chosen = new Set(around.filter((a) => a.k === 4 && a.inland).sort((a, b) => a.sum - b.sum).slice(0, pickN).map((a) => a.n.id));
   for (const { n, mine } of around) {
     if (!chosen.has(n.id) || mine.length < 2) continue;
     n.heartland = true;

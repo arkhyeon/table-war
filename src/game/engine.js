@@ -182,13 +182,24 @@ export function supplied(s, world, nid) {
   if (cap === null || cap === undefined || s.regions[cap].owner !== nid) return set;
   const q = [cap];
   set.add(cap);
+  // 바다는 보급로를 끊지 않음 (적 함대가 지키는 바다만 막힘) — 바다를 거쳐 이어진 내 땅도 보급됨
+  const seaOk = new Set();
   for (let i = 0; i < q.length; i++) {
     for (const nb of world.regions[q[i]].neighbors) {
-      if (set.has(nb.id) || s.regions[nb.id].owner !== nid) continue;
+      const t = s.regions[nb.id];
+      if (set.has(nb.id) || seaOk.has(nb.id)) continue;
+      if (t.sea) {
+        if (t.owner !== null && t.owner !== nid && t.troops > 0 && getRel(s, nid, t.owner).type === 'none') continue;
+        seaOk.add(nb.id);
+        q.push(nb.id);
+        continue;
+      }
+      if (t.owner !== nid) continue;
       set.add(nb.id);
       q.push(nb.id);
     }
   }
+  for (const z of seaOk) if (s.regions[z].owner === nid) set.add(z);
   return set;
 }
 
