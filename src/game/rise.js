@@ -429,7 +429,7 @@ function raiderName(s, civ, sea, rng) {
 }
 export function spawnHorde(s, world, rng) {
   if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
-  if (s.nations.filter((n) => n.alive && n.horde).length >= 3 || rng() >= 0.04) return;
+  if (s.nations.filter((n) => n.alive && n.horde).length >= 3 || rng() >= 0.02) return;
   const ew = edgeWeight(s, world);
   const df = s.df || 1;
   const opts = [];
@@ -630,10 +630,11 @@ function breakAway(s, world, host, g, rids, rng) {
 
 function successionCrisis(s, world, n, rng) {
   const land = ownLand(s, n.id);
-  if (land.length < 8 || n.horde || n.fief) return;
+  // 큰 나라(10곳↑)만, 천하에 한 번 일어나면 30턴은 잠잠
+  if (land.length < 10 || n.horde || n.fief || s.turn - (s.lastSplit ?? -99) < 30) return;
   const king = s.generals[n.ruler];
   const claimant = nationGenerals(s, n.id).filter((g) => g.id !== n.ruler && g.persona !== '충신' && (g.persona === '야심' || (g.loyalty ?? 60) < 55)).sort((a, b) => rating(b) - rating(a))[0];
-  if (!king || !claimant || rng() >= (claimant.persona === '야심' ? 0.6 : 0.3)) return;
+  if (!king || !claimant || rng() >= (claimant.persona === '야심' ? 0.35 : 0.12)) return;
   const C = world.regions[n.capital ?? land[0]];
   // 왕위를 노리는 자의 근거지: 그가 있는 곳 (수도면 수도에서 가장 먼 땅)
   const far = (r) => Math.hypot(world.regions[r].cx - C.cx, world.regions[r].cy - C.cy);
@@ -644,6 +645,7 @@ function successionCrisis(s, world, n, rng) {
   if (!rids.includes(base)) rids.unshift(base);
   if (rids.length < 2) return;
   claimant.region = base;
+  s.lastSplit = s.turn;
   const m = breakAway(s, world, n.id, claimant, [base, ...rids.filter((r) => r !== base)], rng);
   (s.turnEvents = s.turnEvents || []).push({ icon: '👑', title: `계승 분쟁 — ${m.name}`, story: `${n.name}의 새 군주 ${king.name}을(를) 인정하지 않는 ${claimant.name}이(가) 스스로 왕을 칭하고 ${m.name}을(를) 세웠습니다.`, effect: `${n.name}이(가) 둘로 갈라짐 (${rids.length}개 지역 이탈)`, nations: [n.id, m.id], global: true, rids });
   log(s, `👑 계승 분쟁! ${claimant.name}이(가) ${n.name}에서 갈라져 나와 ${m.name}을(를) 세웠습니다.`, [n.id, m.id], 'warn');
@@ -656,7 +658,7 @@ export function generalDrama(s, world, rng) {
   for (const n of s.nations.slice()) {
     if (!n.alive || n.horde) continue;
     const k = s.generals[n.ruler];
-    if (k && k.status === 'active' && s.turn > 12 && !(n.healthy > s.turn) && rng() < 0.005) {
+    if (k && k.status === 'active' && s.turn > 12 && !(n.healthy > s.turn) && rng() < 0.003) {
       k.status = 'dead';
       (s.turnEvents = s.turnEvents || []).push({ icon: '⚰️', title: `${k.name} 붕어`, story: `${n.name}의 군주 ${k.name}이(가) 세상을 떠났습니다.`, effect: '새 군주가 즉위합니다', nations: [n.id], global: n.isPlayer || ownLand(s, n.id).length >= 8 });
       log(s, `⚰️ ${n.name}의 군주 ${k.name}이(가) 세상을 떠났습니다.`, [n.id], 'general');
@@ -693,14 +695,15 @@ export function generalDrama(s, world, rng) {
     }
   }
   // 3) 영웅 봉기: 충성 40 아래의 장수가 지키던 땅을 들고 일어섬 (턴에 한 번까지, 큰 나라일수록 위험)
-  if (late || s.nations.length >= MAX_IDS) return;
+  // 영웅 봉기는 천하에 25턴에 한 번까지
+  if (late || s.nations.length >= MAX_IDS || s.turn - (s.lastUprising ?? -99) < 25) return;
   const total = s.regions.filter((r) => !r.sea).length;
   for (const g of rng.shuffle(Object.values(s.generals).filter((x) => x.status === 'active' && x.persona !== '충신' && (x.loyalty ?? 60) < 40))) {
     const n = s.nations[g.nation];
     if (!n?.alive || n.horde || n.fief || n.ruler === g.id || n.capital === g.region || s.regions[g.region]?.owner !== n.id) continue;
     const land = ownLand(s, n.id);
-    if (land.length < 6) continue;
-    const p = ((40 - g.loyalty) / 300) * (g.persona === '야심' ? 2 : 1) * (0.6 + (land.length / total) * 4) * (1 - tv(gensIn(s, g.region, n.id).filter((x) => x.id !== g.id), '치안'));
+    if (land.length < 8) continue;
+    const p = ((40 - g.loyalty) / 900) * (g.persona === '야심' ? 2 : 1) * (0.6 + (land.length / total) * 4) * (1 - tv(gensIn(s, g.region, n.id).filter((x) => x.id !== g.id), '치안'));
     if (rng() >= p) continue;
     const k = Math.max(2, Math.min(5, Math.round(land.length * 0.08) + 1));
     const rids = [g.region];
@@ -712,6 +715,7 @@ export function generalDrama(s, world, rng) {
     }
     if (land.length - rids.length < 3) continue;
     const m = breakAway(s, world, n.id, g, rids, rng);
+    s.lastUprising = s.turn;
     (s.turnEvents = s.turnEvents || []).push({ icon: '⚔️', title: `영웅 봉기 — ${g.name}`, story: `${n.name}에 불만을 품은 ${g.name}이(가) 지키던 ${s.regions[rids[0]].name} 일대를 들고 일어나 ${m.name}을(를) 세웠습니다.`, effect: `${n.name}의 ${rids.length}개 지역 이탈`, nations: [n.id, m.id], global: true, rids });
     log(s, `⚔️ ${g.name}이(가) ${n.name}에 반기를 들고 ${m.name}을(를) 세웠습니다!`, [n.id, m.id], 'warn');
     if (n.isPlayer) for (const x of nationGenerals(s, n.id)) if ((x.loyalty ?? 60) < 40) log(s, `⚠️ ${x.name}의 충성도 위태롭습니다 (${Math.round(x.loyalty)}). 포상을 고려하세요.`, [n.id], 'warn');
