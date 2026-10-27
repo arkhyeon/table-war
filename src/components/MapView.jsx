@@ -598,7 +598,8 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const mark = landmarks?.has(r.id);
               const wx = weather ? WEATHER[weather[r.id]] : null;
               const cut = cutSet?.has(r.id);
-              const gc = visible ? genCount?.[r.id] || 0 : 0;
+              const gi = visible ? genCount?.[r.id] : null;
+              const gc = gi ? (typeof gi === 'number' ? gi : gi.n) : 0;
               const b = reg.buildings;
               const icons = [b.walls && `🏰${b.walls < 3 ? b.walls : ''}`, b.market && '💰', b.port && '⚓', b.barracks && '⚔️'].filter(Boolean);
               // 멀리서 볼 때 병력 모르는 지역은 이름표 대신 작은 점 (큰 지도에서 지도가 이름표로 덮이지 않게)
@@ -645,11 +646,18 @@ export default function MapView({ world, regions, nations, selected, targets, on
                     </g>
                   )}
                   {gc > 0 && (
-                    <g transform={`translate(${bw / 2 + s * 0.6},0)`}>
-                      <circle r={ib * 0.62} fill="#2a2210" stroke="#ffe066" strokeWidth={s * 0.1} />
-                      <text dy={ib * 0.32} fontSize={ib * (gc > 1 ? 0.7 : 0.9)} textAnchor="middle" fill="#ffe066" fontWeight="700">
-                        {gc > 1 ? `★${gc}` : '★'}
+                    <g transform={`translate(${bw / 2 + s * 0.35},${-s * 0.2})`}>
+                      {/* 군단 깃발: 대장 이름 첫 글자, 장수가 여럿이면 수 */}
+                      <line y1={s * 0.9} y2={-s * 1.3} stroke="#3b2b1a" strokeWidth={s * 0.14} strokeLinecap="round" />
+                      <path d={`M0 ${-s * 1.3}H${s * 1.25}L${s * 0.95} ${-s * 0.75}L${s * 1.25} ${-s * 0.2}H0Z`} fill={col} stroke="#1a1a1a" strokeWidth={s * 0.08} />
+                      <text x={s * 0.5} y={-s * 0.55} fontSize={s * 0.62} textAnchor="middle" fill="#fff" fontWeight="800" stroke="#1a1a1a" strokeWidth={s * 0.12} paintOrder="stroke">
+                        {gi?.ch || '★'}
                       </text>
+                      {gc > 1 && (
+                        <text x={s * 0.5} y={s * 0.35} fontSize={s * 0.5} textAnchor="middle" fill="#ffe066" fontWeight="800" stroke="#1a1a1a" strokeWidth={s * 0.1} paintOrder="stroke">
+                          ×{gc}
+                        </text>
+                      )}
                     </g>
                   )}
                   {icons.length > 0 && (

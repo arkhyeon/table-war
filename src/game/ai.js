@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -232,6 +232,20 @@ export function aiActions(s, world, nid) {
     const spot = nationRegions(s, nid).filter((r) => governorOf(s, r)?.role !== 'civ').sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
     if (civs.length && spot !== undefined) doRelocate(s, nid, civs[0].id, spot);
   }
+  // 장수 모집: 전선보다 장수가 모자라면 (금이 넉넉할 때)
+  {
+    const fronts = nationRegions(s, nid).filter((r) => !s.regions[r].sea && world.regions[r].neighbors.some((x) => { const t = s.regions[x.id]; return !t.sea && t.owner !== null && t.owner !== nid && hostile(s, nid, t.owner); })).length;
+    const gc = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active').length;
+    if (gc < Math.max(2, Math.ceil(fronts / 2)) && n.gold > hireCost(s, nid) + 60 * G && !hireCheck(s, nid)) doHire(s, nid);
+  }
+  // 군단 배치: 전선에서 병력이 가장 많은데 장수가 없는 곳으로, 후방에서 노는 무관을 보냄 (턴당 2명까지)
+  if (n.ap > 2) {
+    const front = nationRegions(s, nid).filter((r) => !s.regions[r].sea && world.regions[r].neighbors.some((x) => { const t = s.regions[x.id]; return !t.sea && t.owner !== nid && (t.owner === null || hostile(s, nid, t.owner)); }));
+    const frontSet = new Set(front);
+    const spots = front.filter((r) => !gensIn(s, r, nid).length).sort((a, b) => s.regions[b].troops - s.regions[a].troops);
+    const idle = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && !g.order && g.role !== 'civ' && !frontSet.has(g.region) && n.ruler !== g.id);
+    for (let k = 0; k < Math.min(2, spots.length, idle.length) && n.ap > 2; k++) doRelocate(s, nid, idle[k].id, spots[k]);
+  }
   // 천도: 수도가 적 대군과 맞닿아 위험하면, 안쪽의 큰 고을로 (드물게)
   if (n.capital !== null && n.ap >= 5 && stateRng(s)() < 0.3) {
     const cap = n.capital;
@@ -282,7 +296,9 @@ export function aiActions(s, world, nid) {
         // 사방이 적이면 비운 땅을 노린 기회 공격을 막도록 수비를 더 남김
         let keep = reg.sea ? 0 : threat[r] > 0 ? Math.min(Math.floor(reg.troops * ((n.fronts || 0) >= 3 ? 0.6 : 0.33)), Math.ceil(threat[r] * ((n.fronts || 0) >= 3 ? 700 : 300))) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
-        const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep);
+        // 군단 규칙: 나라는 장수가 이끄는 군단만 칠 수 있고, 병력은 지휘 한도까지
+        if (!gens.length && t.owner !== null && !t.sea && !s.nations[t.owner].horde) continue;
+        const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep, commandCap(s, gens));
         if (count < 2000 && !reg.sea) continue;
         if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;
         let need = t.owner === null ? 1.25 : s.coalition?.target === t.owner && inCoalition(s, nid) ? 1.05 : 1.15 + (1 - n.aggression) * 0.45;

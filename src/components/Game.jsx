@@ -4,7 +4,7 @@ import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -105,7 +105,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       setGame(s);
       return;
     }
-    // 집결지·전선 자동 행군 (행동력 없음)
+    // 군단 목표 행군 → 집결지·전선 자동 행군 (내 땅 안은 행동력 없음)
+    for (const line of armyMarch(s, world, pid)) log(s, line, [pid], 'info');
     const sent = autoMarch(s, world, pid);
     endTurnPlan(s, world);
     if (sent) log(s, `🚩 후방 병력 ${fmtTroops(sent)}이(가) ${s.nations[pid].rally?.to != null ? `집결지 ${s.regions[s.nations[pid].rally.to].name}` : '전선'}(으)로 행군합니다.`, [pid], 'info');
@@ -210,9 +211,15 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     return m;
   }, [moveMode, selected, game, world, pid, pick]);
 
+  // 지역마다 군단(장수) 수와 대장(통솔 최고)의 첫 글자
   const genCount = useMemo(() => {
     const c = {};
-    for (const g of Object.values(game.generals)) if (g.status === 'active' && !g.order) c[g.region] = (c[g.region] || 0) + 1;
+    for (const g of Object.values(game.generals)) {
+      if (g.status !== 'active' || g.order) continue;
+      const x = (c[g.region] = c[g.region] || { n: 0, lead: -1, ch: '' });
+      x.n++;
+      if (g.lead > x.lead) { x.lead = g.lead; x.ch = g.name[0]; }
+    }
     return c;
   }, [game.generals]);
 
@@ -465,6 +472,14 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           openFief={() => setModal({ type: 'fief', rid: selected })}
           openCall={() => setModal({ type: 'call', rid: selected })}
           openDisband={() => setModal({ type: 'disband', rid: selected })}
+          pickTarget={(gid) => {
+            setSheet(false);
+            setPick({
+              hint: `${game.generals[gid].name} 군단의 목표를 누르세요 (매 턴 3칸씩 진군, 닿으면 공격)`,
+              valid: new Set(game.regions.map((r, i) => i).filter((i) => !game.regions[i].sea)),
+              onPick: (rid) => act((s) => { s.generals[gid].target = rid; return { ok: true, msg: `${s.generals[gid].name} 군단 목표: ${s.regions[rid].name}` }; }),
+            });
+          }}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}

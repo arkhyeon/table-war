@@ -501,6 +501,24 @@ export function canSail(s, nid, from, genIds) {
 export const movable = (s, rid) => Math.max(0, s.regions[rid].troops - (s.regions[rid].moved || 0));
 const arrive = (r, n) => (r.moved = Math.min(r.troops, (r.moved || 0) + n));
 
+// ───────── 군단(토탈워식): 다른 나라를 치려면 장수가 이끄는 군단이 필요, 병력은 지휘 한도까지 ─────────
+// 지휘 한도: 가장 통솔 높은 장수 4천+통솔×300, 함께 가는 장수는 절반씩 더함. 장수 없는 소부대는 5천(빈 땅 토벌만)
+export const SQUAD = 5000;
+export function commandCap(s, genIds) {
+  const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active');
+  const df = s.df || 1;
+  if (!gens.length) return SQUAD * df;
+  const caps = gens.map((g) => 4000 + g.lead * 300).sort((a, b) => b - a);
+  return Math.round(((caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) * df) / 100) * 100;
+}
+// 공격(남의 땅·중립지·적 함대)인지
+export const isAttack = (s, nid, to) => {
+  const tr = s.regions[to];
+  if (tr.owner === nid) return false;
+  if (tr.sea) return tr.owner !== null && tr.troops > 0;
+  return tr.owner === null || getRel(s, nid, tr.owner).type !== 'alliance';
+};
+
 export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const fr = s.regions[from], tr = s.regions[to];
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
@@ -513,6 +531,12 @@ export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}
   const maxCount = fr.sea ? movable(s, from) : Math.min(fr.troops - 1, movable(s, from));
   if (count > maxCount && count <= (fr.sea ? fr.troops : fr.troops - 1)) return `이번 턴에 이미 움직인 병력은 다시 움직일 수 없습니다 (이동 가능 ${maxCount.toLocaleString('ko-KR')}명).`;
   if (count < 1 || count > maxCount) return fr.sea ? '이동 병력이 올바르지 않습니다.' : '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
+  // 군단 규칙: 나라를 치려면 장수가 필요하고, 병력은 지휘 한도까지
+  if (isAttack(s, nid, to)) {
+    if (!genIds.length && tr.owner !== null && !s.nations[tr.owner].horde) return '나라를 치려면 장수가 이끄는 군단이 필요합니다. (장수 없는 소부대는 빈 땅·도적만)';
+    const cap = commandCap(s, genIds);
+    if (count > cap) return `지휘 한도 초과: ${genIds.length ? '이 장수들은' : '장수 없는 소부대는'} ${cap.toLocaleString('ko-KR')}명까지 이끌 수 있습니다.`;
+  }
   if (tr.owner !== null && tr.owner !== nid) {
     const rel = getRel(s, nid, tr.owner);
     // 동맹국 땅으로는 원군(병사만)을 보낼 수 있음
@@ -773,6 +797,54 @@ export function autoMarch(s, world, nid) {
     if (planMove(s, world, nid, r, to, cnt, [], { auto: true }).ok) sent += cnt;
   }
   return sent;
+}
+
+// 군단 목표 행군: 장수에게 먼 목표를 정해 두면 매 턴 내 땅으로 3칸씩 다가가고, 맞닿으면 공격
+// 경로: 내 땅(육지·강)만 지나 목표(또는 목표와 맞닿은 내 땅)까지
+function marchPath(s, world, nid, from, target) {
+  const prev = new Map([[from, null]]);
+  const q = [from];
+  for (let k = 0; k < q.length; k++) {
+    const r = q[k];
+    if (r === target) break;
+    for (const e of world.regions[r].neighbors) {
+      if (prev.has(e.id) || s.regions[e.id].sea) continue;
+      // 목표가 아니면 내 땅(육지·강)만 지나감, 목표로는 해협도 건넘
+      if (e.id !== target && (s.regions[e.id].owner !== nid || (e.type !== 'land' && e.type !== 'river'))) continue;
+      if (e.id === target && e.type !== 'land' && e.type !== 'river' && e.type !== 'strait') continue;
+      prev.set(e.id, r);
+      q.push(e.id);
+    }
+  }
+  if (!prev.has(target)) return null;
+  const path = [target];
+  while (path[0] !== from) path.unshift(prev.get(path[0]));
+  return path;
+}
+export function armyMarch(s, world, nid) {
+  const out = [];
+  for (const g of Object.values(s.generals)) {
+    if (g.nation !== nid || g.status !== 'active' || g.target === undefined || g.target === null || g.order) continue;
+    if (g.region === g.target) { delete g.target; out.push(`🚩 ${g.name} 군단이 목표 ${s.regions[g.region].name}에 닿았습니다.`); continue; }
+    const path = marchPath(s, world, nid, g.region, g.target);
+    if (!path) { out.push(`⚠️ ${g.name} 군단: ${s.regions[g.target].name}까지 갈 길이 없습니다.`); delete g.target; continue; }
+    const fr = s.regions[g.region];
+    const count = Math.min(commandCap(s, [g.id]), movable(s, g.region), fr.troops - 1);
+    if (count < 100) continue;
+    // 내 땅으로 갈 수 있는 만큼(3칸) 먼저, 바로 앞이 남의 땅이면 공격
+    let k = 0;
+    while (k + 1 < path.length && k < MARCH_HOPS && s.regions[path[k + 1]].owner === nid) k++;
+    if (k > 0) {
+      const to = path[k];
+      const res = planMove(s, world, nid, g.region, to, count, [g.id], { auto: true });
+      if (res.ok) out.push(`🚩 ${g.name} 군단 ${fmtTroops(count)}이(가) ${s.regions[to].name}(으)로 행군합니다.`);
+    } else {
+      const to = path[1];
+      const res = planMove(s, world, nid, g.region, to, count, [g.id]);
+      out.push(res.ok ? `⚔️ ${g.name} 군단 ${fmtTroops(count)}이(가) ${s.regions[to].name}을(를) 공격합니다.` : `⏸️ ${g.name} 군단 대기: ${res.msg}`);
+    }
+  }
+  return out;
 }
 
 // ───────── 용병: 장수가 이끄는 공격에만, 통솔이 높을수록 많이, 정치가 높을수록 싸게 ─────────
@@ -1276,6 +1348,28 @@ export function succession(s, nid) {
   n.ruler = gens.length ? gens[0].id : null;
   n.newRuler = s.turn; // 계승 분쟁 판정은 턴 끝에 (rise.js)
   if (gens.length) log(s, `👑 ${n.name}의 새 군주로 ${gens[0].name}이(가) 즉위했습니다.`, [nid], 'general');
+}
+
+// 장수 모집 (토탈워식): 금으로 새 장수를 들임. 장수가 많을수록 비싸고, 땅 4곳마다 1명 + 3명까지
+export const hireCost = (s, nid) => Math.round(((50 + nationGenerals(s, nid).length * 12) * G) / 1000) * 1000;
+export const hireMax = (s, nid) => 3 + Math.floor(nationRegions(s, nid).filter((r) => !s.regions[r].sea).length / 4);
+export function hireCheck(s, nid) {
+  const n = s.nations[nid];
+  if (nationGenerals(s, nid).length >= hireMax(s, nid)) return `장수는 ${hireMax(s, nid)}명까지 (땅 4곳마다 1명 더)`;
+  if (n.hired === s.turn) return '이번 턴에 이미 모집했습니다.';
+  if (n.gold < hireCost(s, nid)) return '금이 부족합니다.';
+  return canAct(s, nid, 1);
+}
+export function doHire(s, nid) {
+  const err = hireCheck(s, nid);
+  if (err) return fail(err);
+  const n = s.nations[nid];
+  const g = spawnGeneral(s, nid, stateRng(s), true);
+  if (!g) return fail('응할 인재가 없습니다.');
+  n.gold -= hireCost(s, nid) - 12 * G; // 방금 늘어난 1명분은 빼고 계산
+  n.ap -= 1;
+  n.hired = s.turn;
+  return { ok: true, msg: `${g.name}을(를) 장수로 맞아들였습니다. (무${g.war} 통${g.lead} 지${g.intel} 정${g.pol})` };
 }
 
 // 포상: 금을 내려 충성을 올림 (행동력 없음, 장수마다 6턴에 한 번)

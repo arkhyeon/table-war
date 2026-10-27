@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -51,10 +51,14 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const fr = game.regions[from], tr = game.regions[to];
   const edge = edgeBetween(world, from, to) || { type: 'march' };
   const myGens = gensIn(game, from, pid);
-  const maxCount = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, from));
-  const [count, setCount] = useState(fr.sea ? maxCount : Math.max(1, Math.min(maxCount, fr.troops - 1000)));
   const aid = tr.owner !== null && tr.owner !== pid && getRel(game, pid, tr.owner).type === 'alliance';
   const [sel, setSel] = useState(() => (aid ? [] : myGens.map((g) => g.id)));
+  // 공격이면 군단 지휘 한도까지만
+  const attacking = !aid && tr.owner !== pid && !(tr.sea && (tr.owner === null || tr.troops <= 0));
+  const cap = attacking ? commandCap(game, sel) : Infinity;
+  const maxCount = Math.min(fr.sea ? fr.troops : fr.troops - 1, movable(game, from), cap);
+  const [count0, setCount] = useState(fr.sea ? maxCount : Math.max(1, Math.min(maxCount, fr.troops - 1000)));
+  const count = Math.max(1, Math.min(count0, maxCount));
   const walls = !tr.sea && (tr.buildings.walls || 0) > 0;
   const [mode, setMode] = useState('siege');
   const [engines, setEngines] = useState(Math.min(2, fr.engines || 0));
@@ -96,6 +100,7 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
       <div className="col">
         <label>
           병력 {count.toLocaleString('ko-KR')} / {maxCount.toLocaleString('ko-KR')}명
+          {attacking && <small className="muted"> · ⚔️ 군단 지휘 한도 {cap.toLocaleString('ko-KR')}{sel.length ? '' : ' (장수 없는 소부대: 빈 땅·도적만)'}</small>}
           {(fr.moved || 0) > 0 && <small className="muted"> · 이번 턴 도착 {fmtTroops(Math.min(fr.moved, fr.troops))}은 이동 불가</small>}
           <Slider min={1} max={Math.max(1, maxCount)} step={maxCount > 2000 ? 100 : 1} value={count} onChange={setCount} style={{ width: '100%' }} />
         </label>
@@ -411,6 +416,16 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
           </button>
         ))}
       </div>
+      {tab === 'mine' && (
+        <div className="row" style={{ gap: 8, margin: '6px 0', flexWrap: 'wrap' }}>
+          <button className="primary" disabled={!!hireCheck(game, pid)} onClick={() => act((s) => doHire(s, pid))} title={hireCheck(game, pid) || ''}>
+            📜 장수 모집 ({fmtGold(hireCost(game, pid))}금 · 1AP)
+          </button>
+          <small className="muted">
+            {hireCheck(game, pid) || `장수 ${nationGenerals(game, pid).length}/${hireMax(game, pid)}명`} · 장수 한 명 = 군단 하나. 나라를 치려면 장수가 이끄는 군단이 필요하고, 통솔이 높을수록 많이 이끕니다.
+          </small>
+        </div>
+      )}
       {tab === 'mine' && (
         <table>
           <thead>
@@ -837,6 +852,7 @@ export function HelpModal({ onClose }) {
           <li><b>중원(대평야)</b>: 수도 위치로 고른 가운데 나라(동서남북 4방향 모두에 다른 나라, 바다를 등지지 않은 내륙, 다른 수도들과 가장 가까운 곳, 나라 6개당 1곳)는 장수 +2·병력 +25%로 시작하고, 시작 땅은 🌾대평야(세금 +20%·인구 상한 +30%, 누가 차지해도 유지).</li>
           <li><b>토착 세력</b>: 빈 땅에도 수비병이 있고(4.5천~1만), 15%는 2~3배 강한 토호의 산채입니다.</li>
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
+          <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(4천+통솔×300, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
           <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
           <li><b>장수 충성·성격</b>: 🔥야심가는 충성이 쉽게 떨어지고 🛡️충신은 점점 오릅니다. 충성 40 미만 장수는 지키던 땅을 들고 <b>영웅 봉기</b>로 독립할 수 있으니 장수 창에서 🎁포상하세요(금, 장수마다 6턴에 한 번). 평판·인덕 군주가 충성을 받쳐 줍니다.</li>

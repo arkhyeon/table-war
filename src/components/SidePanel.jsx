@@ -8,7 +8,7 @@ import { CIVS } from '../game/civs.js';
 import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
-  doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, gensIn, nationRegions, nationGenerals, appearChance, getRel,
+  doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, commandCap, gensIn, nationRegions, nationGenerals, appearChance, getRel,
   poachChance, doPoach, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
 import { revokeFief, pacifyCost, pacifyChance, doPacify, setFiefOrder, fiefFoes } from '../game/rise.js';
@@ -80,7 +80,7 @@ function FiefOrder({ world, game, fid, act }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, openCall, openDisband, sheetOpen, onCloseSheet, pickTarget }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -444,7 +444,15 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   g={g}
                   game={game}
                   extra={
-                    orderTo(g) ? (
+                    g.nation === pid && !spectator ? (
+                      <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap', fontSize: 12 }}>
+                        <span className="muted">⚔️ 군단 지휘 {fmtTroops(commandCap(game, [g.id]))}</span>
+                        {orderTo(g) && <span className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발</span>}
+                        {g.target != null && <span>🎯 목표 {game.regions[g.target].name}</span>}
+                        {pickTarget && <button className="sm" onClick={() => pickTarget(g.id)}>🎯 목표 지정</button>}
+                        {g.target != null && <button className="sm ghost" onClick={() => act((s) => (delete s.generals[g.id].target, { ok: true, msg: '목표를 지웠습니다.' }))}>✕</button>}
+                      </div>
+                    ) : orderTo(g) ? (
                       <small className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발 예정</small>
                     ) : g.nation !== pid && (
                       <button className="sm" style={{ marginTop: 4 }} onClick={() => act((s) => doPoach(s, pid, g.id))} disabled={me.ap < COST.poach || me.gold < COST.poachGold || poachChance(game, pid, g) === 0}>
