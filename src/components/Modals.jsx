@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
 import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp, readChance, bestResponse } from '../game/duel.js';
 import { decodeOwners } from '../game/fog.js';
-import { makeRng } from '../game/rng.js';
+import { makeRng, stateRng } from '../game/rng.js';
 import { TERRAIN, EDGE, COST, BUILDINGS, BATTLE_KIND } from '../game/rules.js';
 import { TRAITS, TIER, traitDesc, traitLabel } from '../game/traits.js';
 import { CIVS } from '../game/civs.js';
@@ -13,7 +13,7 @@ import {
   mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, bulkDraftPlan, doBulkDraft, callTroops, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify } from '../game/rise.js';
-import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
+import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
@@ -349,6 +349,7 @@ export function DiplomacyModal({ world, game, act, confirmIt, onClose }) {
           })}
         </tbody>
       </table>
+      <SowBox game={game} act={act} />
       {t && (
         <div style={{ marginTop: 14 }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -888,7 +889,7 @@ export function HelpModal({ onClose }) {
           <li><b>이동·공격은 계획</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 → 병력·함께 갈 장수를 고르고 계획. 바로 실행되지 않고 화살표로 표시되며(오른쪽 아래 목록에서 취소 가능), 턴 종료 때 모든 나라의 계획이 함께 처리됩니다. 같은 곳에 여러 나라 군대가 몰리면 큰 군대부터 차례로 맞붙고, 아군 증원은 전투 전에 합류합니다. 출발한 병력은 그 턴에 다시 계획할 수 없습니다. 일기토를 신청했다면 그 전투 차례에 일기토 창이 뜹니다.</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 산지 +10%. <b>험산 경계</b>(경계선 위 작은 봉우리)로 넘으면 공격 -35%·AP+1, 다른 경계로 돌아가면 없음. 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
-          <li><b>행군</b>: 내 땅으로만 이어지면 한 번에 <b>2칸</b>까지 이동 (계획 화면에서 2칸 너머 내 땅도 선택 가능).</li>
+          <li><b>내선 작전</b>: 내 땅 안 이동은 행동력이 들지 않고, 내 땅으로만 이어지면 한 번에 <b>3칸</b>까지 이동합니다.</li>
           <li><b>세금</b>: 매 턴 자동 징수. 국가 카드 「자세히」에서 세율 설정(높음=세수↑ 민심↓ 인구 정체).</li>
           <li><b>파산</b>: 다음 턴 국고가 바닥날 것 같으면 국가 카드에 경고가 뜹니다. 지역에서 🏳️해산(행동력 없음)으로 병력을 줄이세요. 바닥나면 녹봉을 못 준 만큼(1명당 1금) 병사가 탈영합니다.</li>
           <li><b>병력 불러오기</b>: 지역에서 📯 → 다른 내 지역마다 보낼 병력을 정함(행동력 1, 내 땅 2칸에 1턴). 🚩전선 투입은 「위협받는 국경」 또는 특정 나라 쪽 국경으로 매 턴 자동 행군.</li>
@@ -911,7 +912,9 @@ export function HelpModal({ onClose }) {
           <li><b>공성</b>: 성벽(내구 3)이 있으면 공격 방식 선택. 포위=이겨도 성벽만 깎음(1, 압승 2, 공성 장수 추가), 0이 되면 함락. 강습=이기면 바로 함락하지만 성벽 효과 2배·손실 1.5배. 포위당하지 않은 턴엔 성벽 복구.</li>
           <li><b>날씨</b>: 북쪽은 눈(공격 -25%, AP+1, 세수 -25%), 남쪽은 가뭄(세수 -35%)이 잦지만 남쪽은 풍년(+35%)도 잦아 연간 손익이 비슷합니다. 비는 도강을 어렵게, 폭풍은 항해를 막습니다.</li>
           <li><b>사건</b>: 역병·홍수·지진·금광·교역 호황·해적·도적·용병단·장수 출분 등 어느 나라에나 일어나는 사건이 턴 소식에 카드로 나옵니다.</li>
-          <li><b>세력 균형</b>: 국력이 평균의 2배를 넘으면 주변국 호감이 계속 떨어지고, 1위가 2.5배를 넘으면 대동맹이 결성됩니다. AI 회원국끼리는 싸우지 않고 패권국을 노리며, 패권국의 침공에 방어 +15%.</li>
+          <li><b>이간계</b>: 외교 창에서 두 나라를 골라 금·행동력 1로 이간질 — 성공하면 둘의 호감 -35, 절반 확률로 둘의 동맹·불가침이 깨집니다. 들키면 두 나라가 나를 미워합니다.</li>
+          <li><b>역사 강역</b>: 역사 시나리오는 그 시대의 실제 판도로 시작합니다. 수도 가까운 땅은 본토, 먼 땅은 변경(병력 절반·충성 낮음)입니다.</li>
+          <li><b>세력 균형</b>: 국력이 평균의 2배를 넘으면 주변국 호감이 계속 떨어지고, 1위가 2.5배를 넘으면서 육지의 35% 이상을 가지면 대동맹이 결성됩니다. AI 회원국끼리는 싸우지 않고 패권국을 노리며, 패권국의 침공에 방어 +15%.</li>
           <li><b>일기토</b>: 반격 &gt; 공격 &gt; 방어 &gt; 반격의 가위바위보, 같은 수끼리는 서로 절반 피해. 체력 = 60 + 무력×0.7 + 통솔×0.2, 위력 = 6 + (무력-30)×0.55(맹장·무쌍 특성 가산). 상대 의도 간파는 무력 85%·지력 15%의 전장 감각 차이로 정해져 힌트로 보입니다. 이기면 전투력 +15%, 지면 -15%. 낙마하면 절반 확률로 전사.</li>
           <li><b>장수와 전투력</b>: 장수는 병사 수를 늘리지 않고 배율을 올립니다. 공격 시 동행 장수 중 최고 (무력+통솔)/2 ÷ 250(최대 약 +40%) + 특성, 방어 시 주둔 장수 최고 (통솔×0.6+지력×0.4) ÷ 250 + 특성.</li>
           <li><b>장수</b>: 무관·문관으로 나뉘고 특성은 Ⅰ~Ⅲ 등급. 등급은 F~SSR. 기본은 공평한 무작위 능력치(이름만 역사 인물이고 능력·주특기는 무작위, 나라마다 장수 수준 합이 비슷 — 뛰어난 장수가 있으면 다음 장수는 약해짐). 레벨이 오르면 특성 승급·추가와 칭호. 포로는 등용·처형·석방, 적 장수는 금으로 회유. 멸망한 나라의 왕은 승자의 장수가 되고, 충성이 낮으면 옛 나라를 부흥시킬 수 있습니다.</li>
@@ -1448,5 +1451,27 @@ export function DisbandModal({ game, rid, act, onClose }) {
         <button className="primary" disabled={n < 100} onClick={() => { const res = act((s) => doDisband(s, pid, rid, n)); if (res?.ok) onClose(); }}>해산</button>
       </div>
     </Modal>
+  );
+}
+
+// 이간계: 두 나라를 골라 서로 싸우게 함
+function SowBox({ game, act }) {
+  const pid = game.playerId;
+  const others = game.nations.filter((n) => n.alive && n.id !== pid && !n.horde);
+  const [a, setA] = useState(others[0]?.id);
+  const [b, setB] = useState(others[1]?.id);
+  if (others.length < 2) return null;
+  const err = sowCheck(game, pid, a, b);
+  return (
+    <div className="card row" style={{ gap: 6, flexWrap: 'wrap', margin: '8px 0' }}>
+      <b>🗡️ 이간계</b>
+      <select value={a} onChange={(e) => setA(+e.target.value)}>{others.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select>
+      <span>↔</span>
+      <select value={b} onChange={(e) => setB(+e.target.value)}>{others.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}</select>
+      <button className="sm primary" disabled={!!err} onClick={() => act((s) => doSow(s, pid, a, b, stateRng(s)))}>
+        이간 ({a !== b && a != null && b != null ? fmtGold(sowCost(game, a, b)) : '-'}금 · 1AP · 성공 {Math.round(sowChance(game, pid) * 100)}%)
+      </button>
+      <small className="muted">{err || '성공하면 두 나라 호감 -35, 절반 확률로 둘의 동맹·불가침이 깨짐. 들키면 두 나라가 나를 미워함. 지력 높은 장수가 있으면 잘 됨.'}</small>
+    </div>
   );
 }

@@ -263,3 +263,44 @@ export function doAnnex(s, world, lord, vassal) {
   checkElimination(s, world, vassal);
   return { ok: true, msg: `${V.name}을(를) 병합했습니다.` };
 }
+
+// ───────── 이간계: 금을 써서 두 나라 사이를 갈라놓음 (모든 나라 가능) ─────────
+export const sowCost = (s, a, b) => Math.round(((25 + (nationPower(s, a) + nationPower(s, b)) * 0.08) * G) / 1000) * 1000;
+export function sowChance(s, nid) {
+  const best = Math.max(0, ...Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid).map((g) => g.intel));
+  return Math.max(0.15, Math.min(0.8, 0.2 + best / 160));
+}
+export function sowCheck(s, nid, a, b) {
+  if (a === b || a === nid || b === nid) return '서로 다른 두 나라를 고르세요.';
+  const A = s.nations[a], B = s.nations[b];
+  if (!A?.alive || !B?.alive) return '멸망한 나라입니다.';
+  if (A.horde || B.horde) return '도적 무리에는 쓸 수 없습니다.';
+  if (s.nations[nid].gold < sowCost(s, a, b)) return '금이 부족합니다.';
+  if (s.nations[nid].ap < 1) return '행동력이 부족합니다 (필요 1).';
+  if (s.nations[nid].sowTurn === s.turn) return '이간계는 한 턴에 한 번입니다.';
+  return null;
+}
+export function doSow(s, nid, a, b, rng) {
+  const err = sowCheck(s, nid, a, b);
+  if (err) return { ok: false, msg: err };
+  const n = s.nations[nid], A = s.nations[a], B = s.nations[b];
+  n.gold -= sowCost(s, a, b);
+  n.ap -= 1;
+  n.sowTurn = s.turn;
+  if (rng() < sowChance(s, nid)) {
+    s.opinion[a][b] -= 35;
+    s.opinion[b][a] -= 35;
+    const rel = getRel(s, a, b);
+    let broke = '';
+    if ((rel.type === 'alliance' || rel.type === 'nap') && rng() < 0.5) {
+      setRel(s, a, b, null);
+      broke = ` ${A.name}과(와) ${B.name}의 ${rel.type === 'alliance' ? '동맹' : '불가침'}이 깨졌습니다!`;
+    }
+    log(s, `🗡️ 이간계 성공 — ${A.name}과(와) ${B.name}이(가) 서로를 의심하기 시작했습니다.${broke}`, [nid], 'diplo');
+    return { ok: true, msg: `이간계 성공! 두 나라의 호감 -35.${broke}` };
+  }
+  s.opinion[a][nid] -= 15;
+  s.opinion[b][nid] -= 15;
+  log(s, `🗡️ ${n.name}의 이간계가 들통났습니다. (${A.name}·${B.name}의 호감 -15)`, [nid, a, b], 'warn');
+  return { ok: true, accepted: false, msg: '이간계가 들통났습니다. 두 나라의 호감 -15.' };
+}

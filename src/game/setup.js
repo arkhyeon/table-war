@@ -115,6 +115,28 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   plan.forEach((n) => (owner[n.region] = n.id));
   // 라운드 로빈으로 영토 확장
   const counts = plan.map(() => 1);
+  // 역사 강역(area): 그 시대 실제로 다스리던 땅을 먼저 차지 — 여러 상자가 겹치면 가장 작은 상자가 이김(섬·속령 같은 세부)
+  // 수도에서 가까운 size개는 본토, 나머지는 변경(병력 적고 충성 낮음 = 이름뿐인 넓은 땅)
+  const frontier = new Set();
+  if (world.geo && plan.some((n) => n.area)) {
+    const got = plan.map(() => []);
+    world.regions.forEach((wr, r) => {
+      if (wr.sea || owner[r] !== null) return;
+      const [lon, lat] = world.geo.toLL(wr.cx, wr.cy);
+      let best = null, ba = Infinity;
+      for (const n of plan) for (const [w, s0, e, nn] of n.area || []) {
+        const a = (e - w) * (nn - s0);
+        if (lon >= w && lon <= e && lat >= s0 && lat <= nn && a < ba) { ba = a; best = n; }
+      }
+      if (best) { owner[r] = best.id; got[best.id].push(r); }
+    });
+    for (const n of plan) {
+      const cap = world.regions[n.region];
+      const d = (r) => Math.hypot(world.regions[r].cx - cap.cx, world.regions[r].cy - cap.cy);
+      got[n.id].sort((x, y) => d(x) - d(y)).forEach((r, k) => k + 1 >= n.size && frontier.add(r));
+      counts[n.id] += got[n.id].length;
+    }
+  }
   for (let round = 0; round < Math.max(12 * Math.max(1, Math.ceil(df)), ...plan.map((n) => n.size + 2)); round++) {
     let grew = false;
     for (const n of plan) {
@@ -164,7 +186,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     // 변방(나라들의 한가운데에서 멀수록)일수록 최대 1.8배 강함 → 변방국이 공짜로 커지지 못하고 중앙과 맞붙게
     const strong = owner[i] === null && rng() < 0.15;
     const edge = owner[i] === null ? 1 + 0.8 * Math.min(1, Math.hypot(wr.cx - mid[0], wr.cy - mid[1]) / spread) : 1;
-    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1)) / df)) * 100;
+    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1) * (frontier.has(i) ? 0.5 : 1)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
       owner: owner[i],
@@ -172,7 +194,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       pop: Math.round((wr.pop / df) * 10) / 10,
       buildings: { market: 0, walls: 0, port: 0, barracks: 0 },
       conscripted: false,
-      loyalty: owner[i] === null ? 50 : 80,
+      loyalty: owner[i] === null ? 50 : frontier.has(i) ? 65 : 80,
       river,
     };
   });
@@ -188,7 +210,8 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     scenarioId: scn.id,
     seed,
     opts,
-    winShare: scn.winShare || 0.6,
+    // 처음부터 큰 제국이 있으면 승리 기준을 그만큼 높임 (시작하자마자 이기지 않게)
+    winShare: Math.min(0.9, Math.max(scn.winShare || 0.6, Math.max(...plan.map((n) => counts[n.id])) / Math.max(1, world.landCount) + 0.2)),
     df,
     turn: 1,
     rs: hashString(`play:${scn.id}:${seed}`) | 0,

@@ -5,7 +5,7 @@ import {
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
   marchVia, genIndexOn, genIndexOff } from './engine.js';
-import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
+import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
 
@@ -546,6 +546,14 @@ export function aiDiplomacy(s, world, nid) {
         } else if (evaluateDeal(s, world, nid, cand, deal) >= 0) applyDeal(s, world, nid, cand, deal);
         return;
       }
+    }
+  }
+  // 이간계: 사방이 적이고 돈이 있으면, 서로 맞닿은 두 적국을 갈라놓음 (서로 싸우게)
+  if (foes.length >= 2 && n.gold >= 120 * G && rng.chance(0.25)) {
+    for (const x of foes) for (const y of foes) {
+      if (x >= y || getRel(s, x, y).type === 'none' && s.opinion[x][y] < -30) continue;
+      const touch = nationRegions(s, x).some((r) => world.regions[r].neighbors.some((e) => s.regions[e.id].owner === y));
+      if (touch && !sowCheck(s, nid, x, y)) { doSow(s, nid, x, y, rng); return; }
     }
   }
   if (!rng.chance(0.18)) return;

@@ -148,26 +148,35 @@ export function income(s, nid) {
 }
 
 // 내 땅 2칸 행군: 내 땅(육지)만 거쳐 닿는 두 칸 거리의 내 땅이면 중간 지역을 돌려줌
+// 내선 작전(모든 나라): 내 땅(육지·강)으로만 이어지면 3칸까지 한 번에, 행동력 없이 이동
+export const MARCH_HOPS = 3;
 export function marchVia(world, s, from, to) {
   if (!s) return null;
   const nid = s.regions[from].owner;
-  if (nid === null || s.regions[from].sea || s.regions[to].sea || s.regions[to].owner !== nid) return null;
-  for (const a of world.regions[from].neighbors) {
-    if (a.type !== 'land' && a.type !== 'river') continue;
-    const m = s.regions[a.id];
-    if (m.sea || m.owner !== nid) continue;
-    const b = world.regions[a.id].neighbors.find((x) => x.id === to && (x.type === 'land' || x.type === 'river'));
-    if (b) return a.id;
+  if (nid === null || s.regions[from].sea || s.regions[to].sea || s.regions[to].owner !== nid || from === to) return null;
+  const first = new Map();
+  let front = [from];
+  const seen = new Set([from]);
+  for (let d = 0; d < MARCH_HOPS; d++) {
+    const nxt = [];
+    for (const r of front) for (const e of world.regions[r].neighbors) {
+      if ((e.type !== 'land' && e.type !== 'river') || seen.has(e.id) || s.regions[e.id].owner !== nid || s.regions[e.id].sea) continue;
+      seen.add(e.id);
+      first.set(e.id, r === from ? e.id : first.get(r));
+      if (e.id === to) return d === 0 ? null : first.get(e.id);
+      nxt.push(e.id);
+    }
+    front = nxt;
   }
   return null;
 }
+const ownLand = (s, nid, r) => s && s.regions[r].owner === nid && !s.regions[r].sea;
 
 export function moveCost(world, from, to, s) {
   const e = edgeBetween(world, from, to);
-  if (!e) {
-    const mid = marchVia(world, s, from, to);
-    return mid === null ? Infinity : Math.max(moveCost(world, from, mid, s), moveCost(world, mid, to, s));
-  }
+  // 내 땅 안 이동(맞닿았거나 내 땅으로 3칸 안)은 행동력 없음
+  if (s && ownLand(s, s.regions[from].owner, from) && ownLand(s, s.regions[from].owner, to) && (e ? e.type === 'land' || e.type === 'river' : marchVia(world, s, from, to) !== null)) return 0;
+  if (!e) return Infinity;
   let c = COST.move;
   if (e.mtn) c += 1;
   if (e.type === 'cliff' || e.type === 'strait') c += 1;
@@ -543,7 +552,7 @@ export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}
   const fr = s.regions[from], tr = s.regions[to];
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
   const e = edgeBetween(world, from, to) || (marchVia(world, s, from, to) !== null ? { type: 'march' } : null);
-  if (!e) return '인접하지 않은 지역입니다. (내 땅 안에서는 2칸까지 행군 가능)';
+  if (!e) return '인접하지 않은 지역입니다. (내 땅 안에서는 3칸까지 행군 가능)';
   if (e.type === 'coast' && !canSail(s, nid, from, genIds)) return '배를 띄우려면 출발지에 항구가 있거나 수군 장수가 필요합니다.';
   const seaMove = e.type === 'coast' || e.type === 'sea' || e.type === 'landing' || e.type === 'cliff';
   const sailor = genIds.some((id) => (s.generals[id]?.traits || []).some(([t, l]) => t === '항해' && l >= 3));

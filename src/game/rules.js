@@ -23,7 +23,7 @@ export const EDGE = {
   sea: { name: '해전', mult: 1, desc: '함대끼리 교전' },
   landing: { name: '상륙', mult: 0.75, desc: '바다에서 상륙 공격 -25% (수군·상륙 장수가 경감)' },
   cliff: { name: '절벽 상륙', mult: 0.45, desc: '깎아지른 해안: 공격 -55%, 행동력 +1 (상륙 장수가 경감)' },
-  march: { name: '행군(내 땅 2칸)', mult: 1, desc: '내 땅으로만 이어진 길로 한 번에 2칸' },
+  march: { name: '행군(내 땅 3칸)', mult: 1, desc: '내 땅으로만 이어진 길로 한 번에 3칸, 행동력 없음' },
 };
 // 험산 경계: 이 경계선으로 넘으면 공격 -35%, 행동력 +1 (다른 경계로 돌아가면 없음)
 export const MTN_EDGE = { name: '험산 경계', mult: 0.65 };

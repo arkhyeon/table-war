@@ -1,5 +1,6 @@
 // 시나리오: bbox = [서경, 남위, 동경, 북위]
 // 국가: [이름, 문명, 경도, 위도, 초기 지역 수, 수도명, 군주(이름|무|통|지|정|특성), 장수 풀(선택)]
+import { AREAS } from './areas.js';
 const N = (name, civ, lon, lat, size, capital, ruler, pools, power) => ({ name, civ, lon, lat, size, capital, ruler, pools, power });
 
 export const SCENARIOS = [
@@ -658,7 +659,6 @@ export const SCENARIOS = [
       N('명', 'china', 116.4, 39.9, 12, '북경', '만력제|20|40|60|40|정치'),
       N('도요토미 정권', 'japan', 135.5, 34.69, 9, '오사카', '도요토미 히데요시|60|90|95|95|인덕'),
       N('도쿠가와', 'japan', 139.69, 35.69, 4, '에도', '도쿠가와 이에야스|70|95|90|95|수성'),
-      N('대마도', 'japan', 129.3, 34.4, 1, '이즈하라', '소 요시토시|60|65|70|75|외교'),
       N('건주여진', 'steppe', 124.8, 41.6, 3, '페 알라', '누르하치|90|95|90|85|기마'),
       N('해서여진', 'steppe', 126.5, 43.8, 2, '울라', '부잔타이|75|75|65|60|기마'),
       N('야인여진', 'steppe', 131, 46, 2, '야인부', '야인여진 대추장|75|70|50|50|기마'),
@@ -823,6 +823,9 @@ const ERA = {
     N('마푸체', 'americas', -72.6, -38.7, 2, '아라우카니아', '라우타로의 후예|90|85|60|55|산악'),
   ],
 };
+// 역사 강역 붙이기 (areas.js) — 지역사 나라와 시대별 세계 나라 모두
+for (const scn of SCENARIOS) for (const n of scn.nations || []) if (AREAS[scn.id]?.[n.name]) n.area = AREAS[scn.id][n.name];
+for (const [k, list] of Object.entries(ERA)) for (const n of list) if (AREAS[`era${k}`]?.[n.name]) n.area = AREAS[`era${k}`][n.name];
 // 시대마다 쓸 세계 나라 목록 (BC는 BC220 세계사, 1805는 1800 세계사)
 const eraFor = (year) => {
   if (year < 0) return SCENARIOS.find((x) => x.id === 'world_bc220').nations;

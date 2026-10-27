@@ -185,11 +185,23 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       if (why && !why.startsWith('행동력') && !why.startsWith('이동 병력')) kind = 'blocked';
       m.set(nb.id, kind);
     }
-    // 내 땅 2칸 행군 목적지
-    if (!fr.sea) for (const nb of world.regions[selected].neighbors) for (const x of world.regions[nb.id].neighbors) {
-      if (x.id === selected || m.has(x.id) || marchVia(world, game, selected, x.id) === null) continue;
-      const why = moveCheck(game, world, pid, selected, x.id, Math.max(1, probe), gens);
-      m.set(x.id, why && !why.startsWith('행동력') && !why.startsWith('이동 병력') ? 'blocked' : 'move');
+    // 내 땅 3칸 행군 목적지 (내선 작전)
+    if (!fr.sea) {
+      const seen = new Set([selected]);
+      let front = [selected];
+      for (let d = 0; d < 3; d++) {
+        const nxt = [];
+        for (const r of front) for (const x of world.regions[r].neighbors) {
+          if (seen.has(x.id) || game.regions[x.id].sea || game.regions[x.id].owner !== pid || (x.type !== 'land' && x.type !== 'river')) continue;
+          seen.add(x.id);
+          nxt.push(x.id);
+          if (!m.has(x.id)) {
+            const why = moveCheck(game, world, pid, selected, x.id, Math.max(1, probe), gens);
+            m.set(x.id, why && !why.startsWith('행동력') && !why.startsWith('이동 병력') ? 'blocked' : 'move');
+          }
+        }
+        front = nxt;
+      }
     }
     return m;
   }, [moveMode, selected, game, world, pid]);
