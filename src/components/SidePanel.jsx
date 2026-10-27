@@ -8,8 +8,9 @@ import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
   doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN,
+  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
+import { revokeFief } from '../game/rise.js';
 
 export function relTag(game, a, b) {
   if (a === b) return null;
@@ -63,7 +64,7 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, sheetOpen, onCloseSheet }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, openBribe, openFief, sheetOpen, onCloseSheet }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
@@ -128,7 +129,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           {me.rally?.to != null && game.regions[me.rally.to]?.owner === pid && <span>🚩 집결: {game.regions[me.rally.to].name}</span>}
           {!spectator && openLoyalty && (
             <button className="sm" onClick={openLoyalty} title="민심 낮은 순으로 지역을 보고 진휼">
-              🍚 민심 관리{lowLoy ? ` (위험 ${lowLoy})` : ''}
+              📋 지역 목록{lowLoy ? ` (민심 위험 ${lowLoy})` : ''}
             </button>
           )}
           {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
@@ -265,6 +266,22 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               </span>
             )}
           </div>
+          {!spectator && !mine && !r.sea && (() => {
+            const own = r.owner !== null ? game.nations[r.owner] : null;
+            if (own?.fief && own.lord === pid)
+              return (
+                <div className="actions" style={{ marginTop: 10 }}>
+                  <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 수입 40% 상납</span>
+                  <button onClick={() => act((s) => revokeFief(s, world, pid, own.id))}>🏯 군단 회수</button>
+                </div>
+              );
+            const agents = bribeAgents(game, world, pid, selected);
+            return agents.length > 0 && !(own && (own.horde || getRel(game, pid, own.id).type === 'alliance' || own.capital === selected)) ? (
+              <div className="actions" style={{ marginTop: 10 }}>
+                <button onClick={openBribe} title="맞닿은 곳의 장수가 돈으로 이 땅을 넘어오게 함 (실패하면 돈은 상대에게)">💰 매수 ({fmtGold(bribeCost(game, selected))}금)</button>
+              </div>
+            ) : null;
+          })()}
           {mine && (
             <>
               <div className="actions" style={{ marginTop: 10 }}>
@@ -298,6 +315,9 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 >
                   🚩 {me.rally?.to === selected ? '집결 해제' : '집결지로'}
                 </button>
+                {me.capital !== selected && (
+                  <button onClick={openFief} title="장수에게 이 일대를 맡겨 스스로 다스리게 함 (언제든 회수)">🏯 분봉</button>
+                )}
                 {me.capital !== selected && (
                   <button
                     onClick={() => act((s) => doMoveCapital(s, world, pid, selected))}

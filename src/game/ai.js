@@ -433,7 +433,7 @@ function seekCoalition(s, world, nid, rng) {
   const threat = [...nbs].filter((o) => hostile(s, nid, o) && nationPower(s, o) > myP * 1.4).sort((a, b) => nationPower(s, b) - nationPower(s, a))[0];
   if (threat === undefined || !rng.chance(0.5)) return false;
   const bordersThreat = (x) => nationRegions(s, x).some((r) => world.regions[r].neighbors.some((nb) => s.regions[nb.id].owner === threat));
-  const partners = s.nations.filter((o) => o.alive && o.id !== nid && o.id !== threat && bordersThreat(o.id) && getRel(s, o.id, threat).type !== 'alliance' && !isVassalOf(s, o.id, threat));
+  const partners = s.nations.filter((o) => o.alive && !o.fief && !o.horde && o.id !== nid && o.id !== threat && bordersThreat(o.id) && getRel(s, o.id, threat).type !== 'alliance' && !isVassalOf(s, o.id, threat));
   if (!partners.length) return false;
   const o = rng.pick(partners);
   const deal = emptyDeal();
@@ -481,6 +481,8 @@ function breakOut(s, world, nid, rng) {
 export function aiDiplomacy(s, world, nid) {
   const rng = stateRng(s);
   const n = s.nations[nid];
+  // 군단(분봉)과 도적 무리는 외교를 하지 않음
+  if (n.fief || n.horde) return;
   if (breakOut(s, world, nid, rng)) return;
   if (seekCoalition(s, world, nid, rng)) return;
   if (!rng.chance(0.18)) return;

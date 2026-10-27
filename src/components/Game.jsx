@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
@@ -80,6 +80,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   };
   // 큰 지도는 턴 처리에 시간이 걸리므로 '처리 중' 표시를 먼저 그린 뒤 계산
   const [busy, setBusy] = useState(false);
+  const [panTo, setPanTo] = useState(null);
   const doEndTurn = () => {
     if (busy) return;
     setBusy(true);
@@ -341,7 +342,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             showTroops={showTroops}
             weather={game.weather}
             cutSet={cutSet}
-            focus={replay ? replay.list[replay.i].to : null}
+            focus={replay ? replay.list[replay.i].to : panTo}
             flash={flashSet}
             orders={myOrders}
             home={game.nations[pid]?.capital}
@@ -407,6 +408,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           openGenerals={() => setModal({ type: 'gens' })}
           openConscript={() => setModal({ type: 'conscript', rid: selected })}
           openLoyalty={() => setModal({ type: 'loyalty' })}
+          openBribe={() => setModal({ type: 'bribe', rid: selected })}
+          openFief={() => setModal({ type: 'fief', rid: selected })}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
@@ -436,7 +439,9 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           각 나라가 움직이는 중…
         </div>
       )}
-      {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} act={act} onFocus={(rid) => { setSelected(rid); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} act={act} onFocus={(rid) => { setSelected(rid); setPanTo(rid); setTimeout(() => setPanTo(null), 1500); setModal(null); setSheet(true); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'bribe' && <BribeModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
+      {modal?.type === 'fief' && <FiefModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'save' && (
         <SaveModal
           game={game}

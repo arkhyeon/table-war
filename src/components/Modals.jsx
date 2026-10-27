@@ -10,7 +10,9 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, conscriptMax, conscriptCost, doConscript, CONSCRIPT, movable,
   doRelief, reliefCost, canRelief, RELIEF_COOLDOWN, ownDistances, reinforceTurns, frontierOf,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe,
 } from '../game/engine.js';
+import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
@@ -56,9 +58,14 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
   const [mode, setMode] = useState('siege');
   const [engines, setEngines] = useState(Math.min(2, fr.engines || 0));
   const isAttack = !aid && tr.owner !== pid && !(tr.sea && (tr.owner === null || tr.troops <= 0));
-  const opts = walls ? { mode, engines } : { engines };
-  const err = moveCheck(game, world, pid, from, to, count, sel);
-  const est = useMemo(() => (isAttack && !err ? estimateBattle(game, world, pid, from, to, count, sel, opts) : null), [game, world, pid, from, to, count, sel, isAttack, err, mode, engines]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 용병: 장수가 이끄는 공격에만 (통솔 → 최대 인원, 정치 → 값)
+  const mCap = isAttack && !tr.sea ? mercCap(game, sel) : 0;
+  const mPrice = mercPrice(game, sel);
+  const [mercWant, setMerc] = useState(0);
+  const merc = Math.min(mercWant, mCap);
+  const opts = walls ? { mode, engines, merc } : { engines, merc };
+  const err = moveCheck(game, world, pid, from, to, count, sel) || (merc * mPrice > game.nations[pid].gold ? '용병을 살 금이 부족합니다.' : null);
+  const est = useMemo(() => (isAttack && !err ? estimateBattle(game, world, pid, from, to, count + merc, sel, opts) : null), [game, world, pid, from, to, count, sel, isAttack, err, mode, engines, merc]); // eslint-disable-line react-hooks/exhaustive-deps
   const rel = tr.owner !== null && tr.owner !== pid ? getRel(game, pid, tr.owner) : null;
   const betrayal = isAttack && rel && (rel.type === 'nap' || rel.type === 'vassal');
   const owner = tr.owner === null ? (tr.sea ? '빈 바다' : '중립 세력') : game.nations[tr.owner].name;
@@ -107,6 +114,20 @@ export function MoveModal({ world, game, from, to, act, onClose, onDone, onDuel 
                 );
               })}
             </div>
+          </div>
+        )}
+        {isAttack && !tr.sea && (
+          <div className="card col" style={{ gap: 4 }}>
+            <b>💰 용병 고용 <small className="muted">(이 전투에만 함께 싸우고 떠남 · 장수가 있어야 함)</small></b>
+            {mCap > 0 ? (
+              <label style={{ fontSize: 13 }}>
+                {fmtTroops(merc)} / 최대 {fmtTroops(mCap)} · 금 {fmtGold(merc * mPrice)} (1명당 {mPrice}금)
+                <Slider min={0} max={mCap} step={100} value={merc} onChange={setMerc} style={{ width: '100%' }} />
+                <small className="muted">최대 인원은 장수의 통솔, 값은 정치에 따라 달라집니다.</small>
+              </label>
+            ) : (
+              <small className="muted">함께 갈 장수를 넣으면 고용할 수 있습니다.</small>
+            )}
           </div>
         )}
         {walls && isAttack && (
@@ -857,7 +878,12 @@ export function HelpModal({ onClose }) {
           <li><b>자원병</b>: 민심 60 이상인 지역은 매 턴 백성이 스스로 입대합니다. 영토를 잃거나 수도가 위협받으면 민심 40 이상 지역에서 4배로 늘어납니다.</li>
           <li><b>민심</b>: 점령 직후 15(중립지는 35)에서 매 턴 회복. 주둔군 3천↑·수도·낮은 세율·인덕 장수로 빨라짐. <b>통치 부담은 내륙(국경에 닿지 않은 곳)만</b>: 전 육지의 1/8을 차지할 때마다 -1(최대 -5). 25 미만이면 반란. 대책: 🍚진휼(돈만 듦, 지역마다 6턴에 한 번, +7/+14 — 국가 카드의 「민심 관리」에서 민심 낮은 순으로 일괄 진휼), 계엄, 치안 장수.</li>
           <li><b>후방 징병</b>: 징병 창의 「보낼 곳」에서 다른 내 지역을 고르면, 내 땅 2칸마다 1턴 걸려 그곳에 도착(도착지를 잃으면 출발지로).</li>
-          <li><b>천운</b>: 한 나라가 육지 30%를 넘게 차지하면 가끔(언제일지 모름, 앞설수록 잦음) 대반란·명장 망명·반패권 원조(맞닿은 나라들에 군자금·의병) 중 하나가 일어납니다.</li>
+          <li><b>천운</b>: 한 나라가 육지 25%를 넘게 차지하면 가끔(언제일지 모름, 앞설수록 잦음) 대반란·명장 망명·반패권 원조(맞닿은 나라들에 군자금·의병) 중 하나가 일어납니다.</li>
+          <li><b>용병</b>: 장수가 이끄는 공격 계획에서만 고용. 장수 통솔이 높을수록 많이, 정치가 높을수록 싸게. 그 전투만 함께 싸우고 떠남(손실도 나눠 짐).</li>
+          <li><b>매수</b>: 맞닿은 내 지역에 장수가 있어야 함. 지력·정치↑·상대 민심↓일수록 성공, 수비 장수·성벽이 있으면 어려움. 실패하면 금은 상대 나라가 가짐. 수도·동맹·도적 무리는 불가.</li>
+          <li><b>분봉</b>: 내 지역에서 🏯분봉 → 장수에게 이어진 땅 몇 곳을 맡기면 그 장수가 컴퓨터처럼 알아서 다스리고 싸움(내 외교를 따름, 수입 40% 상납, 통일에 포함). 군단 땅을 눌러 언제든 회수. 충성 40 미만이면 역모로 독립할 수 있음.</li>
+          <li><b>도적 무리</b>: 황건적·산적단·해적단 같은 무리가 빈 땅이나 민심이 무너진 땅에서 일어남(동시에 최대 3). 협상·매수 불가, 쳐부숴야 함.</li>
+          <li><b>지역 목록</b>: 국가 카드의 📋 지역 목록에서 병력·민심·인구 순으로 보고, 이름을 누르면 그 지역으로 이동.</li>
           <li><b>속국</b>: 수입 25% 조공, 종주국과 맞닿은 적을 함께 공격, 속국 땅도 통일(100%)에 포함, 병합하면 민심 70으로 바로 안정.</li>
           <li><b>보급</b>: 수도와 끊긴 지역은 ✂ 표시, 병력이 매 턴 1~10% 무작위 감소, 전투력 -20%(보급 특성으로 경감).</li>
           <li><b>공성</b>: 성벽(내구 3)이 있으면 공격 방식 선택. 포위=이겨도 성벽만 깎음(1, 압승 2, 🛠️공성병기·공성 장수 추가), 0이 되면 함락. 강습=이기면 바로 함락하지만 성벽 효과 2배·손실 1.5배. 포위당하지 않은 턴엔 성벽 복구.</li>
@@ -1187,6 +1213,7 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const [th, setTh] = useState(60);
+  const [sort, setSort] = useState('troops');
   const list = nationRegions(game, pid)
     .filter((rid) => !game.regions[rid].sea)
     .map((rid) => {
@@ -1194,8 +1221,8 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
       const inner = world.regions[rid].neighbors.every((x) => game.regions[x.id].sea || game.regions[x.id].owner === pid);
       return { rid, r, inner, loy: Math.round(r.loyalty ?? 100), cost: reliefCost(game, rid), ready: canRelief(game, rid) };
     })
-    .sort((a, b) => a.loy - b.loy);
-  const pick = list.filter((x) => x.loy < th && x.ready);
+    .sort((a, b) => (sort === 'troops' ? b.r.troops - a.r.troops : sort === 'pop' ? b.r.pop - a.r.pop : a.loy - b.loy));
+  const pick = list.filter((x) => x.loy < th && x.ready).sort((a, b) => a.loy - b.loy);
   const total = pick.reduce((a, x) => a + x.cost, 0);
   const bulk = () =>
     act((s) => {
@@ -1209,8 +1236,16 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
       return n ? { ok: true, msg: `${n}곳에 진휼했습니다. (금 -${fmtGold(spent)})` } : { ok: false, msg: '진휼할 수 있는 곳이 없거나 금이 부족합니다.' };
     });
   return (
-    <Modal title="🍚 민심 관리" onClose={onClose} wide>
+    <Modal title="📋 지역 목록" onClose={onClose} wide>
+      <div className="row" style={{ marginBottom: 8, gap: 6 }}>
+        <span>정렬</span>
+        {[['troops', '🪖 병력'], ['loy', '❤️ 민심'], ['pop', '👥 인구']].map(([k, l]) => (
+          <button key={k} className={'sm' + (sort === k ? ' primary' : '')} onClick={() => setSort(k)}>{l}</button>
+        ))}
+        <small className="muted">이름을 누르면 그 지역으로 이동</small>
+      </div>
       <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+        <span>🍚 진휼</span>
         <span>민심</span>
         {[40, 60, 80].map((v) => (
           <button key={v} className={'sm' + (th === v ? ' primary' : '')} onClick={() => setTh(v)}>
@@ -1227,13 +1262,102 @@ export function LoyaltyModal({ world, game, act, onFocus, onClose }) {
           <div key={x.rid} className="row" style={{ gap: 8, fontSize: 13, borderBottom: '1px dashed var(--line)', padding: '3px 0' }}>
             <b style={{ width: 34, textAlign: 'right', color: x.loy < 25 ? 'var(--danger)' : x.loy < 50 ? 'var(--accent)' : 'var(--ok)' }}>{x.loy}</b>
             <a style={{ flex: 1, cursor: 'pointer' }} onClick={() => onFocus(x.rid)}>
-              {x.r.name} <small className="muted">{x.inner ? '내륙' : '국경'}</small>
+              {x.r.name} <small className="muted">{x.inner ? '내륙' : '국경'}{game.nations[pid].capital === x.rid ? ' · 수도' : ''}</small>
             </a>
+            <span style={{ width: 70, textAlign: 'right' }}>🪖 {fmtTroops(x.r.troops)}</span>
+            <span className="muted" style={{ width: 54, textAlign: 'right' }}>👥 {Math.round(x.r.pop)}천</span>
             <button className="sm" disabled={!x.ready || me.gold < x.cost || x.loy >= 100} onClick={() => act((s) => doRelief(s, pid, x.rid))}>
               {x.ready ? `진휼 ${fmtGold(x.cost)}` : `${RELIEF_COOLDOWN - (game.turn - x.r.reliefTurn)}턴 뒤`}
             </button>
           </div>
         ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ───────── 매수: 맞닿은 곳의 장수가 돈으로 지역을 넘어오게 함 ─────────
+export function BribeModal({ world, game, rid, act, onClose }) {
+  const pid = game.playerId;
+  const r = game.regions[rid];
+  const agents = bribeAgents(game, world, pid, rid).sort((a, b) => bribeChance(game, world, pid, rid, b) - bribeChance(game, world, pid, rid, a));
+  const [gid, setGid] = useState(agents[0]?.id);
+  const g = game.generals[gid];
+  const cost = bribeCost(game, rid);
+  const err = gid === undefined ? '맞닿은 내 지역에 장수가 없습니다.' : bribeCheck(game, world, pid, rid, gid);
+  const owner = r.owner === null ? '중립 세력' : game.nations[r.owner].name;
+  return (
+    <Modal title={`💰 ${r.name} 매수`} onClose={onClose}>
+      <div className="col">
+        <div className="muted" style={{ fontSize: 13 }}>
+          {owner}의 땅을 돈으로 넘어오게 합니다. 장수의 지력·정치가 높을수록, 그 땅 민심이 낮을수록 잘 되고, 수비 장수·성벽이 있으면 어렵습니다. <b>실패하면 금은 {r.owner === null ? '날아갑니다' : `${owner}이(가) 갖습니다`}.</b> 성공하면 수비병 절반이 귀순합니다.
+        </div>
+        <div className="gen-picks">
+          {agents.map((a) => (
+            <button key={a.id} className={'gen-pick' + (a.id === gid ? ' on' : '')} onClick={() => setGid(a.id)}>
+              <span>{a.id === gid ? '✅' : '⬜'} <b>{a.name}</b></span>
+              <small>지{a.intel} 정{a.pol} · 성공률 {Math.round(bribeChance(game, world, pid, rid, a) * 100)}%</small>
+            </button>
+          ))}
+        </div>
+        <div className="kv">
+          <span>비용</span>
+          <span>{fmtGold(cost)}금 · 1 AP (보유 {fmtGold(game.nations[pid].gold)})</span>
+          <span>성공률</span>
+          <span>{g ? `${Math.round(bribeChance(game, world, pid, rid, g) * 100)}%` : '-'}</span>
+        </div>
+        {err && <div style={{ color: 'var(--danger)' }}>{err}</div>}
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>취소</button>
+          <button className="primary" disabled={!!err} onClick={() => { const res = act((s) => doBribe(s, world, pid, rid, gid)); if (res?.ok || res?.done) onClose(); }}>
+            💰 매수 시도
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ───────── 분봉: 장수에게 땅을 맡겨 스스로 다스리게 함 ─────────
+export function FiefModal({ world, game, rid, act, onClose }) {
+  const pid = game.playerId;
+  const me = game.nations[pid];
+  const gens = nationGenerals(game, pid).filter((g) => g.id !== me.ruler && !g.order).sort((a, b) => (b.loyalty ?? 60) - (a.loyalty ?? 60));
+  const mine = nationRegions(game, pid).length;
+  const [gid, setGid] = useState(gens[0]?.id);
+  const [n, setN] = useState(Math.min(5, Math.max(1, mine - 2)));
+  const rids = fiefRegions(game, world, pid, rid, n);
+  const err = grantFiefCheck(game, pid, gid, rids);
+  const g = game.generals[gid];
+  return (
+    <Modal title="🏯 분봉 — 장수에게 땅 맡기기" onClose={onClose}>
+      <div className="col">
+        <div className="muted" style={{ fontSize: 13 }}>
+          맡긴 땅은 장수가 컴퓨터처럼 알아서 다스리고 싸웁니다(내 외교를 따름). 수입의 {Math.round(FIEF_TRIBUTE * 100)}%를 바치고, 그 땅도 통일에 포함됩니다. 언제든 회수할 수 있지만, <b>충성 40 미만이면 역모로 독립할 수 있습니다</b>.
+        </div>
+        <div className="gen-picks">
+          {gens.map((x) => (
+            <button key={x.id} className={'gen-pick' + (x.id === gid ? ' on' : '')} onClick={() => setGid(x.id)}>
+              <span>{x.id === gid ? '✅' : '⬜'} <b>{x.name}</b></span>
+              <small style={{ color: (x.loyalty ?? 60) < 40 ? 'var(--danger)' : undefined }}>
+                충성 {Math.round(x.loyalty ?? 60)} · 무{x.war} 통{x.lead} 지{x.intel} 정{x.pol}
+              </small>
+            </button>
+          ))}
+        </div>
+        <label>
+          맡길 땅 {rids.length}곳 ({game.regions[rid].name}에서 이어진 곳, 수도 제외)
+          <Slider min={1} max={Math.max(1, mine - 2)} value={n} onChange={setN} style={{ width: '100%' }} />
+        </label>
+        <small className="muted">{rids.map((x) => game.regions[x].name).join(', ')}</small>
+        {g && (g.loyalty ?? 60) < 40 && <div style={{ color: 'var(--danger)' }}>⚠️ 충성이 낮아 역모 위험이 큽니다.</div>}
+        {err && <div style={{ color: 'var(--danger)' }}>{err}</div>}
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>취소</button>
+          <button className="primary" disabled={!!err} onClick={() => { const res = act((s) => grantFief(s, world, pid, gid, rids)); if (res?.ok) onClose(); }}>
+            🏯 맡기기 (1 AP)
+          </button>
+        </div>
       </div>
     </Modal>
   );

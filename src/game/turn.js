@@ -6,7 +6,7 @@ import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, na
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations, fortune } from './rise.js';
+import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -89,7 +89,7 @@ function balanceOfPower(s, world) {
       s.coalition = { target: top.id, since: s.turn };
       log(s, `⚔️ ${top.name}의 패권에 맞서 대동맹이 결성되었습니다! 각국이 ${top.name}을(를) 공동의 적으로 삼습니다.`, s.nations.map((x) => x.id), 'diplo');
     }
-    const members = alive.filter((o) => o.id !== top.id && !isVassalOf(s, o.id, top.id) && getRel(s, o.id, top.id).type !== 'alliance');
+    const members = alive.filter((o) => o.id !== top.id && !o.horde && !isVassalOf(s, o.id, top.id) && getRel(s, o.id, top.id).type !== 'alliance');
     s.coalition.members = members.map((o) => o.id);
     for (const a of members) for (const b of members) if (a.id !== b.id) s.opinion[a.id][b.id] += 1;
     // 군자금 지원: 패권국과 맞닿지 않은 AI 회원국이 최전선 회원국에 국고의 6%를 보냄
@@ -119,7 +119,7 @@ function upkeep(s, world) {
     if (!n.isPlayer && inc.gross > 0) net += Math.round(inc.gross * (DIFFICULTY[s.opts?.difficulty]?.tax || 0));
     const lord = s.nations.find((o) => o.alive && isVassalOf(s, n.id, o.id));
     if (lord && inc.gross > 0) {
-      const tribute = Math.round(inc.gross * 0.25);
+      const tribute = Math.round(inc.gross * (n.fief ? FIEF_TRIBUTE : 0.25));
       net -= tribute;
       lord.gold += tribute;
     }
@@ -282,6 +282,7 @@ export function endTurnPlan(s, world) {
     }
   };
   hide(1);
+  syncFiefs(s);
   const rng = stateRng(s);
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {
@@ -306,6 +307,8 @@ export function endTurnFinish(s, world) {
   for (const r of s.regions) delete r.moved;
   riseNations(s, world, stateRng(s));
   fortune(s, world, stateRng(s));
+  spawnHorde(s, world, stateRng(s));
+  fiefLoyalty(s, world, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
   arriveReinforcements(s);

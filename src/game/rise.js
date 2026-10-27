@@ -1,7 +1,7 @@
 import { G } from './rules.js';
 import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
-import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel } from './engine.js';
+import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, checkElimination, canAct } from './engine.js';
 import { fmtGold } from './format.js';
 import { colorFor } from './setup.js';
 
@@ -149,7 +149,7 @@ function tryRise(s, world, rng) {
 }
 
 // 천운: 한 나라가 크게 앞서면 가끔(언제일지 모름) 판을 흔드는 일이 생김
-// 앞설수록 잦아짐(30%부터, 최대 턴당 8%), 한 번 일어나면 8턴은 조용
+// 앞설수록 잦아짐(25%부터, 최대 턴당 10%), 한 번 일어나면 8턴은 조용
 export function fortune(s, world, rng) {
   if (s.turn < 15 || s.opts?.noRise) return;
   if (s.fortuneTurn !== undefined && s.turn - s.fortuneTurn < 8) return;
@@ -159,7 +159,7 @@ export function fortune(s, world, rng) {
   const sizeOf = (id) => nationRegions(s, id).length;
   const leader = alive.reduce((a, b) => (sizeOf(b.id) > sizeOf(a.id) ? b : a));
   const share = sizeOf(leader.id) / land;
-  if (share < 0.3 || rng() >= Math.min(0.08, (share - 0.3) * 0.25)) return;
+  if (share < 0.25 || rng() >= Math.min(0.1, (share - 0.25) * 0.3)) return;
   const L = leader.id;
   const rivals = alive.filter((n) => n.id !== L && getRel(s, n.id, L).type !== 'vassal');
   if (!rivals.length) return;
@@ -228,4 +228,138 @@ export function riseNations(s, world, rng) {
   if (s.turn < 10 || s.opts?.noRise) return;
   if (rng() < 0.08 && tryRestore(s, world, rng)) return;
   if (rng() < 0.03) tryRise(s, world, rng);
+}
+
+// ───────── 분봉: 장수에게 땅을 맡겨 스스로 다스리게 함 (내 나라의 일부, 언제든 회수) ─────────
+const lighten = (hsl) => hsl.replace(/hsl\((\d+), (\d+)%, (\d+)%\)/, (_, h, sat, l) => `hsl(${h}, ${Math.max(30, sat - 15)}%, ${Math.min(78, +l + 18)}%)`);
+export const FIEF_TRIBUTE = 0.4;
+
+// 맡길 땅: 고른 지역에서 이어진 내 땅(수도 제외) n곳
+export function fiefRegions(s, world, pid, start, n) {
+  const ok = (r) => s.regions[r].owner === pid && !s.regions[r].sea && s.nations[pid].capital !== r;
+  if (!ok(start)) return [];
+  const out = [start];
+  for (let i = 0; i < out.length && out.length < n; i++) {
+    for (const nb of world.regions[out[i]].neighbors) {
+      if (out.length >= n) break;
+      if ((nb.type === 'land' || nb.type === 'river') && ok(nb.id) && !out.includes(nb.id)) out.push(nb.id);
+    }
+  }
+  return out;
+}
+
+export function grantFiefCheck(s, pid, gid, rids) {
+  const g = s.generals[gid];
+  if (!g || g.status !== 'active' || g.nation !== pid || g.order) return '맡길 장수를 고르세요.';
+  if (s.nations[pid].ruler === gid) return '군주는 맡길 수 없습니다.';
+  if (!rids.length) return '맡길 땅이 없습니다.';
+  if (nationRegions(s, pid).length - rids.length < 2) return '내 나라에 땅이 너무 적게 남습니다.';
+  if (s.nations.length >= MAX_IDS) return '더 이상 나라를 만들 수 없습니다.';
+  return canAct(s, pid, 1);
+}
+
+export function grantFief(s, world, pid, gid, rids) {
+  const err = grantFiefCheck(s, pid, gid, rids);
+  if (err) return { ok: false, msg: err };
+  const me = s.nations[pid], g = s.generals[gid];
+  me.ap -= 1;
+  const n = newNation(s, me.civ, `${g.name} 군단`);
+  Object.assign(n, { fief: true, lord: pid, color: lighten(me.color), pools: me.pools || [me.civ], gold: 40 * G, aggression: 0.8 });
+  for (const rid of rids) {
+    for (const x of gensIn(s, rid, pid)) if (x.id !== gid) x.region = me.capital;
+    s.regions[rid].owner = n.id;
+  }
+  n.capital = rids.includes(g.region) ? g.region : rids[0];
+  Object.assign(g, { nation: n.id, region: n.capital });
+  delete g.governor;
+  n.ruler = g.id;
+  n.maxAp = computeMaxAp(s, n.id);
+  n.ap = 0;
+  setRel(s, n.id, pid, { type: 'vassal', overlord: pid, since: s.turn });
+  syncFiefs(s);
+  s.opinion[n.id][pid] = 60;
+  log(s, `🏯 ${g.name}에게 ${rids.length}개 지역을 맡겼습니다. ${n.name}이(가) 스스로 다스리며 수입의 ${Math.round(FIEF_TRIBUTE * 100)}%를 바칩니다.`, [pid, n.id], 'diplo');
+  return { ok: true, msg: `${n.name}을(를) 세웠습니다.` };
+}
+
+export function revokeFief(s, world, pid, fid) {
+  const f = s.nations[fid];
+  if (!f?.alive || !f.fief || f.lord !== pid) return { ok: false, msg: '내 군단이 아닙니다.' };
+  for (const rid of nationRegions(s, fid)) s.regions[rid].owner = pid;
+  for (const r of s.regions) if (r.sea && r.owner === fid) r.owner = pid;
+  for (const g of Object.values(s.generals)) if (g.nation === fid && g.status === 'active') { g.nation = pid; if (g.id === f.ruler) g.loyalty = Math.max(0, (g.loyalty ?? 60) - 10); }
+  s.nations[pid].gold += Math.max(0, f.gold);
+  f.gold = 0;
+  s.orders = (s.orders || []).filter((o) => o.n !== fid);
+  log(s, `🏯 ${f.name}의 땅을 거두어들였습니다.`, [pid], 'diplo');
+  checkElimination(s, world, fid);
+  return { ok: true, msg: `${f.name}을(를) 회수했습니다.` };
+}
+
+// 군단은 종주국과 같은 외교 관계를 따름
+export function syncFiefs(s) {
+  for (const f of s.nations) {
+    if (!f.alive || !f.fief) continue;
+    for (const o of s.nations) {
+      if (o.id === f.id || o.id === f.lord) continue;
+      const r = getRel(s, f.lord, o.id);
+      setRel(s, f.id, o.id, r.type === 'vassal' ? null : r);
+      s.opinion[f.id][o.id] = s.opinion[f.lord][o.id];
+    }
+  }
+}
+
+// 충성이 낮은 군단장은 역모를 꾀함
+export function fiefLoyalty(s, world, rng) {
+  for (const f of s.nations) {
+    if (!f.alive || !f.fief) continue;
+    const g = s.generals[f.ruler];
+    const loy = g?.loyalty ?? 60;
+    if (loy >= 40 || rng() >= (40 - loy) / 300) continue;
+    f.fief = false;
+    setRel(s, f.id, f.lord, null);
+    s.opinion[f.lord][f.id] = -60;
+    s.opinion[f.id][f.lord] = -40;
+    f.name = `${g.name}의 나라`;
+    (s.turnEvents = s.turnEvents || []).push({ icon: '🗡️', title: `역모 — ${g.name}`, story: `충성심이 바닥난 ${g.name}이(가) 맡겨진 땅을 들고 ${s.nations[f.lord].name}에 반기를 들었습니다.`, effect: `${f.name} 독립 (${nationRegions(s, f.id).length}개 지역)`, nations: [f.lord, f.id], global: true });
+    log(s, `🗡️ ${g.name}이(가) 역모를 일으켜 독립했습니다!`, [f.lord, f.id], 'warn');
+  }
+}
+
+// ───────── 도적 무리: 나라가 아닌 무리 (협상 불가), 빈 땅이나 민심 무너진 땅에서 일어남 ─────────
+const HORDE = {
+  china: ['황건적', '적미군', '녹림군', '홍건적', '백련교도'], tk: ['황건적', '흑산적', '백파적'], korea: ['초적', '명화적', '도적떼'],
+  japan: ['잇키 무리', '왜구', '산적단'], steppe: ['마적단', '유목 도적'], arab: ['베두인 약탈자', '하와리지'], persia: ['아사신', '산적단'],
+  turk: ['젤랄리 반도'], rome: ['노예 반란군', '해적단'], byzantine: ['해적단', '산적단'], frank: ['자크리 농민군', '용병 약탈단'],
+  english: ['농민 반란군', '무법자 무리'], german: ['농민군', '약탈 기사단'], iberian: ['산적단', '해적단'], italian: ['용병 약탈단'],
+  slavic: ['카자크 무리', '농민 반란군'], nordic: ['해적단'], india: ['다코이트'], southeast_asian: ['해적단'],
+};
+export function hordeName(s, civ, rng) {
+  const used = new Set(s.nations.filter((n) => n.alive).map((n) => n.name));
+  const list = HORDE[civ] || ['도적단', '산적단'];
+  return rng.shuffle(list.slice()).find((x) => !used.has(x)) || `${rng.pick(list)} ${s.turn}`;
+}
+export function spawnHorde(s, world, rng) {
+  if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS) return;
+  if (s.nations.filter((n) => n.alive && n.horde).length >= 3 || rng() >= 0.025) return;
+  const opts = [];
+  for (let rid = 0; rid < s.regions.length; rid++) {
+    const r = s.regions[rid];
+    if (r.sea) continue;
+    if (r.owner === null) {
+      const nb = world.regions[rid].neighbors.filter((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null).map((x) => x.id);
+      if (nb.length) opts.push({ rids: [rid, ...nb.slice(0, 2)], w: 2, mult: 1.6 });
+    } else if (s.nations[r.owner].capital !== rid && (r.loyalty ?? 100) < 30 && !s.nations[r.owner].horde) opts.push({ rids: [rid], w: 1, mult: 1.2, from: r.owner });
+  }
+  if (!opts.length) return;
+  const o = rng.weighted(opts, (x) => x.w);
+  const civ = civNear(s, world, o.rids[0]);
+  const lead = leaderFor(s, civ, rng);
+  const n = newNation(s, civ, hordeName(s, civ, rng));
+  Object.assign(n, { horde: true, aggression: 1, color: 'hsl(25, 12%, 30%)' });
+  seize(s, world, n, o.rids, o.mult);
+  const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng, true);
+  finish(s, n, king);
+  (s.turnEvents = s.turnEvents || []).push({ icon: '🏴', title: `${n.name} 봉기`, story: `${s.regions[o.rids[0]].name} 일대에서 ${king.name}이(가) 이끄는 ${n.name}이(가) 일어나 약탈을 시작했습니다. 이들과는 협상할 수 없습니다.`, effect: `${o.rids.length}개 지역 장악`, nations: o.from !== undefined ? [n.id, o.from] : [n.id], global: true, rids: o.rids });
+  log(s, `🏴 ${n.name}이(가) ${s.regions[o.rids[0]].name}에서 봉기했습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
 }

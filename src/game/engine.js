@@ -342,13 +342,14 @@ export function conscriptCost(s, rid, amount, mode = 'draft') {
 }
 
 // 후방 징병 → 다른 내 지역으로 보냄: 내 땅으로 이어진 거리 2칸에 1턴
-export function ownDistances(s, world, nid, from) {
+export function ownDistances(s, world, nid, from, parent) {
   const dist = new Map([[from, 0]]);
   const q = [from];
   for (let k = 0; k < q.length; k++) {
     for (const e of world.regions[q[k]].neighbors) {
       if ((e.type !== 'land' && e.type !== 'river') || dist.has(e.id) || s.regions[e.id].owner !== nid || s.regions[e.id].sea) continue;
       dist.set(e.id, dist.get(q[k]) + 1);
+      if (parent) parent.set(e.id, q[k]);
       q.push(e.id);
     }
   }
@@ -369,10 +370,13 @@ export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = r
   if (err) return fail(err);
   let sent = '';
   if (dest !== rid && dest !== null && dest !== undefined) {
-    const d = ownDistances(s, world, nid, rid).get(dest);
+    const parent = new Map();
+    const d = ownDistances(s, world, nid, rid, parent).get(dest);
     if (d === undefined) return fail('도착지는 내 땅으로 이어진 지역이어야 합니다.');
     const turns = reinforceTurns(d);
-    (s.reinforce = s.reinforce || []).push({ n: nid, from: rid, to: dest, count: amount, arrive: s.turn + turns });
+    const path = [dest];
+    while (path[0] !== rid) path.unshift(parent.get(path[0]));
+    (s.reinforce = s.reinforce || []).push({ n: nid, from: rid, to: dest, count: amount, start: s.turn, arrive: s.turn + turns, path });
     sent = ` → ${s.regions[dest].name}에 ${turns}턴 뒤 도착`;
   } else r.troops += amount;
   r.pop = Math.max(3, r.pop - c.pop);
@@ -639,7 +643,17 @@ export function planMove(s, world, nid, from, to, count, genIds = [], opts = {})
   const engines = Math.min(opts.engines || 0, fr.engines || 0);
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from && !g.order);
   s.orderSeq = (s.orderSeq || 0) + 1;
-  const o = { id: s.orderSeq, n: nid, from, to, count, gens: gens.map((g) => g.id), opts: { ...opts, engines }, cost, seaOwner: fr.sea ? fr.owner : undefined };
+  // 용병: 장수가 이끄는 적지 공격에만
+  let merc = 0, mercCost = 0;
+  if (opts.merc > 0) {
+    const hostileTo = tr.owner === null ? !tr.sea : tr.owner !== nid && getRel(s, nid, tr.owner).type !== 'alliance';
+    if (!gens.length || !hostileTo) return fail('용병은 장수가 이끄는 공격에만 쓸 수 있습니다.');
+    merc = Math.min(Math.round(opts.merc / 100) * 100, mercCap(s, gens.map((g) => g.id)));
+    mercCost = merc * mercPrice(s, gens.map((g) => g.id));
+    if (s.nations[nid].gold < mercCost) return fail(`용병 고용에 금이 부족합니다 (필요 ${fmtGold(mercCost)}).`);
+    s.nations[nid].gold -= mercCost;
+  }
+  const o = { id: s.orderSeq, n: nid, from, to, count, gens: gens.map((g) => g.id), opts: { ...opts, engines, merc, mercCost }, cost, seaOwner: fr.sea ? fr.owner : undefined };
   s.nations[nid].ap -= cost;
   fr.troops -= count;
   if (engines) fr.engines -= engines;
@@ -702,15 +716,93 @@ export function autoMarch(s, world, nid) {
   return sent;
 }
 
+// ───────── 용병: 장수가 이끄는 공격에만, 통솔이 높을수록 많이, 정치가 높을수록 싸게 ─────────
+export function mercCap(s, genIds) {
+  const gens = genIds.map((id) => s.generals[id]).filter(Boolean);
+  if (!gens.length) return 0;
+  const best = Math.max(...gens.map((g) => g.lead));
+  return Math.max(0, Math.round(((best - 30) * 120 * (s.df || 1)) / 100) * 100);
+}
+export function mercPrice(s, genIds) {
+  const gens = genIds.map((id) => s.generals[id]).filter(Boolean);
+  const pol = gens.length ? Math.max(...gens.map((g) => g.pol)) : 50;
+  return Math.round(30 * (1.35 - pol / 200)); // 1명당 금 (정치 100이면 17, 30이면 26)
+}
+
+// ───────── 매수: 장수가 맞닿은 곳에 있어야 하고, 지력·정치가 높을수록 잘 됨. 실패하면 돈은 상대에게 ─────────
+export function bribeCost(s, rid) {
+  const r = s.regions[rid];
+  return Math.round(((20 + r.pop * 2) * G * (1 + r.troops / 20000)) / 1000) * 1000;
+}
+export function bribeAgents(s, world, nid, rid) {
+  const near = new Set([rid, ...world.regions[rid].neighbors.map((x) => x.id)]);
+  return Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid && !g.order && near.has(g.region) && s.regions[g.region].owner === nid && g.bribed !== s.turn);
+}
+export function bribeChance(s, world, nid, rid, g) {
+  const r = s.regions[rid];
+  const defGens = r.owner !== null ? gensIn(s, rid, r.owner) : [];
+  const loy = r.owner === null ? 50 : r.loyalty ?? 100;
+  const skill = (g.intel + g.pol) / 200;
+  const c = 0.08 + skill * 0.6 - loy / 250 - (defGens.length ? 0.2 : 0) - (r.buildings?.walls || 0) * 0.05 + (r.owner === null ? 0.1 : 0);
+  return Math.max(0.03, Math.min(0.8, c));
+}
+export function bribeCheck(s, world, nid, rid, gid) {
+  const r = s.regions[rid];
+  if (r.sea || r.owner === nid) return '다른 세력의 땅만 매수할 수 있습니다.';
+  if (r.owner !== null && s.nations[r.owner].capital === rid) return '수도는 매수할 수 없습니다.';
+  if (r.owner !== null && getRel(s, nid, r.owner).type === 'alliance') return '동맹국의 땅은 매수할 수 없습니다.';
+  if (r.owner !== null && s.nations[r.owner].horde) return '도적 무리는 돈으로 움직이지 않습니다.';
+  const g = s.generals[gid];
+  if (!g || !bribeAgents(s, world, nid, rid).includes(g)) return '맞닿은 내 지역(또는 그곳)에 이번 턴 매수하지 않은 장수가 있어야 합니다.';
+  if (s.nations[nid].gold < bribeCost(s, rid)) return '금이 부족합니다.';
+  return canAct(s, nid, 1);
+}
+export function doBribe(s, world, nid, rid, gid) {
+  const err = bribeCheck(s, world, nid, rid, gid);
+  if (err) return fail(err);
+  const r = s.regions[rid], n = s.nations[nid], g = s.generals[gid];
+  const cost = bribeCost(s, rid);
+  const chance = bribeChance(s, world, nid, rid, g);
+  const old = r.owner;
+  n.gold -= cost;
+  n.ap -= 1;
+  g.bribed = s.turn;
+  if (stateRng(s)() < chance) {
+    for (const x of gensIn(s, rid, old ?? undefined)) if (old !== null) x.region = s.nations[old].capital ?? x.region;
+    transferRegion(s, world, rid, nid);
+    r.troops = Math.max(100, Math.round(r.troops * 0.5 / 100) * 100);
+    r.loyalty = 40;
+    if (old !== null) {
+      s.opinion[old][nid] -= 20;
+      checkElimination(s, world, old);
+    }
+    gainExp(s, g, 15);
+    log(s, `💰 ${g.name}이(가) ${fmtGold(cost)}금으로 ${r.name}${old !== null ? `(${s.nations[old].name})` : ''}을(를) 매수했습니다! 수비병 절반이 귀순.`, old !== null ? [nid, old] : [nid], 'diplo');
+    return { ok: true, msg: `${r.name} 매수 성공!` };
+  }
+  if (old !== null) {
+    s.nations[old].gold += cost;
+    s.opinion[old][nid] -= 10;
+  }
+  log(s, `💸 ${g.name}의 ${r.name} 매수가 실패했습니다.${old !== null ? ` 금 ${fmtGold(cost)}은 ${s.nations[old].name}의 손에 들어갔습니다.` : ' 금만 날렸습니다.'}`, old !== null ? [nid, old] : [nid], 'warn');
+  return { ok: true, failed: true, accepted: false, msg: `매수 실패 (성공률 ${Math.round(chance * 100)}%) — 금 ${fmtGold(cost)}을 잃었습니다.` };
+}
+
 // 후방에서 징병해 보낸 증원 도착 (도착지를 잃었으면 출발지로, 둘 다 잃었으면 흩어짐)
+// 가는 길(2칸에 1턴)에 내 땅이 아닌 곳이 생기면 그 앞 내 땅에서 멈춤 → 집결·전선 자동 행군이 이어받음
 export function arriveReinforcements(s) {
   const left = [];
   for (const o of s.reinforce || []) {
-    if (o.arrive > s.turn) { left.push(o); continue; }
-    const at = s.regions[o.to].owner === o.n ? o.to : s.regions[o.from].owner === o.n ? o.from : null;
+    const path = o.path || [o.from, o.to];
+    const reach = o.arrive <= s.turn ? path.length - 1 : Math.min(path.length - 1, (s.turn - (o.start ?? s.turn)) * 2);
+    let k = 0;
+    while (k < reach && s.regions[path[k + 1]].owner === o.n) k++;
+    const blocked = k < reach;
+    if (!blocked && o.arrive > s.turn) { left.push(o); continue; }
+    const at = s.regions[path[k]].owner === o.n ? path[k] : null;
     if (at !== null) {
       s.regions[at].troops += o.count;
-      log(s, `🪖 증원 ${fmtTroops(o.count)}이(가) ${s.regions[at].name}에 도착했습니다.`, [o.n], 'info');
+      log(s, blocked ? `🪖 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 길이 막혀 ${s.regions[at].name}에 멈췄습니다.` : `🪖 증원 ${fmtTroops(o.count)}이(가) ${s.regions[at].name}에 도착했습니다.`, [o.n], 'info');
     } else log(s, `💨 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 갈 곳을 잃고 흩어졌습니다.`, [o.n], 'warn');
   }
   s.reinforce = left;
@@ -722,6 +814,7 @@ export function cancelOrder(s, id) {
   const o = s.orders[k];
   const fr = s.regions[o.from];
   s.nations[o.n].ap += o.cost;
+  if (o.opts.mercCost) s.nations[o.n].gold += o.opts.mercCost;
   fr.troops += o.count;
   if (fr.sea && fr.owner === null) fr.owner = o.n;
   if (o.opts.engines) fr.engines = (fr.engines || 0) + o.opts.engines;
@@ -882,7 +975,12 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   }
   const defGens = f.def.filter((g) => g.status === 'active');
   const atkGens = gens.filter((g) => g.status === 'active');
-  const A = count * f.attMult * duelMult * rng.range(0.85, 1.15);
+  // 용병: 이 전투에만 함께 싸우고 끝나면 (살아남은 몫을 데리고) 떠남
+  const merc = transit ? opts.merc || 0 : 0;
+  const tot = count + merc;
+  const own = (x) => (merc ? Math.round((x * count) / tot / 100) * 100 : x);
+  if (merc) lines.push(`용병 ${fmtTroops(merc)} 참전`);
+  const A = tot * f.attMult * duelMult * rng.range(0.85, 1.15);
   const D = tr.troops * f.defMult * rng.range(0.85, 1.15);
   take();
   (s.battles = s.battles || []).push(battle);
@@ -920,7 +1018,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     battle.siege = { before, after: tr.buildings.walls };
     if (tr.buildings.walls > 0) {
       report.defLoss = Math.min(Math.max(0, tr.troops - 100), Math.round(tr.troops * Math.min(0.5, (0.3 * A) / Math.max(1, D))));
-      report.attLoss = Math.round(count * Math.min(0.6, (0.45 * D) / A + 0.1));
+      report.attLoss = Math.min(count, own(Math.round(tot * Math.min(0.6, (0.45 * D) / A + 0.1))));
       tr.troops -= report.defLoss;
       fr.troops += count - report.attLoss;
       fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + engines);
@@ -932,8 +1030,8 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
 
   if (A > D) {
     const ratio = D / A;
-    const loss = Math.min(count - 1, Math.round(count * ratio * 0.7 * assaultLoss));
-    const survivors = Math.max(1, count - loss);
+    const loss = Math.min(tot - 1, Math.round(tot * ratio * 0.7 * assaultLoss));
+    const survivors = Math.max(1, own(tot - loss));
     report.win = true;
     report.attLoss = count - survivors;
     report.defLoss = tr.troops;

@@ -57,6 +57,8 @@ function regionValue(s, world, rid, forNation) {
 export function validateDeal(s, world, from, to, deal) {
   const F = s.nations[from], To = s.nations[to];
   if (!F.alive || !To.alive) return '멸망한 국가입니다.';
+  if (F.horde || To.horde) return '도적 무리와는 협상할 수 없습니다.';
+  if (F.fief || To.fief) return '군단은 종주국의 외교를 따릅니다.';
   if (deal.give.gold > F.gold) return '제안하는 금이 국고보다 많습니다.';
   if (deal.get.gold > To.gold) return `상대 국고(${fmtGold(To.gold)}금)보다 많은 금을 요구했습니다.`;
   if (deal.give.regions.some((r) => s.regions[r].owner !== from)) return '내 영토가 아닌 지역이 포함되어 있습니다.';
