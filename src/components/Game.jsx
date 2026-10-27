@@ -4,7 +4,7 @@ import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -303,7 +303,23 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     return out.sort((a, b) => b.k - a.k).slice(0, 8);
   }, [game, world, pid, vis, spect, me.alive]);
   // 내 부대들 (지도 위 말)
-  const myArmies = useMemo(() => Object.values(game.armies || {}).filter((a) => a.n === pid).map((a) => ({ ...a, ch: game.generals[a.gids[0]]?.name || '?', color: me.color })), [game.armies, game.generals, pid, me.color]);
+  const myArmies = useMemo(() => {
+    const out = Object.values(game.armies || {}).filter((a) => a.n === pid).map((a) => ({ ...a, ch: game.generals[a.gids[0]]?.name || '?', color: me.color }));
+    // 적 부대: 보이는 남의 땅에 장수가 있으면 그 장수들이 이끌 수 있는 만큼을 부대 말로
+    const by = {};
+    for (const g of Object.values(game.generals)) {
+      if (g.status !== 'active' || g.order || g.nation === pid || !vis.has(g.region)) continue;
+      const r = game.regions[g.region];
+      if (r.sea || r.owner !== g.nation) continue;
+      (by[g.region] = by[g.region] || []).push(g);
+    }
+    for (const [rid, gs] of Object.entries(by)) {
+      const lead = gs.reduce((a, b) => (b.lead > a.lead ? b : a));
+      const nat = game.nations[lead.nation];
+      out.push({ id: 'v' + rid, rid: +rid, enemy: true, ch: lead.name, troops: Math.min(game.regions[rid].troops, commandCap(game, gs.map((g) => g.id))), color: nat?.color || '#888', target: null });
+    }
+    return out;
+  }, [game.armies, game.generals, game.regions, game.nations, pid, me.color, vis]);
   const landmarks = useMemo(() => new Set(game.landmarks || []), [game.landmarks]);
   const proposal = game.proposals[0];
   const showLevel = (game.levelChoices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
@@ -416,7 +432,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             threats={threats}
             armies={myArmies}
             selArmy={selArmy}
-            onArmy={(id) => { setSelArmy((cur) => (cur === id ? null : id)); setSelected(game.armies[id].rid); setMoveMode(false); }}
+            onArmy={(id) => { if (!game.armies?.[id]) { setSelected(+id.slice(1)); setSheet(true); return; } setSelArmy((cur) => (cur === id ? null : id)); setSelected(game.armies[id].rid); setMoveMode(false); }}
             landmarks={landmarks}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}

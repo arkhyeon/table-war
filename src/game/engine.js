@@ -332,7 +332,19 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
 export function estimateBattle(s, world, nid, from, to, count, genIds, opts = {}) {
   const f = battleFactors(s, world, nid, from, to, genIds, { ...opts, count });
   const A = count * f.attMult;
-  const D = s.regions[to].troops * f.defMult;
+  // 요격 부대까지 셈
+  const tr = s.regions[to];
+  let sup = 0;
+  if (tr.owner !== null && !tr.sea && !s.nations[tr.owner].horde && tr.owner !== nid) {
+    for (const x of world.regions[to].neighbors) {
+      const rr = s.regions[x.id];
+      if (x.id === from || rr.sea || rr.owner !== tr.owner) continue;
+      const sg = gensIn(s, x.id, tr.owner);
+      if (sg.length) { const amt = Math.min(rr.troops * 0.5, commandCap(s, sg.map((g) => g.id)) * 0.5); if (amt >= 1000) sup += amt; }
+    }
+  }
+  if (sup) f.mods.push(`요격 부대 +${fmtTroops(Math.round(sup / 100) * 100)}`);
+  const D = (tr.troops + sup) * f.defMult;
   let wins = 0;
   const trials = 300;
   for (let i = 0; i < trials; i++) {
@@ -1087,6 +1099,12 @@ export function buildResolveQueue(s) {
     const hostile = list.filter((o) => !friendly.includes(o)).sort((a, b) => b.count - a.count);
     q.push(...friendly.map((o) => o.id), ...hostile.map((o) => o.id));
   }
+  // 협공 표시: 같은 나라가 서로 다른 곳에서 같은 땅을 치는 계획 수
+  for (const list of byTo.values()) {
+    const by = {};
+    for (const o of list) (by[o.n] = by[o.n] || new Set()).add(o.from);
+    for (const o of list) o.opts.pincer = by[o.n].size;
+  }
   s.resolveQueue = q;
 }
 
@@ -1235,8 +1253,27 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const tot = count + merc;
   const own = (x) => (merc ? Math.round((x * count) / tot / 100) * 100 : x);
   if (merc) lines.push(`용병 ${fmtTroops(merc)} 참전`);
-  const A = tot * f.attMult * duelMult * rng.range(0.85, 1.15);
-  const D = tr.troops * f.defMult * rng.range(0.85, 1.15);
+  // 협공: 이번 턴 두 곳 이상에서 같은 땅을 치면 +15%
+  const pincer = (opts.pincer || 0) >= 2 ? 1.15 : 1;
+  if (pincer > 1) lines.push('협공 +15%');
+  // 요격: 맞닿은 수비국 땅에 장수가 이끄는 부대가 있으면 달려와 함께 싸움 (그 땅 병력의 절반, 지휘 한도의 절반까지)
+  const support = [];
+  if (defender !== null && !tr.sea && !s.nations[defender].horde) {
+    for (const x of world.regions[to].neighbors) {
+      const rr = s.regions[x.id];
+      if (x.id === from || rr.sea || rr.owner !== defender) continue;
+      const sg = gensIn(s, x.id, defender);
+      if (!sg.length) continue;
+      const amt = Math.floor(Math.min(rr.troops * 0.5, commandCap(s, sg.map((g) => g.id)) * 0.5) / 100) * 100;
+      if (amt >= 1000) support.push({ rid: x.id, amt, name: sg.reduce((a, b) => (b.lead > a.lead ? b : a)).name });
+    }
+  }
+  const sup = support.reduce((t, x) => t + x.amt, 0);
+  if (sup) lines.push(`요격: ${support.map((x) => `${x.name}(${fmtTroops(x.amt)})`).join(', ')}`);
+  // 요격 부대 손실: 수비 병력 비율만큼 나눠 짐
+  const hitSupport = (frac) => { for (const x of support) s.regions[x.rid].troops = Math.max(100, s.regions[x.rid].troops - Math.round((x.amt * frac) / 100) * 100); };
+  const A = tot * f.attMult * duelMult * pincer * rng.range(0.85, 1.15);
+  const D = (tr.troops + sup) * f.defMult * rng.range(0.85, 1.15);
   take();
   (s.battles = s.battles || []).push(battle);
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
@@ -1275,6 +1312,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       report.defLoss = Math.min(Math.max(0, tr.troops - 100), Math.round(tr.troops * Math.min(0.5, (0.3 * A) / Math.max(1, D))));
       report.attLoss = Math.min(count, own(Math.round(tot * Math.min(0.6, (0.45 * D) / A + 0.1))));
       tr.troops -= report.defLoss;
+      if (sup) hitSupport(0.15);
       fr.troops += count - report.attLoss;
       fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + engines);
       for (const g of atkGens) gainExp(s, g, 10);
@@ -1289,7 +1327,8 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     const survivors = Math.max(1, own(tot - loss));
     report.win = true;
     report.attLoss = count - survivors;
-    report.defLoss = tr.troops;
+    report.defLoss = tr.troops + Math.round(sup * 0.5);
+    if (sup) hitSupport(0.5);
     const wasCapital = defender !== null && !tr.sea && s.nations[defender].capital === to;
     const plunder = wasCapital ? Math.floor(s.nations[defender].gold * 0.2) : 0;
     const fierce = tv(atkGens, '맹장') ? 0.12 : 0;
@@ -1336,8 +1375,12 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   report.win = false;
   report.attLoss = count - back;
   const archery = 1 + 2 * tv(defGens, '궁술');
-  report.defLoss = Math.max(0, Math.min(tr.troops - 1, Math.round((tr.troops * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
-  tr.troops -= report.defLoss;
+  const pool = tr.troops + sup;
+  const lossAll = Math.max(0, Math.min(pool - 1, Math.round((pool * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
+  report.defLoss = lossAll;
+  const supFrac = pool > 0 ? sup / pool : 0;
+  tr.troops = Math.max(1, tr.troops - Math.round(lossAll * (1 - supFrac)));
+  if (sup) hitSupport((lossAll * supFrac) / sup);
   fr.troops += back;
   arrive(fr, back);
   if (engines && home) fr.engines = Math.min(ENGINE_MAX, (fr.engines || 0) + Math.floor(engines / 2));

@@ -645,7 +645,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       </text>
                     </g>
                   )}
-                  {gc > 0 && (
+                  {gc > 0 && !(armies || []).some((a) => a.enemy && a.rid === r.id) && (
                     <g transform={`translate(${bw / 2 + s * 0.35},${-s * 0.2})`}>
                       {/* 군단 깃발: 대장 이름 첫 글자, 장수가 여럿이면 수 */}
                       <line y1={s * 0.9} y2={-s * 1.3} stroke="#3b2b1a" strokeWidth={s * 0.14} strokeLinecap="round" />
@@ -713,7 +713,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 <g key={a.id}>
                   {tgt && <path d={`M${x} ${y}L${tgt.cx} ${tgt.cy}`} stroke={a.color} strokeWidth={s * 0.18} strokeDasharray={`${s * 0.3} ${s * 0.3}`} opacity={0.75} pointerEvents="none" />}
                   <g transform={`translate(${x},${y})`} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onArmy?.(a.id); }}>
-                    <circle r={s * 1.35} fill={on ? '#ffe066' : '#fffdf6'} stroke={on ? '#ff9a3c' : a.color} strokeWidth={s * (on ? 0.35 : 0.22)} opacity={0.95} />
+                    <circle r={s * 1.35} fill={on ? '#ffe066' : a.enemy ? '#3a2a24' : '#fffdf6'} stroke={on ? '#ff9a3c' : a.color} strokeWidth={s * (on ? 0.35 : 0.22)} opacity={0.95} />
                     <g transform={`translate(${-s * 0.35},${s * 0.75})`}>
                       <Rider u={s * 0.5} color={a.color} />
                     </g>
