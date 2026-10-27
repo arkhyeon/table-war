@@ -49,11 +49,21 @@ function updatePosture(s, world, nid) {
   }
   const ratio = n.goal !== null && n.goal !== undefined && s.nations[n.goal]?.alive ? nationPower(s, nid) / Math.max(1, nationPower(s, n.goal)) : 0;
   const strong = ratio >= 1.25 && income(s, nid).net > 0;
+  if (n.fief && n.order) {
+    n.posture = n.order.kind === 'defend' ? 'build' : 'war';
+    return;
+  }
   n.posture = strong || (underAttack && ratio >= 0.8) || s.coalition?.target === n.goal || hegemonDrive(s, nid) > 0 ? 'war' : 'build';
 }
 
 function updateGoal(s, world, nid) {
   const n = s.nations[nid];
+  // 군단: 주군이 내린 공략 명령을 따름
+  if (n.fief && n.order?.kind === 'attack' && s.nations[n.order.target]?.alive) {
+    n.goal = n.order.target;
+    n.goalSince = s.turn;
+    return;
+  }
   // 대동맹 회원국은 패권국과 닿아 있으면 곧바로 목표를 패권국으로
   const ct = s.coalition?.target;
   if (ct !== undefined && inCoalition(s, nid) && n.goal !== ct) {
@@ -265,6 +275,8 @@ export function aiActions(s, world, nid) {
         if (t.owner === nid || (!hostile(s, nid, t.owner) && !napBreak)) continue;
         if (t.sea && !isEnemyFleet(s, nid, nb.id)) continue;
         if (t.owner !== null && s.turn <= 3) continue; // 초반 3턴은 국가 간 전쟁 유예
+        // 군단 명령: 수비면 나라는 치지 않음, 공략이면 그 나라(와 도적)만
+        if (n.fief && n.order && t.owner !== null && !s.nations[t.owner].horde && (n.order.kind === 'defend' || t.owner !== n.order.target)) continue;
         const cost = moveCost(world, r, nb.id, s);
         if (cost > n.ap) continue;
         // 사방이 적이면 비운 땅을 노린 기회 공격을 막도록 수비를 더 남김

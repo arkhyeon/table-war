@@ -15,6 +15,7 @@ import {
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
 import { onProposalDeclined } from '../game/ai.js';
+import { answerCard } from '../game/cards.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
 import { playerStat } from '../game/turn.js';
@@ -840,6 +841,8 @@ export function HelpModal({ onClose }) {
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
           <li><b>장수 충성·성격</b>: 🔥야심가는 충성이 쉽게 떨어지고 🛡️충신은 점점 오릅니다. 충성 40 미만 장수는 지키던 땅을 들고 <b>영웅 봉기</b>로 독립할 수 있으니 장수 창에서 🎁포상하세요(금, 장수마다 6턴에 한 번). 평판·인덕 군주가 충성을 받쳐 줍니다.</li>
           <li><b>군주의 죽음·계승 분쟁</b>: 군주는 늙거나 전사·처형으로 죽을 수 있습니다. 큰 나라(8곳↑)에서 새 군주가 즉위하면 야심가나 충성 낮은 2인자가 왕위를 다투며 나라를 둘로 가를 수 있습니다.</li>
+          <li><b>군단 명령</b>: 분봉한 군단에 ⚔️자유·🛡️수비·🎯○○ 공략을 명할 수 있습니다(국가 카드 또는 군단 땅을 눌러서).</li>
+          <li><b>사건 카드</b>: 가끔 선택지가 있는 사건이 옵니다(흉년·혼인 동맹·기습 간언·무기 상인·명의·인재 천거 등). 역사 시나리오에는 그 시대의 역사 카드도 나옵니다.</li>
           <li><b>변방 침입</b>: 나라들 한가운데에서 먼 변방에 이민족(흉노·여진·바이킹…)이나 해적(왜구·바르바리…)이 쳐들어와 땅을 빼앗습니다. 변방국일수록 등이 위험합니다.</li>
           <li><b>후방 징병</b>: 징병 창의 「보낼 곳」에서 다른 내 지역을 고르면, 내 땅 3칸마다 1턴 걸려 그곳에 도착(🗺️ 지도에서 고르기 가능)(도착지를 잃으면 출발지로).</li>
           <li><b>천운</b>: 한 나라가 육지 25%를 넘게 차지하면 가끔(언제일지 모름, 앞설수록 잦음) 대반란·명장 망명·반패권 원조 중 하나가 일어납니다. 한 판에 최대 2번.</li>
@@ -1442,5 +1445,23 @@ export function WhereMap({ world, game, ids }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// 사건 카드: 선택지 고르기
+export function ChoiceModal({ world, game, act }) {
+  const c = game.choices[0];
+  return (
+    <Modal title={`${c.icon} ${c.title}${c.hist ? ' · 역사' : ''}`}>
+      <p>{fixJosa(c.story)}</p>
+      <div className="col" style={{ gap: 8 }}>
+        {c.options.map((o, i) => (
+          <button key={i} className={i === 0 ? 'primary' : ''} style={{ textAlign: 'left' }} onClick={() => act((s) => answerCard(s, world, i))}>
+            <b>{o.label}</b>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>{o.desc}</div>
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }

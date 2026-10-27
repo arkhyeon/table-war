@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
@@ -271,7 +271,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const myEvents = (game.turnEvents || []).filter((e) => e.global || e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
   const proposal = game.proposals[0];
-  const showProposal = proposal && !modal && !replay && !game.gameOver;
+  const showChoice = (game.choices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
+  const showProposal = proposal && !showChoice && !modal && !replay && !game.gameOver;
 
   return (
     <div className="game">
@@ -506,6 +507,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal?.type === 'news' && <NewsModal game={game} news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
+      {showChoice && <ChoiceModal world={world} game={game} act={act} />}
       {showProposal && <ProposalModal world={world} game={game} act={act} />}
       {ask && (
         <ConfirmModal

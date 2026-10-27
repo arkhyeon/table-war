@@ -366,6 +366,27 @@ export function syncFiefs(s) {
   }
 }
 
+// 군단 명령: 자유(스스로 판단) · 수비(나라는 치지 않음) · 공략(정한 나라만 침)
+export function setFiefOrder(s, pid, fid, order) {
+  const f = s.nations[fid];
+  if (!f?.alive || !f.fief || f.lord !== pid) return { ok: false, msg: '내 군단이 아닙니다.' };
+  f.order = order || null;
+  f.goal = order?.kind === 'attack' ? order.target : null;
+  const g = s.generals[f.ruler];
+  const what = !order ? '스스로 판단해 싸우라' : order.kind === 'defend' ? '맡은 땅을 지키라' : `${s.nations[order.target].name}을(를) 공략하라`;
+  return { ok: true, msg: `${g?.name || f.name}에게 「${what}」고 명했습니다.` };
+}
+// 군단과 맞닿은 적국 (공략 대상 후보)
+export function fiefFoes(s, world, fid) {
+  const f = s.nations[fid];
+  const out = new Set();
+  for (const r of nationRegions(s, fid)) for (const x of world.regions[r].neighbors) {
+    const o = s.regions[x.id].owner;
+    if (o !== null && o !== fid && o !== f.lord && !s.regions[x.id].sea && s.nations[o].alive && !s.nations[o].horde && !(s.nations[o].fief && s.nations[o].lord === f.lord) && getRel(s, f.lord, o).type !== 'alliance') out.add(o);
+  }
+  return [...out];
+}
+
 // 충성이 낮은 군단장은 역모를 꾀함
 export function fiefLoyalty(s, world, rng) {
   for (const f of s.nations) {
@@ -635,7 +656,7 @@ export function generalDrama(s, world, rng) {
   for (const n of s.nations.slice()) {
     if (!n.alive || n.horde) continue;
     const k = s.generals[n.ruler];
-    if (k && k.status === 'active' && s.turn > 12 && rng() < 0.005) {
+    if (k && k.status === 'active' && s.turn > 12 && !(n.healthy > s.turn) && rng() < 0.005) {
       k.status = 'dead';
       (s.turnEvents = s.turnEvents || []).push({ icon: '⚰️', title: `${k.name} 붕어`, story: `${n.name}의 군주 ${k.name}이(가) 세상을 떠났습니다.`, effect: '새 군주가 즉위합니다', nations: [n.id], global: n.isPlayer || ownLand(s, n.id).length >= 8 });
       log(s, `⚰️ ${n.name}의 군주 ${k.name}이(가) 세상을 떠났습니다.`, [n.id], 'general');

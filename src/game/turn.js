@@ -35,6 +35,7 @@ function historyNotes(s) {
   }
 }
 import { trackStats, checkAchievements } from './achievements.js';
+import { drawCards } from './cards.js';
 import { updateExplored, encodeOwners } from './fog.js';
 import { hashString } from './rng.js';
 
@@ -314,6 +315,7 @@ export function endTurnFinish(s, world) {
   arriveReinforcements(s);
   s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
   runEvents(s, world, stateRng(s));
+  drawCards(s, world, stateRng(s));
   historyNotes(s);
   updateExplored(s, world);
   s.gameOver = early?.win ? early : s.spectator ? spectatorOver(s) : s.sandbox && s.nations[s.playerId].alive ? null : checkGameOver(s);

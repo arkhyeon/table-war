@@ -11,7 +11,7 @@ import {
   doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, gensIn, nationRegions, nationGenerals, appearChance, getRel,
   poachChance, doPoach, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
-import { revokeFief, pacifyCost, pacifyChance, doPacify } from '../game/rise.js';
+import { revokeFief, pacifyCost, pacifyChance, doPacify, setFiefOrder, fiefFoes } from '../game/rise.js';
 
 export function relTag(game, a, b) {
   if (a === b) return null;
@@ -49,6 +49,33 @@ export function GenLine({ g, extra }) {
       </div>
       {extra}
     </div>
+  );
+}
+
+// 군단 명령 고르기: 자유 / 수비 / ○○ 공략
+function FiefOrder({ world, game, fid, act }) {
+  const pid = game.playerId;
+  const f = game.nations[fid];
+  const foes = fiefFoes(game, world, fid);
+  const val = !f.order ? 'free' : f.order.kind === 'defend' ? 'defend' : `atk:${f.order.target}`;
+  return (
+    <select
+      value={val}
+      title="군단장에게 내리는 명령"
+      onChange={(e) => {
+        const v = e.target.value;
+        act((s) => setFiefOrder(s, pid, fid, v === 'free' ? null : v === 'defend' ? { kind: 'defend' } : { kind: 'attack', target: +v.slice(4) }));
+      }}
+    >
+      <option value="free">⚔️ 자유 (알아서 싸움)</option>
+      <option value="defend">🛡️ 수비 (나라는 치지 않음)</option>
+      {f.order?.kind === 'attack' && !foes.includes(f.order.target) && game.nations[f.order.target]?.alive && <option value={val}>🎯 {game.nations[f.order.target].name} 공략</option>}
+      {foes.map((o) => (
+        <option key={o} value={`atk:${o}`}>
+          🎯 {game.nations[o].name} 공략
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -126,6 +153,11 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               📋 지역 목록
             </button>
           )}
+          {!spectator && game.nations.filter((f) => f.alive && f.fief && f.lord === pid).map((f) => (
+            <span key={f.id} style={{ width: '100%' }}>
+              🏯 {game.generals[f.ruler]?.name} 군단 {nationRegions(game, f.id).length}곳 <FiefOrder world={world} game={game} fid={f.id} act={act} />
+            </span>
+          ))}
           {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
           {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
         </div>
@@ -264,6 +296,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               return (
                 <div className="actions" style={{ marginTop: 10 }}>
                   <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 상납 없음, 큰일엔 지원 요청</span>
+                  <span style={{ gridColumn: '1 / -1' }}>명령 <FiefOrder world={world} game={game} fid={own.id} act={act} /></span>
                   <button onClick={() => act((s) => revokeFief(s, world, pid, own.id))}>🏯 군단 회수</button>
                 </div>
               );
