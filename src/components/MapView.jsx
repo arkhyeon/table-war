@@ -507,9 +507,9 @@ export default function MapView({ world, regions, nations, selected, targets, on
               <path
                 key={rid}
                 d={statics.outline[rid]}
-                fill={kind === 'attack' ? '#ff554433' : kind === 'move' ? '#ffe06622' : 'none'}
+                fill={kind === 'attack' ? '#ff554433' : kind === 'chosen' ? '#5fdc7a44' : kind === 'move' ? '#ffe06622' : 'none'}
                 fillRule="evenodd"
-                stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
+                stroke={kind === 'attack' ? '#ff5544' : kind === 'chosen' ? '#5fdc7a' : kind === 'blocked' ? '#888' : '#ffe066'}
                 strokeWidth={2.4}
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
                 data-target={kind}
@@ -531,9 +531,9 @@ export default function MapView({ world, regions, nations, selected, targets, on
               <path
                 key={rid}
                 d={statics.outline[rid]}
-                fill={kind === 'attack' ? '#ff554433' : kind === 'move' ? '#ffe06622' : 'none'}
+                fill={kind === 'attack' ? '#ff554433' : kind === 'chosen' ? '#5fdc7a44' : kind === 'move' ? '#ffe06622' : 'none'}
                 fillRule="evenodd"
-                stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
+                stroke={kind === 'attack' ? '#ff5544' : kind === 'chosen' ? '#5fdc7a' : kind === 'blocked' ? '#888' : '#ffe066'}
                 strokeWidth={2.4}
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
                 data-target={kind}

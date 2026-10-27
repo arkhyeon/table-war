@@ -4,7 +4,7 @@ import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal, PlotModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish, playerStat } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck, draftMax } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -197,7 +197,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   }, [modal, selected, game]);
 
   const targets = useMemo(() => {
-    if (pick) return new Map([...pick.valid].map((r) => [r, 'move']));
+    if (pick) return new Map([...pick.valid].map((r) => [r, pick.chosen?.has(r) ? 'chosen' : 'move']));
     if (!moveMode || selected === null || game.regions[selected].owner !== game.playerId) return null;
     const m = new Map();
     const fr = game.regions[selected];
@@ -259,6 +259,14 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     }
     if (pick) {
       if (!pick.valid.has(rid)) return toast('여기는 고를 수 없습니다. 노랗게 표시된 내 땅(길이 이어진 곳)을 누르세요.', true);
+      if (pick.chosen) {
+        // 여러 곳 고르기: 누를 때마다 넣었다 뺐다
+        const c = new Set(pick.chosen);
+        if (c.has(rid)) c.delete(rid);
+        else c.add(rid);
+        setPick({ ...pick, chosen: c });
+        return;
+      }
       const f = pick.onPick;
       setPick(null);
       f(rid);
@@ -402,7 +410,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           </div>
         )}
         {!spect && me.alive && (
-          <button onClick={() => setModal({ type: 'draft' })} title="모든 지역에서 한꺼번에 징병해 한 곳으로 보냄">💂<span className="lbl"> 징병</span></button>
+          <button onClick={() => setModal({ type: 'draft' })} title="지도에서 고른 지역마다 슬라이더로 인원을 정해 징병">💂<span className="lbl"> 징병</span></button>
         )}
         <button onClick={() => setModal({ type: 'diplo' })} title="외교">🤝<span className="lbl"> 외교</span></button>
         <button onClick={() => setModal({ type: 'gens' })} title="장수">⭐<span className="lbl"> 장수</span></button>
@@ -501,7 +509,9 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           )}
           {pick && (
             <div className="map-hint">
-              {pick.hint} <button className="sm" onClick={() => setPick(null)}>취소</button>
+              {pick.hint}
+              {pick.chosen && <> · <b>{pick.chosen.size}곳</b> <button className="sm primary" onClick={() => { const f = pick.onPick; setPick(null); f(pick.chosen); }}>완료</button></>}{' '}
+              <button className="sm" onClick={() => { const f = pick.onCancel; setPick(null); f?.(); }}>취소</button>
             </div>
           )}
           {moveMode && !pick && <div className="map-hint">이동/공격할 인접 지역을 누르세요<span className="lbl"> (Esc 취소)</span> · 노랑=이동 빨강=공격</div>}
@@ -538,7 +548,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           setMoveMode={setMoveMode}
           act={act}
           openGenerals={() => setModal({ type: 'gens' })}
-          openConscript={() => setModal({ type: 'draft', init: { dest: selected } })}
+          openConscript={() => setModal({ type: 'draft', init: { rid: selected } })}
           openLoyalty={() => setModal({ type: 'loyalty' })}
           openBribe={() => setModal({ type: 'bribe', rid: selected })}
           openFief={() => setModal({ type: 'fief', rid: selected })}
@@ -575,10 +585,27 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           init={modal.init}
           act={act}
           onClose={() => setModal(null)}
-          onPickDest={() => {
+          onPickRegions={(picks, dest) => {
+            const back = () => setModal({ type: 'draft', init: { picks, dest } });
             setModal(null);
             setSheet(false);
-            setPick({ hint: '징병한 병사들을 모을 내 땅을 누르세요', valid: new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea)), onPick: (d) => setModal({ type: 'draft', init: { dest: d } }) });
+            const valid = new Set(nationRegions(game, pid).filter((r) => draftMax(game, pid, r) >= 100));
+            setPick({
+              hint: '징병할 내 땅을 누르세요 (다시 누르면 빠짐)',
+              valid,
+              chosen: new Set(Object.keys(picks).map(Number).filter((r) => valid.has(r))),
+              onCancel: back,
+              onPick: (set) => {
+                const o = {};
+                for (const r of set) o[r] = picks[r] ?? draftMax(game, pid, r);
+                setModal({ type: 'draft', init: { picks: o, dest } });
+              },
+            });
+          }}
+          onPickDest={(picks) => {
+            setModal(null);
+            setSheet(false);
+            setPick({ hint: '징병한 병사들을 모을 내 땅을 누르세요', valid: new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea)), onCancel: () => setModal({ type: 'draft', init: { picks } }), onPick: (d) => setModal({ type: 'draft', init: { picks, dest: d } }) });
           }}
         />
       )}

@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, draftMax, manpower, DRAFT_GOLD, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -1457,47 +1457,63 @@ function SowBox({ game, act }) {
   );
 }
 
-// 징병: 모든 내 땅에서 한꺼번에 뽑아 한 곳으로 보냄 (행동력 2, 한 턴 1회)
-export function DraftModal({ world, game, act, onClose, init = {}, onPickDest }) {
+// 징병: 지도에서 고른 지역마다 슬라이더로 인원을 정해 그 자리에서 뽑음 (행동력 2, 한 턴 1회)
+export function DraftModal({ world, game, act, onClose, init = {}, onPickRegions, onPickDest }) {
   const pid = game.playerId;
   const me = game.nations[pid];
-  const rally = me.rally?.to;
-  const [dest, setDest] = useState(init.dest !== undefined ? init.dest : rally != null && game.regions[rally]?.owner === pid ? rally : null);
-  const plan = draftPlan(game, pid);
-  const men = plan.reduce((a, x) => a + x.amt, 0), gold = plan.reduce((a, x) => a + x.gold, 0);
+  const [want, setWant] = useState(() => {
+    if (init.picks) return init.picks;
+    const o = {};
+    if (init.rid != null && draftMax(game, pid, init.rid) >= 100) o[init.rid] = draftMax(game, pid, init.rid);
+    return o;
+  });
+  const [dest, setDest] = useState(init.dest ?? null);
+  const room = manpower(game, pid).room;
+  const rows = Object.keys(want).map(Number).filter((rid) => draftMax(game, pid, rid) >= 100).map((rid) => ({ rid, max: draftMax(game, pid, rid) }));
+  const men = rows.reduce((a, o) => a + (want[o.rid] || 0), 0);
+  const gold = men * DRAFT_GOLD;
+  const over = men > room;
   const dist = useMemo(() => (dest !== null ? ownDistances(game, world, pid, dest) : null), [game, world, pid, dest]);
-  const far = dist ? Math.max(0, ...plan.filter((x) => dist.has(x.rid)).map((x) => dist.get(x.rid))) : 0;
-  const stay = dist ? plan.filter((x) => !dist.has(x.rid)).length : 0;
-  const err = draftCheck(game, pid);
+  const far = dist ? Math.max(0, ...rows.filter((o) => o.rid !== dest && dist.has(o.rid)).map((o) => dist.get(o.rid))) : 0;
+  const base = draftCheck(game, pid);
+  const err = base || (!men ? '징병할 지역을 고르고 인원을 정하세요.' : over ? `병력 상한까지 ${fmtTroops(room)}만 더 뽑을 수 있습니다.` : me.gold < gold ? '금이 부족합니다.' : null);
+  const all = () => { const o = {}; for (const r of nationRegions(game, pid)) { const m = draftMax(game, pid, r); if (m >= 100) o[r] = m; } setWant(o); };
   return (
-    <Modal title="💂 징병" onClose={onClose}>
+    <Modal title="💂 징병" onClose={onClose} wide>
       <div className="col">
-        <div>
-          내 땅 <b>{plan.length}곳</b>에서 인구의 4%(병영 8%)씩 — <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {DRAFT_AP}
-          <div className="muted" style={{ fontSize: 12 }}>한 턴에 한 번. 병사 1명당 유지비 1금/턴 — 수입보다 많이 뽑으면 파산합니다. 금이 모자라면 많이 뽑는 곳부터.</div>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {onPickRegions && <button className="sm primary" onClick={() => onPickRegions(want, dest)}>🗺️ 지도에서 지역 고르기</button>}
+          <button className="sm" onClick={all}>모든 내 땅</button>
+          <button className="sm" onClick={() => setWant({})}>비우기</button>
+          <small className="muted">지역마다 최대 인구의 4%(병영 8%) · 1명당 {DRAFT_GOLD}금 · 더 뽑을 수 있는 병력 {fmtTroops(room)}</small>
+        </div>
+        <div className="col" style={{ maxHeight: '42vh', overflow: 'auto', gap: 4 }}>
+          {!rows.length && <div className="muted">아직 고른 지역이 없습니다. 지도에서 징병할 내 땅을 골라 주세요.</div>}
+          {rows.map((o) => (
+            <div key={o.rid} className="row" style={{ gap: 8, fontSize: 13 }}>
+              <span style={{ width: 120 }}>{game.regions[o.rid].name}{game.regions[o.rid].buildings.barracks ? ' 🏕️' : ''}</span>
+              <Slider min={0} max={o.max} step={100} value={want[o.rid] || 0} onChange={(v) => setWant({ ...want, [o.rid]: v })} style={{ flex: 1 }} />
+              <span style={{ width: 120, textAlign: 'right' }}>{fmtTroops(want[o.rid] || 0)} / {fmtTroops(o.max)}</span>
+              <button className="sm" onClick={() => setWant({ ...want, [o.rid]: o.max })}>최대</button>
+              <button className="sm" onClick={() => { const w = { ...want }; delete w[o.rid]; setWant(w); }}>✕</button>
+            </div>
+          ))}
         </div>
         <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-          <span>보낼 곳</span>
-          <button className={'sm' + (dest === null ? ' primary' : '')} onClick={() => setDest(null)}>각자 제자리</button>
-          {rally != null && game.regions[rally]?.owner === pid && (
-            <button className={'sm' + (dest === rally ? ' primary' : '')} onClick={() => setDest(rally)}>🚩 집결지 {game.regions[rally].name}</button>
-          )}
-          {onPickDest && <button className="sm" onClick={() => onPickDest()}>🗺️ 지도에서 고르기</button>}
-          {dest !== null && dest !== rally && <b>→ {game.regions[dest].name}</b>}
+          <span>뽑은 병사</span>
+          <button className={'sm' + (dest === null ? ' primary' : '')} onClick={() => setDest(null)}>뽑은 자리에 둠</button>
+          {onPickDest && <button className={'sm' + (dest !== null ? ' primary' : '')} onClick={() => onPickDest(want)}>🗺️ 한 곳으로 모으기{dest !== null ? ` → ${game.regions[dest].name}` : ''}</button>}
+          {dest !== null && <small className="muted">내 땅 3칸에 1턴 (가장 먼 곳 {reinforceTurns(far)}턴)</small>}
         </div>
-        {dest !== null && (
-          <small className="muted">
-            내 땅 3칸에 1턴 (가장 먼 곳 {reinforceTurns(far)}턴){stay > 0 && ` · 길이 이어지지 않은 ${stay}곳은 제자리`}
-          </small>
-        )}
-        {err && <small style={{ color: 'var(--danger)' }}>{err}</small>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <span className="muted">합계 <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {DRAFT_AP}</span>
+          {err && <small style={{ color: 'var(--danger)' }}>{err}</small>}
           <button onClick={onClose}>취소</button>
           <button
             className="primary"
             disabled={!!err}
             onClick={() => {
-              const res = act((s) => doDraft(s, pid, world, dest));
+              const res = act((s) => doDraft(s, pid, world, dest, rows.map((o) => ({ rid: o.rid, amt: want[o.rid] || 0 }))));
               if (res?.ok) onClose();
             }}
           >

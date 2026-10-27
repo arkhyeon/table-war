@@ -92,6 +92,7 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .map-ctrl { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .map-ctrl .zoom-lv { background: #000a; color: #fff; border-radius: 6px; font-size: 11px; text-align: center; padding: 3px 0; min-width: 40px; }
 .map-hint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: #000a; padding: 6px 12px; border-radius: 8px; font-size: 13px; pointer-events: none; }
+.map-hint button { pointer-events: auto; }
 .side { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
 .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
 .kv { display: grid; grid-template-columns: 70px 1fr; gap: 3px 8px; font-size: 13px; }

@@ -317,6 +317,9 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
   if (hasBond(def)) buffD *= 1.1;
   if (tr.ambush === s.turn) { buffD *= 1.25; mods.push('🌿 매복 수비 +25%'); }
+  // 사면초가 결사항전: 3나라 이상에게 동시에 공격받으면 수비 +10%~+30%
+  const desp = tr.owner === null ? 0 : desperate(s, tr.owner);
+  if (desp) { buffD *= 1 + desp; mods.push(`🛡️ 사면초가 결사항전 +${Math.round(desp * 100)}%`); }
   // 중원 본토: 사방이 적인 대신 백성이 똘똘 뭉쳐 지킴
   if (tr.owner !== null && tr.home === tr.owner && s.nations[tr.owner].heartland) { buffD *= 1.2; mods.push('🏯 중원 결집 수비 +20%'); }
   // 대동맹 연합군은 패권국을 칠 때 사기가 오름
@@ -359,6 +362,17 @@ export function estimateBattle(s, world, nid, from, to, count, genIds, opts = {}
   return { ...f, A, D, ratio: D > 0 ? A / D : 99, winChance: D <= 0 ? 1 : wins / trials };
 }
 
+// 사면초가: 최근 6턴 안에 나를 친 나라 수 (도적 제외). 3곳 이상이면 결사항전
+export const SIEGE_FRONTS = 3;
+export function frontsOf(s, nid, except = null) {
+  const h = s.nations[nid]?.hitBy;
+  if (!h) return 0;
+  let k = 0;
+  for (const [o, t] of Object.entries(h)) if (+o !== except && s.turn - t <= 6 && s.nations[o]?.alive && !s.nations[o].horde) k++;
+  return k;
+}
+export const desperate = (s, nid) => Math.min(0.3, Math.max(0, frontsOf(s, nid) - SIEGE_FRONTS + 1) * 0.1);
+
 // ───────── 행동 ─────────
 const fail = (msg) => ({ ok: false, msg });
 
@@ -369,7 +383,7 @@ export function canAct(s, nid, ap) {
   return null;
 }
 
-// 징병: 나라 전체에서 한 번에 (한 턴 1회, 행동력 2). 지역마다 인구의 4%(병영 8%), 1명당 5금
+// 징병: 지도에서 고른 지역마다 슬라이더로 인원을 정해 한 번에 (한 턴 1회, 행동력 2). 지역당 최대 인구의 4%(병영 8%), 1명당 5금
 // dest를 주면 뽑은 병사를 그곳으로 행군시킴 (내 땅으로 이어진 곳만, 3칸에 1턴)
 export const DRAFT_AP = 2;
 export const DRAFT_GOLD = 5;
@@ -383,14 +397,19 @@ export function manpower(s, nid) {
   for (const r of s.regions) if (r.sea && r.owner === nid) used += r.troops;
   return { cap: Math.round(cap), used, room: Math.max(0, Math.round(cap - used)) };
 }
+// 한 지역에서 한 턴에 뽑을 수 있는 최대 인원 (병영 2배, 징병 특성 장수)
+export function draftMax(s, nid, rid) {
+  const r = s.regions[rid];
+  if (!r || r.sea || r.owner !== nid) return 0;
+  const rate = (r.buildings.barracks ? 0.08 : 0.04) * (1 + tv(gensIn(s, rid, nid), '징병'));
+  return Math.floor((r.pop * 1000 * rate) / 100) * 100;
+}
 export function draftPlan(s, nid) {
   const room = manpower(s, nid).room;
   const raw = nationRegions(s, nid)
     .filter((rid) => !s.regions[rid].sea)
     .map((rid) => {
-      const r = s.regions[rid];
-      const rate = (r.buildings.barracks ? 0.08 : 0.04) * (1 + tv(gensIn(s, rid, nid), '징병'));
-      const amt = Math.floor((r.pop * 1000 * rate) / 100) * 100;
+      const amt = draftMax(s, nid, rid);
       return { rid, amt, gold: amt * DRAFT_GOLD };
     })
     .filter((x) => x.amt >= 200)
@@ -425,16 +444,23 @@ export function ownDistances(s, world, nid, from, parent) {
 }
 export const MARCH_PER_TURN = 3;
 export const reinforceTurns = (d) => Math.max(1, Math.ceil(d / MARCH_PER_TURN));
-export function doDraft(s, nid, world, dest = null) {
+// picks: [{rid, amt}] 고른 지역마다 슬라이더로 정한 인원 (없으면 모든 땅에서 최대로)
+export function doDraft(s, nid, world, dest = null, picks = null) {
   const err = draftCheck(s, nid);
   if (err) return fail(err);
   const n = s.nations[nid];
   const parent = new Map();
   const dist = dest !== null && world ? ownDistances(s, world, nid, dest, parent) : null;
   let men = 0, spent = 0, k = 0, sent = 0;
+  let room = manpower(s, nid).room;
+  const list = picks
+    ? picks.map(({ rid, amt }) => { const a = Math.min(Math.floor(amt / 100) * 100, draftMax(s, nid, rid)); return { rid, amt: a, gold: a * DRAFT_GOLD }; }).filter((x) => x.amt >= 100)
+    : draftPlan(s, nid);
   // 많이 뽑을 수 있는 곳부터, 금이 닿는 만큼
-  for (const x of draftPlan(s, nid)) {
+  for (const x of list) {
+    if (picks) { x.amt = Math.min(x.amt, Math.floor(room / 100) * 100); x.gold = x.amt * DRAFT_GOLD; if (x.amt < 100) continue; }
     if (n.gold - spent < x.gold) continue;
+    room -= x.amt;
     const r = s.regions[x.rid];
     r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
     if (dist && x.rid !== dest && dist.has(x.rid)) {
@@ -1225,6 +1251,8 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     }
   };
   n.ap -= cost;
+  // 누구에게 공격받았는지 기록 (사면초가 판정)
+  if (tr.owner !== null && tr.owner !== nid && !tr.sea && !n.horde) (s.nations[tr.owner].hitBy = s.nations[tr.owner].hitBy || {})[nid] = s.turn;
   // 아군 지역 또는 빈 바다로 이동
   if (tr.owner === nid || (tr.sea && (tr.owner === null || tr.troops <= 0))) {
     if (!transit) fr.troops -= count;

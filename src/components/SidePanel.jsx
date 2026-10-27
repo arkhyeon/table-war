@@ -328,8 +328,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)} disabled={r.troops < 2}>
                   🚩 이동·공격 (M)
                 </button>
-                <button onClick={openConscript} disabled={!!draftCheck(game, pid)} title={draftCheck(game, pid) || `모든 내 땅에서 징병해 이곳으로 보냄 (행동력 ${DRAFT_AP})`}>
-                  💂 여기로 징병
+                <button onClick={openConscript} disabled={!!draftCheck(game, pid)} title={draftCheck(game, pid) || `이곳(과 지도에서 고른 땅)에서 슬라이더로 인원을 정해 징병 (행동력 ${DRAFT_AP})`}>
+                  💂 여기서 징병
                 </button>
                 <button
                   className={me.rally?.to === selected ? 'primary' : ''}
