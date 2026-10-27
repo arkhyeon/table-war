@@ -125,10 +125,14 @@ function upkeep(s, world) {
     }
     n.gold = Math.round(n.gold + net);
     if (n.gold < 0) {
+      // 국고가 바닥나면 녹봉을 못 받은 만큼(1명당 1금) 병사가 탈영
+      const unpaid = -n.gold;
       n.gold = 0;
-      // 국고가 바닥나면 매 턴 병력의 20%가 탈영 (한 번에 증발하지 않게)
-      for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.floor((r.troops * 0.8) / 100) * 100);
-      log(s, `💸 ${n.name}의 국고가 바닥나 병사 20%가 탈영했습니다. 병력을 줄이거나 세금을 올리세요.`, [n.id], 'warn');
+      const total = s.regions.reduce((a, r) => a + (r.owner === n.id ? r.troops : 0), 0);
+      const frac = Math.min(0.95, unpaid / Math.max(1, total));
+      let gone = 0;
+      for (const r of s.regions) if (r.owner === n.id) { const d = Math.floor((r.troops * frac) / 100) * 100; r.troops = Math.max(100, r.troops - d); gone += d; }
+      log(s, `💸 ${n.name}의 국고가 바닥나 녹봉을 못 받은 병사 ${fmtTroops(gone)}이(가) 탈영했습니다.`, [n.id], 'warn');
     }
   }
   // 위기 판단: 영토를 잃었거나 수도 주변 적병이 수도 수비대보다 많으면 '나라가 위태로움'
@@ -172,7 +176,7 @@ function upkeep(s, world) {
     const tax = r.owner === null ? TAX.normal : TAX[effTax(s, i)];
     const gens = r.owner === null ? [] : gensIn(s, i, r.owner);
     const df = s.df || 1;
-    const cap = ((TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0)) / df;
+    const cap = (((TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0)) * (r.plain ? 1.3 : 1)) / df;
     if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth * (1 + tv(gens, '농정'))) + (0.3 * tax.growth) / df);
     if (r.buildings.walls > 0 && r.buildings.walls < WALL_MAX && r.siegedTurn !== s.turn) r.buildings.walls = Math.min(WALL_MAX, r.buildings.walls + 1 + (tv(gens, '축성') ? 1 : 0));
     r.pop = Math.round(r.pop * 10) / 10;
@@ -193,7 +197,7 @@ function upkeep(s, world) {
     const sprawl = inner ? Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8)) : 0;
     // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
     const martial = r.troops >= r.pop * 250;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty + (r.plain ? 1 : 0) - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;

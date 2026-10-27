@@ -272,6 +272,8 @@ export function aiActions(s, world, nid) {
         if (drive && t.owner !== null) need = Math.max(0.95, need - 0.15 - drive * 0.25);
         if (building && t.owner !== null && !sameIsle) need += 0.4; // 내실 중엔 확실한 기회만
         if (sameIsle) need -= 0.15;
+        // 소모전: 나보다 훨씬 약한 나라(국력 1.8배↑)는 비슷한 손실을 주고받아도 결국 버티지 못하니 확실치 않아도 갉아먹음
+        if (t.owner !== null && !t.sea && nationPower(s, nid) >= nationPower(s, t.owner) * 1.8) need = Math.max(0.9, need - 0.25);
         // 돈이 넉넉하면 용병을 붙여 공격 (장수가 있을 때)
         const mc = !t.sea && !reg.sea && gens.length && n.gold > 150 * G ? Math.max(0, Math.min(mercCap(s, gens), Math.floor((n.gold - 80 * G) / mercPrice(s, gens) / 100) * 100)) : 0;
         const { est, opts: mo0 } = attackOption(s, world, nid, r, nb.id, count + mc, gens, need);
@@ -295,10 +297,12 @@ export function aiActions(s, world, nid) {
           const count = Math.min(movable(s, r), reg.troops - 1000 - (threat[r] > 0 ? Math.ceil(threat[r] * 400) : 0));
           if (count < (island ? 3000 : 6000)) continue;
           // 바로 앞바다 또는 (섬나라는) 한 칸 더 건너 상륙할 곳
-          const reach = overseas(s, world, nid, r).filter((o) => o.zone === z.id && (island || o.via === null) && (o.via === null || !s.regions[o.via].troops || s.regions[o.via].owner === nid));
+          // 나보다 약한 나라의 해안은 한 칸 더 건너서라도, 덜 확실해도 계속 상륙해 갉아먹음 (섬나라 압박)
+          const weaker = (o) => s.regions[o.target].owner !== null && nationPower(s, nid) >= nationPower(s, s.regions[o.target].owner) * 1.5;
+          const reach = overseas(s, world, nid, r).filter((o) => o.zone === z.id && (island || o.via === null || weaker(o)) && (o.via === null || !s.regions[o.via].troops || s.regions[o.via].owner === nid));
           const target = reach.find((o) => {
             const t = s.regions[o.target];
-            return !(t.owner !== null && s.turn <= 3) && t.troops * 1.6 < count * (o.type === 'cliff' ? 0.45 : 0.75);
+            return !(t.owner !== null && s.turn <= 3) && t.troops * (weaker(o) ? 1.05 : 1.6) < count * (o.type === 'cliff' ? 0.45 : 0.75);
           });
           if (!target || moveCheck(s, world, nid, r, z.id, count, gens)) continue;
           opts.push({

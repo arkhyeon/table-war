@@ -150,7 +150,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
         </div>
         {!spectator && nextGold < 0 && (
           <div className="warn-box">
-            ⚠️ 다음 턴 파산 예상 — 수입 {fmtGold(inc.gross)} − 지출 {fmtGold(inc.upkeep)} = {fmtGold(inc.net)}/턴, 국고 {fmtGold(me.gold)}. 이대로면 병사 20%가 탈영합니다. 지역에서 🏳️해산하거나 세율을 올리세요. (병사 1명당 1금)
+            ⚠️ 다음 턴 파산 예상 — 수입 {fmtGold(inc.gross)} − 지출 {fmtGold(inc.upkeep)} = {fmtGold(inc.net)}/턴, 국고 {fmtGold(me.gold)}. 이대로면 못 준 녹봉만큼(약 {fmtTroops(-nextGold)}) 병사가 탈영합니다. 지역에서 🏳️해산하거나 세율을 올리세요. (병사 1명당 1금)
           </div>
         )}
         {!spectator && nextGold >= 0 && inc.net < 0 && nextGold + inc.net * 2 < 0 && (
@@ -274,6 +274,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               </span>
             )}
             <span title={TERRAIN[wr.terrain].desc}>⛰️ {TERRAIN[wr.terrain].name}</span>
+            {r.plain && <span title="대평야: 세금 +20%, 인구 상한 +30%, 민심 +1/턴">🌾 대평야</span>}
             <span title={w.desc}>
               {w.icon} {w.name}
             </span>
@@ -292,7 +293,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             if (own?.fief && own.lord === pid)
               return (
                 <div className="actions" style={{ marginTop: 10 }}>
-                  <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 수입 15% 상납, 필요하면 지원 요청</span>
+                  <span className="muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>🏯 내 군단 — {game.generals[own.ruler]?.name} (충성 {Math.round(game.generals[own.ruler]?.loyalty ?? 60)}) · 상납 없음, 큰일엔 지원 요청</span>
                   <button onClick={() => act((s) => revokeFief(s, world, pid, own.id))}>🏯 군단 회수</button>
                 </div>
               );

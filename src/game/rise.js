@@ -1,7 +1,8 @@
 import { G } from './rules.js';
 import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
-import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, checkElimination, canAct } from './engine.js';
+import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, checkElimination, canAct, buildCost, conscriptMax, CONSCRIPT, reliefCost, WALL_MAX } from './engine.js';
+import { fmtTroops } from './format.js';
 import { fmtGold } from './format.js';
 import { emptyDeal, describeDeal, applyDeal } from './diplomacy.js';
 import { colorFor } from './setup.js';
@@ -280,7 +281,7 @@ export function riseNations(s, world, rng) {
 
 // ───────── 분봉: 장수에게 땅을 맡겨 스스로 다스리게 함 (내 나라의 일부, 언제든 회수) ─────────
 const lighten = (hsl) => hsl.replace(/hsl\((\d+), (\d+)%, (\d+)%\)/, (_, h, sat, l) => `hsl(${h}, ${Math.max(30, sat - 15)}%, ${Math.min(78, +l + 18)}%)`);
-export const FIEF_TRIBUTE = 0.15; // 군단은 수입 대부분을 스스로 쓰고, 필요하면 지원을 청함
+export const FIEF_TRIBUTE = 0; // 상납 없음: 군단은 수입을 스스로 쓰고, 큰일이 있으면 지원을 청함
 
 // 맡길 땅: 고른 지역에서 이어진 내 땅(수도 제외) n곳
 export function fiefRegions(s, world, pid, start, n) {
@@ -326,7 +327,7 @@ export function grantFief(s, world, pid, gid, rids) {
   setRel(s, n.id, pid, { type: 'vassal', overlord: pid, since: s.turn });
   syncFiefs(s);
   s.opinion[n.id][pid] = 60;
-  log(s, `🏯 ${g.name}에게 ${rids.length}개 지역을 맡겼습니다. ${n.name}이(가) 스스로 다스리며 수입의 ${Math.round(FIEF_TRIBUTE * 100)}%를 바칩니다.`, [pid, n.id], 'diplo');
+  log(s, `🏯 ${g.name}에게 ${rids.length}개 지역을 맡겼습니다. ${n.name}이(가) 스스로 다스리며 상납 없이 스스로 다스리며, 큰일이 있으면 지원을 청합니다.`, [pid, n.id], 'diplo');
   return { ok: true, msg: `${n.name}을(를) 세웠습니다.` };
 }
 
@@ -482,25 +483,42 @@ export function hordeDemands(s, world, rng) {
   }
 }
 
-// 군단의 지원 요청: 무엇에 얼마가 필요한지 청하고, 주면 충성↑ 안 주면 충성↓
-const FIEF_NEEDS = [
-  ['징병 자금', '병사를 더 모으려 합니다', 30],
-  ['성벽 보수', '국경에 성을 쌓으려 합니다', 40],
-  ['진휼 곡식', '흉흉한 민심을 달래려 합니다', 20],
-  ['원정 군자금', '새 땅을 치려 합니다', 50],
-];
+// 군단의 지원 요청: 군단이 실제로 하려는 일(성 쌓기·징병·시장·진휼)에 드는 금을 청함. 주면 그 일을 바로 하고 충성↑, 안 주면 충성↓
 export function fiefRequests(s, world, rng) {
   if (s.spectator) return;
   for (const f of s.nations) {
     if (!f.alive || !f.fief || f.lord !== s.playerId) continue;
-    if (f.askTurn !== undefined && s.turn - f.askTurn < 6) continue;
-    if (rng() >= 0.2 || (s.proposals || []).length >= 2) continue;
-    const [what, why, base] = FIEF_NEEDS[Math.floor(rng() * FIEF_NEEDS.length)];
-    const gold = Math.round((base * G * (1 + nationRegions(s, f.id).length / 10)) / 1000) * 1000;
+    if (f.askTurn !== undefined && s.turn - f.askTurn < 5) continue;
+    if (rng() >= 0.25 || (s.proposals || []).length >= 2) continue;
+    const mine = nationRegions(s, f.id);
+    const border = mine.filter((r) => world.regions[r].neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== f.id && s.regions[x.id].owner !== f.lord));
+    const plans = [];
+    const wall = border.filter((r) => !s.regions[r].buildings.walls).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
+    if (wall !== undefined) plans.push({ act: 'walls', rid: wall, gold: buildCost(s, wall, f.id, 'walls'), say: `${s.regions[wall].name}에 성을 쌓으려 합니다`, done: `${s.regions[wall].name}에 성을 쌓았습니다` });
+    const cr = mine.filter((r) => !s.regions[r].conscripted).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
+    if (cr !== undefined) {
+      const amt = Math.min(conscriptMax(s, cr, f.id), Math.floor((s.regions[cr].pop * 1000 * 0.08) / 100) * 100);
+      if (amt >= 1000) plans.push({ act: 'draft', rid: cr, amt, gold: amt * CONSCRIPT.draft.gold, say: `${s.regions[cr].name}에서 병사 ${fmtTroops(amt)}을 모으려 합니다`, done: `${s.regions[cr].name}에서 병사 ${fmtTroops(amt)}을 모았습니다` });
+    }
+    const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
+    if (mk !== undefined) plans.push({ act: 'market', rid: mk, gold: buildCost(s, mk, f.id, 'market'), say: `${s.regions[mk].name}에 시장을 열려 합니다`, done: `${s.regions[mk].name}에 시장을 열었습니다` });
+    const sad = mine.filter((r) => (s.regions[r].loyalty ?? 100) < 50).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty)[0];
+    if (sad !== undefined) plans.push({ act: 'relief', rid: sad, gold: reliefCost(s, sad), say: `민심이 흉흉한 ${s.regions[sad].name}에 곡식을 풀려 합니다`, done: `${s.regions[sad].name}에 곡식을 풀었습니다` });
+    if (!plans.length) continue;
+    const pl = plans[Math.floor(rng() * plans.length)];
     f.askTurn = s.turn;
     const g = s.generals[f.ruler];
-    (s.proposals = s.proposals || []).push({ from: f.id, kind: 'fief', gold, what, text: `${g?.name || f.name}: "${why}. ${what}로 금 ${fmtGold(gold)}이 필요합니다." (주면 충성 +6, 거절하면 -4)` });
+    (s.proposals = s.proposals || []).push({ from: f.id, kind: 'fief', gold: pl.gold, plan: pl, text: `${g?.name || f.name}: "${pl.say}. 금 ${fmtGold(pl.gold)}을 내려 주십시오." (주면 바로 시행·충성 +6, 거절하면 충성 -4)` });
   }
+}
+function fiefDo(s, f, pl) {
+  const r = s.regions[pl.rid];
+  if (r.owner !== f.id) return '그 땅을 이미 잃었습니다';
+  if (pl.act === 'walls') r.buildings.walls = WALL_MAX;
+  else if (pl.act === 'market') r.buildings.market = 1;
+  else if (pl.act === 'draft') { r.troops += pl.amt; r.pop = Math.max(3, r.pop - (pl.amt / 1000) * 0.5); r.conscripted = true; }
+  else if (pl.act === 'relief') { r.loyalty = Math.min(100, (r.loyalty ?? 100) + 14); r.reliefTurn = s.turn; }
+  return null;
 }
 export function answerRequest(s, prop, yes) {
   const f = s.nations[prop.from];
@@ -509,10 +527,12 @@ export function answerRequest(s, prop, yes) {
     const g = s.generals[f.ruler];
     if (yes) {
       if (me.gold < prop.gold) return { ok: false, msg: '금이 부족합니다.' };
+      const why = prop.plan ? fiefDo(s, f, prop.plan) : null;
+      if (why) return { ok: true, msg: `${f.name}: ${why}.` };
       me.gold -= prop.gold;
-      f.gold += prop.gold;
       if (g) g.loyalty = Math.min(100, (g.loyalty ?? 60) + 6);
-      return { ok: true, msg: `${f.name}에 금 ${fmtGold(prop.gold)}을 보냈습니다. (충성 +6)` };
+      log(s, `🏯 ${f.name}: 금 ${fmtGold(prop.gold)}을 받아 ${prop.plan?.done || '요청한 일을 했습니다'}.`, [s.playerId, f.id], 'info');
+      return { ok: true, msg: `${f.name}: ${prop.plan?.done || '요청한 일을 했습니다'}. (금 -${fmtGold(prop.gold)}, 충성 +6)` };
     }
     if (g) g.loyalty = Math.max(0, (g.loyalty ?? 60) - 4);
     return { ok: true, msg: `${f.name}의 요청을 거절했습니다. (충성 -4)` };

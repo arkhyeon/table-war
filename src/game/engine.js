@@ -106,6 +106,7 @@ export function regionTax(s, rid) {
   if (wt < 1) wt = 1 - (1 - wt) * (1 - tv(gensIn(s, rid, r.owner), '농정') / 2);
   g *= wt;
   if (r.buildings.market) g *= 1.5;
+  if (r.plain) g *= 1.2; // 대평야
   const gens = gensIn(s, rid, r.owner);
   g *= 1 + tv(gens, '정치') + (r.river ? tv(gens, '치수') : 0) + (r.buildings.port ? tv(gens, '교역') : 0) + governorBonus(governorOf(s, rid)).tax;
   return Math.round((g + (r.buildings.port ? 3 : 0)) * G);
