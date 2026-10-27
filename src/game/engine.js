@@ -146,7 +146,8 @@ export function income(s, nid) {
     inc += regionTax(s, i);
     troops += r.troops;
   });
-  inc = Math.round(inc * (1 + nationTrait(s, nid, '상업')) * landmarkBonus(s, nid));
+  // 중원국: 교통·물산의 중심이라 세수 +15%
+  inc = Math.round(inc * (1 + nationTrait(s, nid, '상업')) * landmarkBonus(s, nid) * (s.nations[nid]?.heartland ? 1.15 : 1));
   // 병사 1명당 1금, 장수 녹봉 1인당 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금
   const army = Math.round(troops * (1 - nationTrait(s, nid, '병참')));
   const salary = nationGenerals(s, nid).length * G;
@@ -316,6 +317,8 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
   if (hasBond(def)) buffD *= 1.1;
   if (tr.ambush === s.turn) { buffD *= 1.25; mods.push('🌿 매복 수비 +25%'); }
+  // 중원 본토: 사방이 적인 대신 백성이 똘똘 뭉쳐 지킴
+  if (tr.owner !== null && tr.home === tr.owner && s.nations[tr.owner].heartland) { buffD *= 1.2; mods.push('🏯 중원 결집 수비 +20%'); }
   // 대동맹 연합군은 패권국을 칠 때 사기가 오름
   if (s.coalition && s.coalition.target === tr.owner && s.coalition.members?.includes(nid)) {
     buffA *= 1.1;

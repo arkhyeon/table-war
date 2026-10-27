@@ -183,9 +183,9 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     const isCap = plan.find((n) => n.region === i);
     // 역사적으로 강했던 나라는 power로 초기 병력 보정 (시나리오에서 지정)
     // 빈 땅의 토착 세력: 대부분 4.5천~1만, 가끔(15%) 2~3배 강한 토호의 산채
-    // 변방(나라들의 한가운데에서 멀수록)일수록 최대 1.8배 강함 → 변방국이 공짜로 커지지 못하고 중앙과 맞붙게
+    // 변방(나라들의 한가운데에서 멀수록)일수록 최대 2.4배 강함 → 변방국이 공짜로 커지지 못하고 중앙과 맞붙게
     const strong = owner[i] === null && rng() < 0.15;
-    const edge = owner[i] === null ? 1 + 0.8 * Math.min(1, Math.hypot(wr.cx - mid[0], wr.cy - mid[1]) / spread) : 1;
+    const edge = owner[i] === null ? 1 + 1.4 * Math.min(1, Math.hypot(wr.cx - mid[0], wr.cy - mid[1]) / spread) : 1;
     const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1) * (frontier.has(i) ? 0.5 : 1)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
@@ -339,6 +339,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     for (const i of mine) {
       const r = s.regions[i];
       r.plain = true;
+      r.home = n.id; // 중원 본토: 지킬 때 결집 보너스
       r.pop = Math.round(r.pop * 1.3 * 10) / 10;
       r.troops = Math.round((r.troops * 1.25) / 100) * 100;
     }

@@ -283,8 +283,8 @@ export function endgame(s, world, rng) {
 
 export function riseNations(s, world, rng) {
   if (s.turn < 10 || s.opts?.noRise || topShare(s).share >= ENDGAME) return;
-  if (rng() < 0.08 && tryRestore(s, world, rng)) return;
-  if (rng() < 0.03) tryRise(s, world, rng);
+  if (rng() < 0.04 && tryRestore(s, world, rng)) return;
+  if (rng() < 0.015) tryRise(s, world, rng);
 }
 
 // ───────── 분봉: 장수에게 땅을 맡겨 스스로 다스리게 함 (내 나라의 일부, 언제든 회수) ─────────
@@ -713,7 +713,7 @@ export function generalDrama(s, world, rng) {
   }
   // 3) 영웅 봉기: 충성 40 아래의 장수가 지키던 땅을 들고 일어섬 (턴에 한 번까지, 큰 나라일수록 위험)
   // 영웅 봉기는 천하에 25턴에 한 번까지
-  if (late || s.nations.length >= MAX_IDS || s.turn - (s.lastUprising ?? -99) < 25) return;
+  if (late || s.nations.length >= MAX_IDS || s.turn - (s.lastUprising ?? -99) < 40) return;
   const total = s.regions.filter((r) => !r.sea).length;
   for (const g of rng.shuffle(Object.values(s.generals).filter((x) => x.status === 'active' && x.persona !== '충신' && (x.loyalty ?? 60) < 40))) {
     const n = s.nations[g.nation];
