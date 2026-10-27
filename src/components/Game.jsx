@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
@@ -406,6 +406,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           act={act}
           openGenerals={() => setModal({ type: 'gens' })}
           openConscript={() => setModal({ type: 'conscript', rid: selected })}
+          openLoyalty={() => setModal({ type: 'loyalty' })}
         />
       </div>
       {modal?.type === 'move' && <MoveModal world={world} game={game} from={modal.from} to={modal.to} act={act} onClose={() => setModal(null)} onDone={() => { setModal(null); setMoveMode(false); }} />}
@@ -435,6 +436,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           각 나라가 움직이는 중…
         </div>
       )}
+      {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} act={act} onFocus={(rid) => { setSelected(rid); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'save' && (
         <SaveModal
           game={game}

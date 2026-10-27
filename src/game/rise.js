@@ -1,7 +1,8 @@
 import { G } from './rules.js';
 import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
-import { addGeneral, computeMaxAp, log, nationRegions, gensIn } from './engine.js';
+import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel } from './engine.js';
+import { fmtGold } from './format.js';
 import { colorFor } from './setup.js';
 
 // 신흥국 출현: 몰락한 왕의 부흥, 빈 땅의 봉기, 민심이 바닥난 지역의 독립
@@ -145,6 +146,82 @@ function tryRise(s, world, rng) {
   announceRise(s, n, o.rids, '🌱', `신흥국 ${n.name} 출현`, `${king.name}이(가) ${how}했습니다.`, o.from !== undefined ? [o.from] : []);
   log(s, `🌱 ${king.name}이(가) ${how}해 신흥국 ${n.name}을(를) 세웠습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
   return true;
+}
+
+// 천운: 한 나라가 크게 앞서면 가끔(언제일지 모름) 판을 흔드는 일이 생김
+// 앞설수록 잦아짐(30%부터, 최대 턴당 8%), 한 번 일어나면 8턴은 조용
+export function fortune(s, world, rng) {
+  if (s.turn < 15 || s.opts?.noRise) return;
+  if (s.fortuneTurn !== undefined && s.turn - s.fortuneTurn < 8) return;
+  const land = s.regions.filter((r) => !r.sea).length;
+  const alive = s.nations.filter((n) => n.alive);
+  if (alive.length < 2) return;
+  const sizeOf = (id) => nationRegions(s, id).length;
+  const leader = alive.reduce((a, b) => (sizeOf(b.id) > sizeOf(a.id) ? b : a));
+  const share = sizeOf(leader.id) / land;
+  if (share < 0.3 || rng() >= Math.min(0.08, (share - 0.3) * 0.25)) return;
+  const L = leader.id;
+  const rivals = alive.filter((n) => n.id !== L && getRel(s, n.id, L).type !== 'vassal');
+  if (!rivals.length) return;
+  const touch = new Set();
+  for (const r of nationRegions(s, L)) for (const nb of world.regions[r].neighbors) {
+    const o = s.regions[nb.id].owner;
+    if (o !== null && o !== L && rivals.some((x) => x.id === o)) touch.add(o);
+  }
+  const front = rivals.filter((n) => touch.has(n.id));
+  const kinds = [];
+  // ① 대반란: 민심이 낮은 땅 몇 곳이 한꺼번에 들고일어남
+  const sore = nationRegions(s, L).filter((r) => r !== leader.capital && (s.regions[r].loyalty ?? 100) < 70).sort((a, b) => (s.regions[a].loyalty ?? 100) - (s.regions[b].loyalty ?? 100));
+  if (sore.length && s.nations.length < MAX_IDS) kinds.push(['revolt', 1]);
+  // ② 명장 망명: 패권국의 이름난 장수가 맞수에게 귀순
+  const star = Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === L && g.id !== leader.ruler).sort((a, b) => b.war + b.lead - (a.war + a.lead))[0];
+  if (star) kinds.push(['defect', 1]);
+  // ③ 반패권 원조: 천하가 패권국을 경계해 맞닿은 나라들에 군자금·의병이 모임
+  kinds.push(['aid', 1.2]);
+  const kind = rng.weighted(kinds, (k) => k[1])[0];
+  s.fortuneTurn = s.turn;
+  const ev = (icon, title, story, effect, nations, rids) => {
+    (s.turnEvents = s.turnEvents || []).push({ icon, title, story, effect, nations, global: true, rids });
+    log(s, `${icon} ${title} — ${effect}`, nations, 'warn');
+  };
+  if (kind === 'revolt') {
+    const k = Math.max(2, Math.min(5, Math.round(sizeOf(L) * 0.04)));
+    const base = sore[0];
+    const rids = [base];
+    for (let i = 0; i < rids.length && rids.length < k; i++) {
+      for (const nb of world.regions[rids[i]].neighbors) {
+        if (rids.length >= k) break;
+        if (!s.regions[nb.id].sea && s.regions[nb.id].owner === L && nb.id !== leader.capital && !rids.includes(nb.id)) rids.push(nb.id);
+      }
+    }
+    if (sizeOf(L) - rids.length < 3) return;
+    const civ = civNear(s, world, base);
+    const lead = leaderFor(s, civ, rng);
+    const n = newNation(s, civ, freshName(s, civ, rng));
+    seize(s, world, n, rids, 1.2);
+    const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng, true);
+    finish(s, n, king);
+    for (const x of rivals) { s.opinion[n.id][x.id] = 30; s.opinion[x.id][n.id] = 20; }
+    ev('🔥', `대반란 — ${n.name} 봉기`, `${leader.name}의 천하가 굳어 가자 ${s.regions[base].name} 일대의 백성이 ${king.name}을(를) 받들고 일어섰습니다.`, `${leader.name}의 ${rids.length}개 지역이 ${n.name}(으)로 독립`, [L, n.id], rids);
+  } else if (kind === 'defect') {
+    const to = rng.weighted(front.length ? front : rivals, (n) => 1 + nationRegions(s, n.id).length);
+    const dest = to.capital ?? nationRegions(s, to.id)[0];
+    if (dest === undefined) return;
+    Object.assign(star, { nation: to.id, region: dest, loyalty: 70 });
+    delete star.order;
+    ev('🏃', `명장 망명 — ${star.name}`, `${leader.name}의 견제와 시기를 견디지 못한 ${star.name}이(가) 밤을 틈타 ${to.name}(으)로 달아났습니다.`, `${star.name}(무${star.war}/통${star.lead})이(가) ${to.name}에 귀순`, [L, to.id]);
+  } else {
+    const got = (front.length ? front : rivals).slice().sort((a, b) => nationRegions(s, b.id).length - nationRegions(s, a.id).length).slice(0, 4);
+    const df = s.df || 1;
+    const gold = Math.round((40 + share * 120) * G / got.length / 1000) * 1000;
+    const men = Math.round(((4000 + share * 16000) * df) / got.length / 100) * 100;
+    for (const n of got) {
+      n.gold += gold;
+      const at = n.capital ?? nationRegions(s, n.id)[0];
+      if (at !== undefined) s.regions[at].troops += men;
+    }
+    ev('🤝', '반(反)패권의 기운', `천하가 ${leader.name}의 독주를 두려워해 상인과 호족들이 ${got.map((n) => n.name).join('·')}에 군자금과 의병을 보냈습니다.`, `${got.map((n) => n.name).join('·')}: 각각 금 +${fmtGold(gold)}, 병력 +${men.toLocaleString('ko-KR')}`, [L, ...got.map((n) => n.id)]);
+  }
 }
 
 export function riseNations(s, world, rng) {

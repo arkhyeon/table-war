@@ -4,7 +4,7 @@ import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
   RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, canSail, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia } from './engine.js';
+  marchVia, genIndexOn, genIndexOff } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -80,10 +80,17 @@ function updateGoal(s, world, nid) {
       cand.set(o, cand.get(o) || 0);
     }
   }
+  // 속국은 종주국의 적(종주국과 맞닿은 나라)을 함께 친다
+  const lord = s.nations.find((x) => x.alive && isVassalOf(s, nid, x.id));
+  const lordFoes = new Set();
+  if (lord) for (const r of nationRegions(s, lord.id)) for (const nb of world.regions[r].neighbors) {
+    const o = s.regions[nb.id].owner;
+    if (o !== null && o !== lord.id && o !== nid && !s.regions[nb.id].sea && getRel(s, lord.id, o).type === 'none') lordFoes.add(o);
+  }
   let best = null, bv = -Infinity;
   for (const [o, base] of cand) {
     if (!hostile(s, nid, o) || getRel(s, nid, o).type !== 'none') continue;
-    const v = base + (myP / Math.max(1, nationPower(s, o))) * 30 - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0);
+    const v = base + (myP / Math.max(1, nationPower(s, o))) * 30 - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
     if (v > bv) { bv = v; best = o; }
   }
   n.goal = best;
@@ -237,6 +244,7 @@ export function aiActions(s, world, nid) {
   const insular = home >= 0 && home !== M.main && M.size[home] <= 30;
   let guard = 0;
   while (n.alive && n.ap > 0 && guard++ < 40) {
+    genIndexOn(s);
     const { mine, threat, dist } = frontierInfo(s, world, nid);
     const fleets = nationFleets(s, nid);
     const opts = [];
@@ -404,11 +412,13 @@ export function aiActions(s, world, nid) {
         break;
       }
     }
+    genIndexOff();
     if (!opts.length) break;
     opts.sort((a, b) => b.score - a.score);
     const res = opts[0].run();
     if (!res || !res.ok) break;
   }
+  genIndexOff();
 }
 
 // AI 외교: 다른 AI와 자동 협상, 플레이어에게는 제안을 보냄

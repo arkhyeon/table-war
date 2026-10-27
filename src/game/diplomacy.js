@@ -243,7 +243,7 @@ export function doAnnex(s, world, lord, vassal) {
   for (const rid of nationRegions(s, vassal)) {
     const r = s.regions[rid];
     r.owner = lord;
-    r.loyalty = Math.min(r.loyalty ?? 100, 45);
+    r.loyalty = Math.max(r.loyalty ?? 100, 70); // 스스로 들어온 땅이라 민심이 좋음
   }
   const king = s.generals[V.ruler];
   if (king) Object.assign(king, { exKing: V.name, joined: s.turn });

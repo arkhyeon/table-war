@@ -2,11 +2,11 @@ import { stateRng } from './rng.js';
 import { TERRAIN, TAX, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus, buildResolveQueue, resolveAll } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus, buildResolveQueue, resolveAll, arriveReinforcements } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations } from './rise.js';
+import { riseNations, fortune } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -187,9 +187,9 @@ function upkeep(s, world) {
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
     // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
-    // 통치 부담은 국경 지역만 (상한 -5). 국경에 닿지 않은 내륙은 세금·보급·사건이 없으면 그대로 안정
+    // 통치 부담은 내륙(국경에 닿지 않은 곳)만, 상한 -5. 국경은 전쟁 중이니 민심이 덜 흔들리고, 내륙은 진휼로 관리
     const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner);
-    const sprawl = inner ? 0 : Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8));
+    const sprawl = inner ? Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8)) : 0;
     // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
     const martial = r.troops >= r.pop * 250;
     r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
@@ -246,7 +246,8 @@ function upkeep(s, world) {
 export function checkGameOver(s) {
   const p = s.nations[s.playerId];
   if (!p.alive) return { win: false, text: `${p.name}이(가) 멸망했습니다.` };
-  const owned = nationRegions(s, s.playerId).length;
+  // 속국의 땅도 내 판도로 셈
+  const owned = s.nations.filter((n) => n.alive && (n.id === s.playerId || isVassalOf(s, n.id, s.playerId))).reduce((a, n) => a + nationRegions(s, n.id).length, 0);
   // 승리: 육지 100% (s.winShare는 컴퓨터의 견제·확장 속도 기준으로만 씀)
   if (owned >= landCount(s)) return { win: true, text: '모든 땅을 차지해 천하를 통일했습니다!' };
   const rivals = s.nations.filter((n) => n.alive && n.id !== s.playerId && !isVassalOf(s, n.id, s.playerId));
@@ -261,6 +262,7 @@ export function playerStat(s) {
   let regions = 0, troops = 0;
   for (const r of s.regions) if (r.owner === pid) { troops += r.troops; if (!r.sea) regions++; }
   for (const o of s.orders || []) if (o.n === pid) troops += o.count;
+  for (const o of s.reinforce || []) if (o.n === pid) troops += o.count;
   return { regions, troops, gold: s.nations[pid].gold, gens: Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === pid).length };
 }
 
@@ -303,8 +305,10 @@ export function endTurnFinish(s, world) {
   // 새 턴: 모든 부대가 다시 움직일 수 있음
   for (const r of s.regions) delete r.moved;
   riseNations(s, world, stateRng(s));
+  fortune(s, world, stateRng(s));
   (s.history = s.history || []).push(encodeOwners(s));
   s.turn += 1;
+  arriveReinforcements(s);
   s.weather = rollWeather(world, s.turn, hashString(String(s.seed)) & 0xffff);
   runEvents(s, world, stateRng(s));
   historyNotes(s);

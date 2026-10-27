@@ -18,8 +18,49 @@ export const setRel = (s, a, b, rel) => {
 export const nationRegions = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && !r.sea ? (acc.push(i), acc) : acc), []);
 export const nationFleets = (s, nid) => s.regions.reduce((acc, r, i) => (r.owner === nid && r.sea ? (acc.push(i), acc) : acc), []);
 // 행군 중(이동 계획에 묶인) 장수는 그 지역에 없는 것으로 봄
-export const gensIn = (s, rid, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.region === rid && !g.order && (nid === undefined || g.nation === nid));
-export const nationGenerals = (s, nid) => Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === nid);
+// 컴퓨터가 행동 후보를 계산하는 동안(장수가 바뀌지 않는 구간)만 쓰는 색인
+let GI = null;
+export const genIndexOn = (s) => { GI = { s, reg: null, nat: null }; };
+export const genIndexOff = () => { GI = null; };
+function genIndex() {
+  if (!GI.reg) {
+    GI.reg = new Map();
+    GI.nat = new Map();
+    for (const k in GI.s.generals) {
+      const g = GI.s.generals[k];
+      if (g.status !== 'active') continue;
+      if (!GI.nat.has(g.nation)) GI.nat.set(g.nation, []);
+      GI.nat.get(g.nation).push(g);
+      if (g.order) continue;
+      if (!GI.reg.has(g.region)) GI.reg.set(g.region, []);
+      GI.reg.get(g.region).push(g);
+    }
+  }
+  return GI;
+}
+
+// 자주 불리므로 배열을 새로 만들지 않고 훑음 (지역 비교를 먼저)
+export const gensIn = (s, rid, nid) => {
+  if (GI && GI.s === s) {
+    const l = genIndex().reg.get(rid) || [];
+    return nid === undefined ? l.slice() : l.filter((g) => g.nation === nid);
+  }
+  const out = [];
+  for (const k in s.generals) {
+    const g = s.generals[k];
+    if (g.region === rid && g.status === 'active' && !g.order && (nid === undefined || g.nation === nid)) out.push(g);
+  }
+  return out;
+};
+export const nationGenerals = (s, nid) => {
+  if (GI && GI.s === s) return (genIndex().nat.get(nid) || []).slice();
+  const out = [];
+  for (const k in s.generals) {
+    const g = s.generals[k];
+    if (g.nation === nid && g.status === 'active') out.push(g);
+  }
+  return out;
+};
 export const edgeBetween = (world, a, b) => world.regions[a].neighbors.find((n) => n.id === b) || null;
 export const nationTrait = (s, nid, id) => tv(nationGenerals(s, nid), id);
 export const landCount = (s) => s.regions.filter((r) => !r.sea).length;
@@ -300,7 +341,22 @@ export function conscriptCost(s, rid, amount, mode = 'draft') {
   };
 }
 
-export function doConscript(s, world, nid, rid, amount, mode = 'draft') {
+// 후방 징병 → 다른 내 지역으로 보냄: 내 땅으로 이어진 거리 2칸에 1턴
+export function ownDistances(s, world, nid, from) {
+  const dist = new Map([[from, 0]]);
+  const q = [from];
+  for (let k = 0; k < q.length; k++) {
+    for (const e of world.regions[q[k]].neighbors) {
+      if ((e.type !== 'land' && e.type !== 'river') || dist.has(e.id) || s.regions[e.id].owner !== nid || s.regions[e.id].sea) continue;
+      dist.set(e.id, dist.get(q[k]) + 1);
+      q.push(e.id);
+    }
+  }
+  return dist;
+}
+export const reinforceTurns = (d) => Math.max(1, Math.ceil(d / 2));
+
+export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = rid) {
   const r = s.regions[rid];
   const n = s.nations[nid];
   if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
@@ -311,16 +367,25 @@ export function doConscript(s, world, nid, rid, amount, mode = 'draft') {
   if (n.gold < c.gold) return fail(`금이 부족합니다 (필요 ${fmtGold(c.gold)}).`);
   const err = canAct(s, nid, COST.conscript);
   if (err) return fail(err);
-  r.troops += amount;
+  let sent = '';
+  if (dest !== rid && dest !== null && dest !== undefined) {
+    const d = ownDistances(s, world, nid, rid).get(dest);
+    if (d === undefined) return fail('도착지는 내 땅으로 이어진 지역이어야 합니다.');
+    const turns = reinforceTurns(d);
+    (s.reinforce = s.reinforce || []).push({ n: nid, from: rid, to: dest, count: amount, arrive: s.turn + turns });
+    sent = ` → ${s.regions[dest].name}에 ${turns}턴 뒤 도착`;
+  } else r.troops += amount;
   r.pop = Math.max(3, r.pop - c.pop);
   r.loyalty = Math.max(0, (r.loyalty ?? 100) - c.loyalty);
   r.conscripted = true;
   n.gold -= c.gold;
   n.ap -= COST.conscript;
-  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 ${CONSCRIPT[mode].name}했습니다. (금 -${fmtGold(c.gold)}${c.loyalty ? `, 민심 -${c.loyalty}` : ''})` };
+  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 ${CONSCRIPT[mode].name}했습니다${sent}. (금 -${fmtGold(c.gold)}${c.loyalty ? `, 민심 -${c.loyalty}` : ''})` };
 }
 
 // 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
+// 진휼 가능 여부 (일괄 진휼용)
+export const canRelief = (s, rid) => s.regions[rid].reliefTurn === undefined || s.turn - s.regions[rid].reliefTurn >= RELIEF_COOLDOWN;
 export const reliefCost = (s, rid) => Math.round(((8 + s.regions[rid].pop * 1.5) * G) / 100) * 100;
 export const RELIEF_COOLDOWN = 6;
 
@@ -363,11 +428,10 @@ export function doRelief(s, nid, rid) {
   if (r.reliefTurn !== undefined && s.turn - r.reliefTurn < RELIEF_COOLDOWN) return fail(`${RELIEF_COOLDOWN - (s.turn - r.reliefTurn)}턴 뒤에 다시 할 수 있습니다.`);
   const cost = reliefCost(s, rid);
   if (n.gold < cost) return fail(`금이 부족합니다 (필요 ${fmtGold(cost)}).`);
-  const err = canAct(s, nid, 1);
-  if (err) return fail(err);
+  if ((r.loyalty ?? 100) >= 100) return fail('민심이 이미 가득합니다.');
+  // 행동력 없이 돈만 듦 (후반에 쌓인 돈의 사용처)
   const gain = (r.loyalty ?? 100) < 40 ? 14 : 7;
   n.gold -= cost;
-  n.ap -= 1;
   r.reliefTurn = s.turn;
   r.loyalty = Math.min(100, (r.loyalty ?? 100) + gain);
   return { ok: true, msg: `${r.name}에 진휼을 베풀었습니다. (민심 +${gain})` };
@@ -636,6 +700,20 @@ export function autoMarch(s, world, nid) {
     if (planMove(s, world, nid, r, to, cnt, [], { auto: true }).ok) sent += cnt;
   }
   return sent;
+}
+
+// 후방에서 징병해 보낸 증원 도착 (도착지를 잃었으면 출발지로, 둘 다 잃었으면 흩어짐)
+export function arriveReinforcements(s) {
+  const left = [];
+  for (const o of s.reinforce || []) {
+    if (o.arrive > s.turn) { left.push(o); continue; }
+    const at = s.regions[o.to].owner === o.n ? o.to : s.regions[o.from].owner === o.n ? o.from : null;
+    if (at !== null) {
+      s.regions[at].troops += o.count;
+      log(s, `🪖 증원 ${fmtTroops(o.count)}이(가) ${s.regions[at].name}에 도착했습니다.`, [o.n], 'info');
+    } else log(s, `💨 ${s.regions[o.to].name}(으)로 가던 증원 ${fmtTroops(o.count)}이(가) 갈 곳을 잃고 흩어졌습니다.`, [o.n], 'warn');
+  }
+  s.reinforce = left;
 }
 
 export function cancelOrder(s, id) {

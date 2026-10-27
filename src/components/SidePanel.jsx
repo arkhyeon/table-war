@@ -63,10 +63,12 @@ function TaxButtons({ value, onPick, withDefault }) {
   );
 }
 
-export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, sheetOpen, onCloseSheet }) {
+export default function SidePanel({ world, game, selected, vis, spectator, moveMode, setMoveMode, act, openGenerals, openConscript, openLoyalty, sheetOpen, onCloseSheet }) {
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
+  const lowLoy = myRegions.filter((x) => !game.regions[x].sea && (game.regions[x].loyalty ?? 100) < 40).length;
+  const incoming = (game.reinforce || []).filter((o) => o.n === pid);
   const inc = income(game, pid);
   const ruler = game.generals[me.ruler];
   const lord = game.nations.find((o) => o.alive && isVassalOf(game, pid, o.id));
@@ -124,6 +126,12 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             </label>
           )}
           {me.rally?.to != null && game.regions[me.rally.to]?.owner === pid && <span>🚩 집결: {game.regions[me.rally.to].name}</span>}
+          {!spectator && openLoyalty && (
+            <button className="sm" onClick={openLoyalty} title="민심 낮은 순으로 지역을 보고 진휼">
+              🍚 민심 관리{lowLoy ? ` (위험 ${lowLoy})` : ''}
+            </button>
+          )}
+          {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
           {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
         </div>
         <details className="more">
@@ -268,10 +276,10 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 </button>
                 <button
                   onClick={() => act((s) => doRelief(s, pid, selected))}
-                  disabled={me.ap < 1 || me.gold < reliefCost(game, selected) || (r.reliefTurn !== undefined && game.turn - r.reliefTurn < RELIEF_COOLDOWN)}
+                  disabled={me.gold < reliefCost(game, selected) || (r.loyalty ?? 100) >= 100 || (r.reliefTurn !== undefined && game.turn - r.reliefTurn < RELIEF_COOLDOWN)}
                   title={`민심 40 미만이면 +14, 아니면 +7. 지역마다 ${RELIEF_COOLDOWN}턴에 한 번`}
                 >
-                  🍚 진휼 ({fmtGold(reliefCost(game, selected))}금·1AP)
+                  🍚 진휼 ({fmtGold(reliefCost(game, selected))}금)
                 </button>
                 <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
                   🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({fmtGold(engineCost(game, selected))}금·1AP)

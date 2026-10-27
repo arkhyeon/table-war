@@ -96,13 +96,24 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   const df = detailFactor(world.detail);
   for (const n of plan) n.size0 = n.size;
   if (df !== 1) for (const n of plan) n.size = Math.max(1, Math.round(n.size * df));
+  // 세계 지도: 나라들이 육지의 일정 비율을 채우도록 키움 (회색 중립 땅만 휑하게 남지 않게)
+  // 세계판 지역사는 무대 바깥의 나라(filler)만 키움
+  if (scn.fill) {
+    const fb = world.focusBox;
+    const inFocus = (r) => fb && r.cx >= fb[0] && r.cx <= fb[0] + fb[2] && r.cy >= fb[1] && r.cy <= fb[1] + fb[3];
+    const grow = plan.filter((n) => !scn.focus || n.filler);
+    const room = world.regions.filter((r) => !r.sea && !inFocus(r)).length * scn.fill;
+    const sum = grow.reduce((a, n) => a + n.size, 0);
+    const k = room / Math.max(1, sum);
+    if (k > 1) for (const n of grow) n.size = Math.round(n.size * k);
+  }
   for (const [i, nm] of Object.entries(opts.names || {})) if (plan[i] && nm.trim()) plan[i].name = nm.trim().slice(0, 16);
   const R = world.regions.length;
   const owner = new Array(R).fill(null);
   plan.forEach((n) => (owner[n.region] = n.id));
   // 라운드 로빈으로 영토 확장
   const counts = plan.map(() => 1);
-  for (let round = 0; round < 12 * Math.max(1, Math.ceil(df)); round++) {
+  for (let round = 0; round < Math.max(12 * Math.max(1, Math.ceil(df)), ...plan.map((n) => n.size + 2)); round++) {
     let grew = false;
     for (const n of plan) {
       if (counts[n.id] >= n.size) continue;
