@@ -304,11 +304,11 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   }, [game, world, pid, vis, spect, me.alive]);
   // 내 부대들 (지도 위 말)
   const myArmies = useMemo(() => {
-    const out = Object.values(game.armies || {}).filter((a) => a.n === pid).map((a) => ({ ...a, ch: game.generals[a.gids[0]]?.name || '?', color: me.color }));
-    // 적 부대: 보이는 남의 땅에 장수가 있으면 그 장수들이 이끌 수 있는 만큼을 부대 말로
+    const out = Object.values(game.armies || {}).filter((a) => a.n === pid || vis.has(a.rid)).map((a) => ({ ...a, enemy: a.n !== pid, ch: game.generals[a.gids[0]]?.name || '?', color: a.n === pid ? me.color : game.nations[a.n]?.color || '#888', target: a.n === pid ? a.target : null }));
+    // 부대에 속하지 않은 적 장수도 이끌 수 있는 만큼을 부대 말로
     const by = {};
     for (const g of Object.values(game.generals)) {
-      if (g.status !== 'active' || g.order || g.nation === pid || !vis.has(g.region)) continue;
+      if (g.status !== 'active' || g.order || g.army || g.nation === pid || !vis.has(g.region)) continue;
       const r = game.regions[g.region];
       if (r.sea || r.owner !== g.nation) continue;
       (by[g.region] = by[g.region] || []).push(g);
@@ -432,7 +432,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             threats={threats}
             armies={myArmies}
             selArmy={selArmy}
-            onArmy={(id) => { if (!game.armies?.[id]) { setSelected(+id.slice(1)); setSheet(true); return; } setSelArmy((cur) => (cur === id ? null : id)); setSelected(game.armies[id].rid); setMoveMode(false); }}
+            onArmy={(id) => { const A = game.armies?.[id]; if (!A || A.n !== pid) { setSelected(A ? A.rid : +id.slice(1)); setSheet(true); return; } setSelArmy((cur) => (cur === id ? null : id)); setSelected(game.armies[id].rid); setMoveMode(false); }}
             landmarks={landmarks}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}

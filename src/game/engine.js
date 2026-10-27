@@ -98,7 +98,8 @@ export function computeMaxAp(s, nid) {
 export function regionTax(s, rid) {
   const r = s.regions[rid];
   if (r.sea || r.owner === null) return 0;
-  let g = 1 + r.pop * 0.4;
+  // 세수: 병력 상한(인구 35%)을 다 채우면 유지비가 세수의 70%쯤 되도록 (남는 금은 장수·건물·용병·외교에)
+  let g = (1 + r.pop * 0.4) * 0.5;
   const w = weatherOf(s, rid);
   let wt = w.tax;
   if (wt < 1) wt = 1 - (1 - wt) * (1 - tv(gensIn(s, rid, r.owner), '농정') / 2);
@@ -368,8 +369,19 @@ export function canAct(s, nid, ap) {
 // dest를 주면 뽑은 병사를 그곳으로 행군시킴 (내 땅으로 이어진 곳만, 3칸에 1턴)
 export const DRAFT_AP = 2;
 export const DRAFT_GOLD = 5;
+// 병력 상한: 나라 인구의 35%까지만 병사로 (징병·자원병 모두 이 안에서)
+export function manpower(s, nid) {
+  let cap = 0, used = 0;
+  for (const r of nationRegions(s, nid)) { const g = s.regions[r]; if (g.sea) continue; cap += g.pop * 1000 * 0.35; used += g.troops; }
+  // 이번 턴 출발한 병력·행군 중인 증원·함대도 셈
+  for (const o of s.orders || []) if (o.n === nid) used += o.count;
+  for (const o of s.reinforce || []) if (o.n === nid) used += o.count;
+  for (const r of s.regions) if (r.sea && r.owner === nid) used += r.troops;
+  return { cap: Math.round(cap), used, room: Math.max(0, Math.round(cap - used)) };
+}
 export function draftPlan(s, nid) {
-  return nationRegions(s, nid)
+  const room = manpower(s, nid).room;
+  const raw = nationRegions(s, nid)
     .filter((rid) => !s.regions[rid].sea)
     .map((rid) => {
       const r = s.regions[rid];
@@ -379,12 +391,17 @@ export function draftPlan(s, nid) {
     })
     .filter((x) => x.amt >= 200)
     .sort((a, b) => b.amt - a.amt);
+  // 상한을 넘으면 비율대로 줄임
+  const tot = raw.reduce((t, x) => t + x.amt, 0);
+  if (tot <= room) return raw;
+  const k = room / Math.max(1, tot);
+  return raw.map((x) => { const amt = Math.floor((x.amt * k) / 100) * 100; return { ...x, amt, gold: amt * DRAFT_GOLD }; }).filter((x) => x.amt >= 200);
 }
 export function draftCheck(s, nid) {
   const n = s.nations[nid];
   if (n.drafted === s.turn) return '이번 턴에 이미 징병했습니다.';
   const plan = draftPlan(s, nid);
-  if (!plan.length) return '징병할 지역이 없습니다.';
+  if (!plan.length) return manpower(s, nid).room < 200 ? '병력이 인구의 35% 상한에 닿았습니다 (땅을 넓히거나 인구가 늘어야 함).' : '징병할 지역이 없습니다.';
   if (n.gold < plan[plan.length - 1].gold) return '금이 부족합니다.';
   return canAct(s, nid, DRAFT_AP);
 }
@@ -718,6 +735,15 @@ export function planMove(s, world, nid, from, to, count, genIds = [], opts = {})
   const cost = opts.auto ? 0 : moveCost(world, from, to, s);
   const engines = Math.min(opts.engines || 0, fr.engines || 0);
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from && !g.order);
+  // 부대 소속 장수가 움직이면 그 부대가 움직이는 것 (여러 부대가 섞이면 첫 부대 기준, 나머지는 따라감)
+  if (!opts.army) {
+    const aid = gens.map((g) => g.army).find(Boolean);
+    if (aid && s.armies?.[aid]) {
+      opts = { ...opts, army: aid };
+      for (const g of gens) if (g.army && g.army !== aid) { const b = s.armies[g.army]; if (b) { b.gids = b.gids.filter((x) => x !== g.id); if (!b.gids.length) delete s.armies[b.id]; } g.army = aid; if (!s.armies[aid].gids.includes(g.id)) s.armies[aid].gids.push(g.id); }
+      for (const g of gens) if (!g.army) { g.army = aid; s.armies[aid].gids.push(g.id); }
+    }
+  }
   s.orderSeq = (s.orderSeq || 0) + 1;
   // 용병: 장수가 이끄는 적지 공격에만
   let merc = 0, mercCost = 0;
@@ -1413,6 +1439,8 @@ export function doRelocate(s, nid, gid, to) {
   const err = canAct(s, nid, COST.relocate);
   if (err) return fail(err);
   s.nations[nid].ap -= COST.relocate;
+  // 다른 곳으로 보내면 부대에서 빠짐
+  if (g.army) { const a = s.armies?.[g.army]; if (a) { a.gids = a.gids.filter((x) => x !== gid); if (!a.gids.length) delete s.armies[a.id]; } delete g.army; }
   g.region = to;
   return { ok: true, msg: `${g.name}을(를) ${s.regions[to].name}에 배치했습니다.` };
 }

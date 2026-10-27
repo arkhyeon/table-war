@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -231,6 +231,16 @@ export function aiActions(s, world, nid) {
     const civs = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && g.role === 'civ' && n.ruler !== g.id && governorOf(s, g.region)?.id !== g.id);
     const spot = nationRegions(s, nid).filter((r) => governorOf(s, r)?.role !== 'civ').sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
     if (civs.length && spot !== undefined) doRelocate(s, nid, civs[0].id, spot);
+  }
+  // 출진: 무관마다 부대를 꾸리고, 있던 부대는 지휘 한도까지 보충 (부대 병력도 그 땅을 함께 지킴)
+  if (!n.horde) {
+    for (const g of Object.values(s.generals)) {
+      if (g.nation !== nid || g.status !== 'active' || g.order || s.regions[g.region]?.owner !== nid || s.regions[g.region].sea) continue;
+      if (g.army && s.armies?.[g.army]) { refillArmy(s, nid, g.army); continue; }
+      if (g.role === 'civ' && n.ruler !== g.id) continue;
+      const amt = Math.floor(Math.min(commandCap(s, [g.id]), garrisonOf(s, g.region) - 100) / 100) * 100;
+      if (amt >= 1500) formArmy(s, nid, g.region, [g.id], amt);
+    }
   }
   // 장수 모집: 전선보다 장수가 모자라면 (금이 넉넉할 때)
   {
