@@ -1,5 +1,5 @@
 import { stateRng } from './rng.js';
-import { T, TERRAIN, EDGE, MTN_EDGE, BUILDINGS, COST, TAX, G } from './rules.js';
+import { T, TERRAIN, EDGE, MTN_EDGE, BUILDINGS, COST, G } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { POOLS, rating, randomStats, fairTarget, gradeScore } from './generals.js';
 import { fixJosa } from './josa.js';
@@ -95,12 +95,10 @@ export function computeMaxAp(s, nid) {
 }
 
 // ───────── 경제 ─────────
-export const effTax = (s, rid) => s.regions[rid].tax || s.nations[s.regions[rid].owner]?.taxRate || 'normal';
-
 export function regionTax(s, rid) {
   const r = s.regions[rid];
   if (r.sea || r.owner === null) return 0;
-  let g = (1 + r.pop * 0.4) * TAX[effTax(s, rid)].mult * (0.4 + (0.6 * (r.loyalty ?? 100)) / 100);
+  let g = 1 + r.pop * 0.4;
   const w = weatherOf(s, rid);
   let wt = w.tax;
   if (wt < 1) wt = 1 - (1 - wt) * (1 - tv(gensIn(s, rid, r.owner), '농정') / 2);
@@ -122,9 +120,9 @@ export function governorOf(s, rid) {
   return gens.reduce((a, b) => (val(b) > val(a) ? b : a));
 }
 export function governorBonus(g) {
-  if (!g) return { tax: 0, loyalty: 0 };
+  if (!g) return { tax: 0 };
   const k = g.role === 'civ' ? 1 : 0.5;
-  return { tax: (Math.max(0, g.pol - 50) / 250) * k, loyalty: g.pol >= 90 ? 2 * k : g.pol >= 70 ? 1 * k : 0 };
+  return { tax: (Math.max(0, g.pol - 50) / 250) * k };
 }
 
 // 병력 유지비는 1명 단위로 계산(2,500명당 1금), 장수 녹봉 1금
@@ -341,30 +339,30 @@ export function canAct(s, nid, ap) {
   return null;
 }
 
-// 징병: 징집(싸지만 인구의 5%를 넘게 뽑으면 민심 하락) 또는 모병(비싸지만 민심 영향 없음, 최대치 절반)
-export const CONSCRIPT = {
-  draft: { name: '징집', gold: 5, desc: '1명당 5금. 인구의 5%를 넘게 뽑으면 넘는 만큼 민심 하락' },
-  hire: { name: '모병', gold: 12, desc: '1명당 12금. 자원자를 모아 민심 영향 없음, 최대 인원 절반' },
-};
-
-export function conscriptMax(s, rid, nid, mode = 'draft') {
-  const r = s.regions[rid];
-  let add = r.pop * 300 * (r.buildings.barracks ? 1.5 : 1) * (1 + tv(gensIn(s, rid, nid), '징병'));
-  if ((r.loyalty ?? 100) < 40) add *= 0.5;
-  if (mode === 'hire') add *= 0.5;
-  return Math.max(100, Math.round(add / 100) * 100);
+// 징병: 나라 전체에서 한 번에 (한 턴 1회, 행동력 2). 지역마다 인구의 4%(병영 8%), 1명당 5금
+// dest를 주면 뽑은 병사를 그곳으로 행군시킴 (내 땅으로 이어진 곳만, 3칸에 1턴)
+export const DRAFT_AP = 2;
+export const DRAFT_GOLD = 5;
+export function draftPlan(s, nid) {
+  return nationRegions(s, nid)
+    .filter((rid) => !s.regions[rid].sea)
+    .map((rid) => {
+      const r = s.regions[rid];
+      const rate = (r.buildings.barracks ? 0.08 : 0.04) * (1 + tv(gensIn(s, rid, nid), '징병'));
+      const amt = Math.floor((r.pop * 1000 * rate) / 100) * 100;
+      return { rid, amt, gold: amt * DRAFT_GOLD };
+    })
+    .filter((x) => x.amt >= 200)
+    .sort((a, b) => b.amt - a.amt);
 }
-
-export function conscriptCost(s, rid, amount, mode = 'draft') {
-  const r = s.regions[rid];
-  const ratio = amount / Math.max(1000, r.pop * 1000);
-  return {
-    gold: amount * CONSCRIPT[mode].gold,
-    loyalty: mode === 'hire' ? 0 : Math.round(Math.max(0, ratio - 0.05) * 45),
-    pop: (amount / 1000) * 0.5,
-  };
+export function draftCheck(s, nid) {
+  const n = s.nations[nid];
+  if (n.drafted === s.turn) return '이번 턴에 이미 징병했습니다.';
+  const plan = draftPlan(s, nid);
+  if (!plan.length) return '징병할 지역이 없습니다.';
+  if (n.gold < plan[plan.length - 1].gold) return '금이 부족합니다.';
+  return canAct(s, nid, DRAFT_AP);
 }
-
 // 후방 징병 → 다른 내 지역으로 보냄: 내 땅으로 이어진 거리 3칸에 1턴 (직접 행군과 같은 속도)
 export function ownDistances(s, world, nid, from, parent) {
   const dist = new Map([[from, 0]]);
@@ -381,64 +379,18 @@ export function ownDistances(s, world, nid, from, parent) {
 }
 export const MARCH_PER_TURN = 3;
 export const reinforceTurns = (d) => Math.max(1, Math.ceil(d / MARCH_PER_TURN));
-
-export function doConscript(s, world, nid, rid, amount, mode = 'draft', dest = rid) {
-  const r = s.regions[rid];
-  const n = s.nations[nid];
-  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
-  if (r.conscripted) return fail('이번 턴에 이미 징병했습니다.');
-  const max = conscriptMax(s, rid, nid, mode);
-  amount = Math.max(100, Math.min(max, Math.round((amount ?? max) / 100) * 100));
-  const c = conscriptCost(s, rid, amount, mode);
-  if (n.gold < c.gold) return fail(`금이 부족합니다 (필요 ${fmtGold(c.gold)}).`);
-  const err = canAct(s, nid, COST.conscript);
+export function doDraft(s, nid, world, dest = null) {
+  const err = draftCheck(s, nid);
   if (err) return fail(err);
-  let sent = '';
-  if (dest !== rid && dest !== null && dest !== undefined) {
-    const parent = new Map();
-    const d = ownDistances(s, world, nid, rid, parent).get(dest);
-    if (d === undefined) return fail('도착지는 내 땅으로 이어진 지역이어야 합니다.');
-    const turns = reinforceTurns(d);
-    const path = [dest];
-    while (path[0] !== rid) path.unshift(parent.get(path[0]));
-    (s.reinforce = s.reinforce || []).push({ n: nid, from: rid, to: dest, count: amount, start: s.turn, arrive: s.turn + turns, path });
-    sent = ` → ${s.regions[dest].name}에 ${turns}턴 뒤 도착`;
-  } else r.troops += amount;
-  r.pop = Math.max(3, r.pop - c.pop);
-  r.loyalty = Math.max(0, (r.loyalty ?? 100) - c.loyalty);
-  r.conscripted = true;
-  n.gold -= c.gold;
-  n.ap -= COST.conscript;
-  return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amount)}을 ${CONSCRIPT[mode].name}했습니다${sent}. (금 -${fmtGold(c.gold)}${c.loyalty ? `, 민심 -${c.loyalty}` : ''})` };
-}
-
-// 일괄 징병: 민심이 깎이지 않는 만큼(인구 5%, 병영 있으면 8%)을 모든 지역에서 한꺼번에 — 행동력 2
-// dest를 주면 뽑은 병사를 그곳으로 행군시킴 (내 땅으로 이어진 곳만, 3칸에 1턴)
-export const BULK_DRAFT_AP = 2;
-export const draftFree = (r) => (r.buildings.barracks ? 0.08 : 0.05);
-export function bulkDraftPlan(s, nid) {
-  return nationRegions(s, nid)
-    .filter((rid) => !s.regions[rid].conscripted && (s.regions[rid].loyalty ?? 100) >= 50)
-    .map((rid) => {
-      const r = s.regions[rid];
-      const amt = Math.min(conscriptMax(s, rid, nid), Math.floor((r.pop * 1000 * draftFree(r)) / 100) * 100);
-      return { rid, amt, gold: amt * CONSCRIPT.draft.gold };
-    })
-    .filter((x) => x.amt >= 500);
-}
-export function doBulkDraft(s, nid, world, dest = null) {
   const n = s.nations[nid];
-  const err = canAct(s, nid, BULK_DRAFT_AP);
-  if (err) return fail(err);
   const parent = new Map();
   const dist = dest !== null && world ? ownDistances(s, world, nid, dest, parent) : null;
   let men = 0, spent = 0, k = 0, sent = 0;
   // 많이 뽑을 수 있는 곳부터, 금이 닿는 만큼
-  for (const x of bulkDraftPlan(s, nid).sort((a, b) => b.amt - a.amt)) {
+  for (const x of draftPlan(s, nid)) {
     if (n.gold - spent < x.gold) continue;
     const r = s.regions[x.rid];
     r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
-    r.conscripted = true;
     if (dist && x.rid !== dest && dist.has(x.rid)) {
       const path = [x.rid];
       while (path[path.length - 1] !== dest) path.push(parent.get(path[path.length - 1]));
@@ -449,18 +401,13 @@ export function doBulkDraft(s, nid, world, dest = null) {
     spent += x.gold;
     k++;
   }
-  if (!k) return fail('징병할 수 있는 지역이 없거나 금이 부족합니다.');
+  if (!k) return fail('금이 부족합니다.');
   n.gold -= spent;
-  n.ap -= BULK_DRAFT_AP;
+  n.ap -= DRAFT_AP;
+  n.drafted = s.turn;
   const to = sent ? ` 그중 ${fmtTroops(sent)}은 ${s.regions[dest].name}(으)로 행군합니다.` : '';
-  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 일괄 징집했습니다.${to} (행동력 -${BULK_DRAFT_AP}, 금 -${fmtGold(spent)}, 민심 영향 없음)` };
+  return { ok: true, msg: `${k}곳에서 병사 ${fmtTroops(men)}을 징병했습니다.${to} (금 -${fmtGold(spent)}, 행동력 -${DRAFT_AP})` };
 }
-
-// 진휼: 곡식을 풀어 민심을 달램. 비싸고 지역마다 6턴에 한 번
-// 진휼 가능 여부 (일괄 진휼용)
-export const canRelief = (s, rid) => s.regions[rid].reliefTurn === undefined || s.turn - s.regions[rid].reliefTurn >= RELIEF_COOLDOWN;
-export const reliefCost = (s, rid) => Math.round(((8 + s.regions[rid].pop * 1.5) * G) / 100) * 100;
-export const RELIEF_COOLDOWN = 6;
 
 // 천도: 수도와 길이 이어진 내 땅으로 수도를 옮김 (12턴에 한 번)
 export const CAPITAL_COOLDOWN = 12;
@@ -470,7 +417,6 @@ export function capitalMoveCheck(s, world, nid, rid) {
   if (!r || r.sea || r.owner !== nid) return '내 땅으로만 천도할 수 있습니다.';
   if (n.capital === rid) return '이미 수도입니다.';
   if (n.capitalMoved !== undefined && s.turn - n.capitalMoved < CAPITAL_COOLDOWN) return `천도는 ${CAPITAL_COOLDOWN}턴에 한 번 (${CAPITAL_COOLDOWN - (s.turn - n.capitalMoved)}턴 남음)`;
-  if ((r.loyalty ?? 100) < 60) return '민심 60 이상인 곳으로만 천도할 수 있습니다.';
   if (n.capital !== null && !supplied(s, world, nid).has(rid)) return '지금 수도와 길이 이어진 곳이어야 합니다.';
   if (n.gold < capitalMoveCost(s, nid)) return '금이 부족합니다.';
   return canAct(s, nid, 3);
@@ -485,29 +431,11 @@ export function doMoveCapital(s, world, nid, rid) {
   n.capital = rid;
   n.capitalMoved = s.turn;
   const r = s.regions[rid];
-  r.loyalty = Math.min(100, (r.loyalty ?? 100) + 10);
-  if (old !== null) s.regions[old].loyalty = Math.max(0, (s.regions[old].loyalty ?? 100) - 10);
   // 군주도 새 수도로
   const king = s.generals[n.ruler];
   if (king && king.status === 'active') king.region = rid;
   log(s, `🏯 ${n.name}이(가) ${old !== null ? s.regions[old].name + '에서 ' : ''}${r.name}(으)로 천도했습니다.`, [nid], 'info');
   return { ok: true, msg: `${r.name}(으)로 천도했습니다.` };
-}
-
-export function doRelief(s, nid, rid) {
-  const r = s.regions[rid];
-  const n = s.nations[nid];
-  if (r.owner !== nid || r.sea) return fail('내 지역이 아닙니다.');
-  if (r.reliefTurn !== undefined && s.turn - r.reliefTurn < RELIEF_COOLDOWN) return fail(`${RELIEF_COOLDOWN - (s.turn - r.reliefTurn)}턴 뒤에 다시 할 수 있습니다.`);
-  const cost = reliefCost(s, rid);
-  if (n.gold < cost) return fail(`금이 부족합니다 (필요 ${fmtGold(cost)}).`);
-  if ((r.loyalty ?? 100) >= 100) return fail('민심이 이미 가득합니다.');
-  // 행동력 없이 돈만 듦 (후반에 쌓인 돈의 사용처)
-  const gain = (r.loyalty ?? 100) < 40 ? 14 : 7;
-  n.gold -= cost;
-  r.reliefTurn = s.turn;
-  r.loyalty = Math.min(100, (r.loyalty ?? 100) + gain);
-  return { ok: true, msg: `${r.name}에 진휼을 베풀었습니다. (민심 +${gain})` };
 }
 
 export function buildCost(s, rid, nid, kind) {
@@ -829,7 +757,7 @@ export function bribeAgents(s, world, nid, rid) {
 export function bribeChance(s, world, nid, rid, g) {
   const r = s.regions[rid];
   const defGens = r.owner !== null ? gensIn(s, rid, r.owner) : [];
-  const loy = r.owner === null ? 50 : r.loyalty ?? 100;
+  const loy = r.owner === null ? 50 : 75;
   const skill = (g.intel + g.pol) / 200;
   const c = 0.08 + skill * 0.6 - loy / 250 - (defGens.length ? 0.2 : 0) - (r.buildings?.walls || 0) * 0.05 + (r.owner === null ? 0.1 : 0);
   return Math.max(0.03, Math.min(0.8, c));
@@ -858,7 +786,6 @@ export function doBribe(s, world, nid, rid, gid) {
     for (const x of gensIn(s, rid, old ?? undefined)) if (old !== null) x.region = s.nations[old].capital ?? x.region;
     transferRegion(s, world, rid, nid);
     r.troops = Math.max(100, Math.round(r.troops * 0.5 / 100) * 100);
-    r.loyalty = 40;
     if (old !== null) {
       s.opinion[old][nid] -= 20;
       checkElimination(s, world, old);
@@ -1181,8 +1108,6 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     tr.troops = survivors;
     tr.moved = survivors;
     if (!tr.sea) {
-      tr.loyalty = defender === null ? 35 : 15;
-      tr.conscripted = true;
       tr.engines = Math.min(ENGINE_MAX, (tr.engines || 0) + engines);
     }
     for (const g of atkGens) {
@@ -1301,7 +1226,30 @@ export function succession(s, nid) {
   const gens = nationGenerals(s, nid).sort((a, b) => rating(b) - rating(a));
   const n = s.nations[nid];
   n.ruler = gens.length ? gens[0].id : null;
+  n.newRuler = s.turn; // 계승 분쟁 판정은 턴 끝에 (rise.js)
   if (gens.length) log(s, `👑 ${n.name}의 새 군주로 ${gens[0].name}이(가) 즉위했습니다.`, [nid], 'general');
+}
+
+// 포상: 금을 내려 충성을 올림 (행동력 없음, 장수마다 6턴에 한 번)
+export const REWARD_COOLDOWN = 6;
+export const rewardCost = (g) => Math.round(((15 + (g.base || 60) * 0.2) * G) / 1000) * 1000;
+export function rewardCheck(s, nid, gid) {
+  const g = s.generals[gid];
+  if (!g || g.nation !== nid || g.status !== 'active') return '내 장수가 아닙니다.';
+  if (s.nations[nid].ruler === gid) return '군주에게는 포상할 수 없습니다.';
+  if (g.rewardTurn !== undefined && s.turn - g.rewardTurn < REWARD_COOLDOWN) return `${REWARD_COOLDOWN - (s.turn - g.rewardTurn)}턴 뒤에 다시 포상할 수 있습니다.`;
+  if (s.nations[nid].gold < rewardCost(g)) return '금이 부족합니다.';
+  return null;
+}
+export function doReward(s, nid, gid) {
+  const err = rewardCheck(s, nid, gid);
+  if (err) return fail(err);
+  const g = s.generals[gid];
+  s.nations[nid].gold -= rewardCost(g);
+  g.rewardTurn = s.turn;
+  const up = g.persona === '야심' ? 10 : 15;
+  g.loyalty = Math.min(100, (g.loyalty ?? 60) + up);
+  return { ok: true, msg: `${g.name}에게 포상했습니다. (충성 +${up})` };
 }
 
 export function doRelease(s, nid, gid) {
@@ -1357,7 +1305,7 @@ export function doPoach(s, nid, gid) {
 }
 
 // ───────── 장수 출현 (공평 규칙) ─────────
-// 낮은 기본값 × 공평 보정 × 민심 × 국고 × 평판 × 인사 특성
+// 낮은 기본값 × 공평 보정 × 국고 × 평판 × 인사 특성
 export function appearChance(s, nid) {
   const n = s.nations[nid];
   const alive = s.nations.filter((x) => x.alive);
@@ -1365,9 +1313,7 @@ export function appearChance(s, nid) {
   const avg = counts.reduce((a, b) => a + b, 0) / Math.max(1, counts.length);
   const mine = nationGenerals(s, nid).length;
   const regs = nationRegions(s, nid);
-  const loy = regs.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, regs.length);
   let p = 0.06 * Math.max(0.25, Math.min(2.5, 1 + (avg - mine) * 0.4));
-  p *= Math.max(0.5, Math.min(1.3, loy / 75));
   p *= n.gold >= 200 * G ? 1.2 : n.gold < 30 * G ? 0.7 : 1;
   p *= Math.max(0.5, Math.min(1.4, n.reputation / 60));
   p *= 1 + nationTrait(s, nid, '인사');
@@ -1418,7 +1364,10 @@ export function addGeneral(s, data, nid, region, rng, ruler = false) {
   }
   data = { ...data, base: Math.round(gradeScore(data)) };
   const { role, traits } = initTraits(data, rng);
-  const gen = { ...data, role, traits, level: 1, exp: 0, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90) };
+  // 성격: 야심가(20%)는 충성이 잘 떨어져 봉기·계승 다툼을 일으키고, 충신(20%)은 배신하지 않음
+  const pr = rng();
+  const persona = ruler ? null : pr < 0.2 ? '야심' : pr < 0.4 ? '충신' : null;
+  const gen = { ...data, role, traits, level: 1, exp: 0, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90), persona };
   s.generals[gen.id] = gen;
   s.usedGen[gen.id] = 1;
   s.appearHistory[gen.id] = (s.appearHistory[gen.id] || 0) + 1;

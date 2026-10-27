@@ -168,7 +168,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   const mid = [capPts.reduce((a, c) => a + c.cx, 0) / capPts.length, capPts.reduce((a, c) => a + c.cy, 0) / capPts.length];
   const spread = Math.max(1, Math.max(...capPts.map((c) => Math.hypot(c.cx - mid[0], c.cy - mid[1]))) * 1.3);
   const regions = world.regions.map((wr, i) => {
-    if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {}, loyalty: 100 };
+    if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {} };
     const river = !!wr.river;
     let civ;
     if (owner[i] !== null) civ = plan[owner[i]].civ;
@@ -193,8 +193,6 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       troops,
       pop: Math.round((wr.pop / df) * 10) / 10,
       buildings: { market: 0, walls: 0, port: 0, barracks: 0 },
-      conscripted: false,
-      loyalty: owner[i] === null ? 50 : frontier.has(i) ? 65 : 80,
       river,
     };
   });
@@ -250,7 +248,6 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       ap: 0,
       maxAp: 0,
       reputation: 60,
-      taxRate: 'normal',
       alive: true,
       isPlayer: n.id === playerId && !opts.spectator,
       aggression: Math.round(rng.range(0.35, 0.95) * 100) / 100,
@@ -301,7 +298,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   // 중원(대평야): 수도 위치로 '가운데' 나라를 고름 —
   //  ① 동서남북 4방향 모두에 다른 나라가 있고 ② 내륙(수도가 해안이 아니고 땅의 절반 이상이 내륙: 바다를 등지지 않음)
   //  ③ 그중 다른 수도들까지 거리 합이 가장 작은 나라(나라 6개당 1곳)
-  // 인재가 모이고(장수 +2) 병력 +25%, 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%·민심 +1/턴, 주인이 바뀌어도 유지)
+  // 인재가 모이고(장수 +2) 병력 +25%, 그 나라의 시작 땅은 대평야(세금 +20%·인구 상한 +30%, 주인이 바뀌어도 유지)
   const caps = s.nations.filter((n) => n.capital !== null).map((n) => ({ n, c: world.regions[n.capital] }));
   const around = caps.map(({ n, c }) => {
     const quad = new Set();
@@ -327,7 +324,6 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
         const add = mine.flatMap((i) => world.regions[i].neighbors.map((x) => x.id)).find((x) => !s.regions[x].sea && s.regions[x].owner === null);
         if (add === undefined) break;
         s.regions[add].owner = n.id;
-        s.regions[add].loyalty = 80;
         mine.push(add);
       }
     }
@@ -339,7 +335,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       r.troops = Math.round((r.troops * 1.25) / 100) * 100;
     }
     for (let q = 0; q < 2; q++) spawnGeneral(s, n.id, rng, true);
-    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +2, 병력 +25%, 시작 땅이 대평야(세금 +20%·인구 +30%·민심 +1/턴)입니다.`, nations: [n.id], kind: 'info' });
+    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +2, 병력 +25%, 시작 땅이 대평야(세금 +20%·인구 +30%)입니다.`, nations: [n.id], kind: 'info' });
   }
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다.${scn.procedural ? ` (시드: ${seed})` : ''}`, nations: [playerId], kind: 'info' });
   return s;

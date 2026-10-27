@@ -155,7 +155,6 @@ export function applyDeal(s, world, from, to, deal) {
       g.region = s.nations[old].capital !== rid ? s.nations[old].capital : home[0];
     }
     r.owner = newOwner;
-    r.loyalty = Math.min(r.loyalty ?? 100, 40);
     if (s.nations[old].capital === rid) {
       const rest = nationRegions(s, old);
       s.nations[old].capital = rest.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0] ?? null;
@@ -245,7 +244,6 @@ export function doAnnex(s, world, lord, vassal) {
   for (const rid of nationRegions(s, vassal)) {
     const r = s.regions[rid];
     r.owner = lord;
-    r.loyalty = Math.max(r.loyalty ?? 100, 70); // 스스로 들어온 땅이라 민심이 좋음
   }
   const king = s.generals[V.ruler];
   if (king) Object.assign(king, { exKing: V.name, joined: s.turn });

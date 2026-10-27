@@ -43,8 +43,8 @@ const EVENTS = [
       if (!pool.length) return;
       const c = rng.pick(pool);
       const ids = [c, ...landNeighbors(s, w, c)];
-      for (const i of ids) s.regions[i].loyalty = Math.max(0, (s.regions[i].loyalty ?? 100) - 15);
-      announce(s, { icon: '🦗', title: '메뚜기 떼', story: `${s.regions[c].name}의 들판을 메뚜기가 뒤덮었습니다.`, effect: `${ids.length}개 지역 민심 -15`, nations: ownersOf(s, ids) });
+      ruin(s, ids, 0.12, 0);
+      announce(s, { icon: '🦗', title: '메뚜기 떼', story: `${s.regions[c].name}의 들판을 메뚜기가 뒤덮었습니다.`, effect: `${ids.length}개 지역 인구 -12%`, nations: ownersOf(s, ids) });
     },
   },
   {
@@ -55,13 +55,12 @@ const EVENTS = [
       const c = rng.pick(pool);
       const r = s.regions[c];
       if (tv(gensIn(s, c, r.owner), '치수')) {
-        announce(s, { icon: '🌊', title: '홍수를 막아냄', story: `${r.name}에 큰물이 졌지만 미리 쌓은 제방이 버텼습니다.`, effect: '치수 장수 덕분에 피해 없음, 민심 +5', nations: [r.owner] });
-        r.loyalty = Math.min(100, r.loyalty + 5);
+        announce(s, { icon: '🌊', title: '홍수를 막아냄', story: `${r.name}에 큰물이 졌지만 미리 쌓은 제방이 버텼습니다.`, effect: '치수 장수 덕분에 피해 없음, 인구 +5%', nations: [r.owner] });
+        r.pop *= 1.05;
         return;
       }
       ruin(s, [c], 0.15, 0.05);
-      r.loyalty = Math.max(0, r.loyalty - 10);
-      announce(s, { icon: '🌊', title: '대홍수', story: `강이 넘쳐 ${r.name}의 논밭과 마을이 잠겼습니다.`, effect: '인구 -15%, 민심 -10 (치수 장수가 있으면 막음)', nations: [r.owner] });
+      announce(s, { icon: '🌊', title: '대홍수', story: `강이 넘쳐 ${r.name}의 논밭과 마을이 잠겼습니다.`, effect: '인구 -15%, 병력 -5% (치수 장수가 있으면 막음)', nations: [r.owner] });
     },
   },
   {
@@ -114,18 +113,19 @@ const EVENTS = [
     w: 2,
     run: (s, w, rng) => {
       const n = rng.pick(s.nations.filter((x) => x.alive));
-      const regs = nationRegions(s, n.id).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty);
-      if (!regs.length || s.regions[regs[0]].loyalty > 55) return;
-      const c = regs[0];
+      // 수도에서 가장 먼 땅에 도적이 들끓음
+      const cap = n.capital !== null ? w.regions[n.capital] : null;
+      const regs = nationRegions(s, n.id).filter((r) => !s.regions[r].sea);
+      if (!cap || regs.length < 4) return;
+      const c = regs.reduce((a, b) => (Math.hypot(w.regions[b].cx - cap.cx, w.regions[b].cy - cap.cy) > Math.hypot(w.regions[a].cx - cap.cx, w.regions[a].cy - cap.cy) ? b : a));
       ruin(s, [c], 0.05, 0.2);
-      s.regions[c].loyalty = Math.max(0, s.regions[c].loyalty - 5);
-      announce(s, { icon: '🗡️', title: '도적 창궐', story: `민심이 흉흉한 ${s.regions[c].name}에 도적떼가 들끓습니다.`, effect: '병력 -20%, 민심 -5', nations: [n.id] });
+      announce(s, { icon: '🗡️', title: '도적 창궐', story: `수도에서 먼 ${s.regions[c].name}에 도적떼가 들끓습니다.`, effect: '병력 -20%, 인구 -5%', nations: [n.id] });
     },
   },
   {
     w: 2,
     run: (s, w, rng) => {
-      const pool = landOwned(s).filter((i) => s.regions[i].loyalty >= 60);
+      const pool = landOwned(s);
       if (!pool.length) return;
       const c = rng.pick(pool);
       s.regions[c].pop *= 1.2;
@@ -136,8 +136,9 @@ const EVENTS = [
     w: 1,
     run: (s, w, rng) => {
       const n = rng.pick(s.nations.filter((x) => x.alive));
-      for (const r of nationRegions(s, n.id)) s.regions[r].loyalty = Math.min(100, s.regions[r].loyalty + 6);
-      announce(s, { icon: '🎉', title: '태평성대', story: `${n.name} 곳곳에서 풍악이 울립니다.`, effect: '전 지역 민심 +6', nations: [n.id] });
+      const g = (30 + nationRegions(s, n.id).length * 4) * G;
+      n.gold += g;
+      announce(s, { icon: '🎉', title: '태평성대', story: `${n.name} 곳곳에서 풍악이 울립니다.`, effect: `국고 +${fmtGold(g)}금`, nations: [n.id] });
     },
   },
   {

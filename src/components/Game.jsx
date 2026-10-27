@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
@@ -440,7 +440,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           setMoveMode={setMoveMode}
           act={act}
           openGenerals={() => setModal({ type: 'gens' })}
-          openConscript={() => setModal({ type: 'conscript', rid: selected })}
+          openConscript={() => setModal({ type: 'draft', init: { dest: selected } })}
           openLoyalty={() => setModal({ type: 'loyalty' })}
           openBribe={() => setModal({ type: 'bribe', rid: selected })}
           openFief={() => setModal({ type: 'fief', rid: selected })}
@@ -465,23 +465,6 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
       {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
-      {modal?.type === 'conscript' && (
-        <ConscriptModal
-          key={modal.init?.dest ?? 'c'}
-          world={world}
-          game={game}
-          rid={modal.rid}
-          init={modal.init}
-          act={act}
-          onClose={() => setModal(null)}
-          onPickDest={({ mode, amount, valid }) => {
-            const rid = modal.rid;
-            setModal(null);
-            setSheet(false);
-            setPick({ hint: '징병한 병사를 보낼 내 땅을 누르세요', valid: new Set(valid), onPick: (d) => setModal({ type: 'conscript', rid, init: { mode, amount, dest: d } }) });
-          }}
-        />
-      )}
       {modal?.type === 'draft' && (
         <DraftModal
           world={world}
@@ -506,7 +489,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           각 나라가 움직이는 중…
         </div>
       )}
-      {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} act={act} onFocus={(rid) => { setSelected(rid); setPanTo(rid); setTimeout(() => setPanTo(null), 1500); setModal(null); setSheet(true); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'loyalty' && <LoyaltyModal world={world} game={game} onFocus={(rid) => { setSelected(rid); setPanTo(rid); setTimeout(() => setPanTo(null), 1500); setModal(null); setSheet(true); }} onClose={() => setModal(null)} />}
       {modal?.type === 'bribe' && <BribeModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'call' && <CallModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
       {modal?.type === 'disband' && <DisbandModal game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}

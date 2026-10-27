@@ -1,10 +1,9 @@
 import { stateRng } from './rng.js';
 import { COST, G } from './rules.js';
 import {
-  getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doConscript, doBuild,
-  buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, conscriptMax, conscriptCost, doRelief, reliefCost,
-  RELIEF_COOLDOWN, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, bulkDraftPlan, doBulkDraft, BULK_DRAFT_AP } from './engine.js';
+  getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
+  buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -39,7 +38,6 @@ const isEnemyFleet = (s, nid, rid) => s.regions[rid].sea && s.regions[rid].owner
 function updatePosture(s, world, nid) {
   const n = s.nations[nid];
   const mine = nationRegions(s, nid);
-  const avgLoy = mine.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, mine.length);
   let underAttack = false;
   for (const r of mine) {
     let enemy = 0;
@@ -50,7 +48,7 @@ function updatePosture(s, world, nid) {
     if (enemy > s.regions[r].troops * 1.5 && enemy > 5000) underAttack = true;
   }
   const ratio = n.goal !== null && n.goal !== undefined && s.nations[n.goal]?.alive ? nationPower(s, nid) / Math.max(1, nationPower(s, n.goal)) : 0;
-  const strong = ratio >= 1.25 && avgLoy >= 50 && income(s, nid).net > 0;
+  const strong = ratio >= 1.25 && income(s, nid).net > 0;
   n.posture = strong || (underAttack && ratio >= 0.8) || s.coalition?.target === n.goal || hegemonDrive(s, nid) > 0 ? 'war' : 'build';
 }
 
@@ -369,30 +367,16 @@ export function aiActions(s, world, nid) {
         break;
       }
     }
-    // 징병: 민심이 45 아래로 떨어지지 않을 만큼, 금이 허락하는 만큼
-    const c = mine.filter((r) => !s.regions[r].conscripted && (s.regions[r].loyalty ?? 100) >= 50).sort((a, b) => threat[b] + s.regions[b].pop * 0.5 - (threat[a] + s.regions[a].pop * 0.5))[0];
+    // 징병: 나라 전체 한 번에 (수입이 남거나 금이 쌓였거나 위협받을 때)
     const net = income(s, nid).net;
-    if (c !== undefined && net > 8) {
-      const r = s.regions[c];
-      // 돈이 넘치면 민심을 해치지 않는 모병, 아니면 징집
-      const mode = n.gold > 300 * G ? 'hire' : 'draft';
-      let amount = conscriptMax(s, c, nid, mode);
-      const bad = (a) => {
-        const k = conscriptCost(s, c, a, mode);
-        return k.loyalty > (r.loyalty ?? 100) - 45 || k.gold > n.gold - 20 * G || a > net * 0.5 + Math.max(0, n.gold - 200 * G) / 40;
-      };
-      while (amount > 1000 && bad(amount)) amount -= 500;
-      if (amount >= 1000 && conscriptCost(s, c, amount, mode).gold <= n.gold) opts.push({ score: 24 + Math.min(threat[c], 40) * 0.6 + (n.gold > 120 * G ? 12 : 0) + (dist[c] === 0 ? 6 : 0) + (building ? 8 : 0) + drive * 10, run: () => doConscript(s, world, nid, c, amount, mode) });
-    }
-    // 금이 쌓였으면 일괄 징병 (돈을 쌓아두기만 하다 교착되는 것 방지)
-    if (n.ap >= BULK_DRAFT_AP && n.gold > 200 * G && net > 0) {
-      const plan = bulkDraftPlan(s, nid);
+    if (!draftCheck(s, nid)) {
+      const plan = draftPlan(s, nid);
       const cost = plan.reduce((a, x) => a + x.gold, 0);
-      if (plan.length >= 3 && cost < n.gold - 80 * G) opts.push({ score: 26 + Math.min(24, n.gold / (150 * G)) + drive * 10, run: () => doBulkDraft(s, nid, world, null) });
+      const men = plan.reduce((a, x) => a + x.amt, 0);
+      const maxThreat = Math.max(0, ...mine.map((r) => threat[r] || 0));
+      // 늘어날 유지비(1명당 1금/턴)를 수입이 감당할 수 있거나, 금이 넉넉하면
+      if (cost < n.gold - 30 * G && (net > men * 0.6 || n.gold > 250 * G || maxThreat > 20)) opts.push({ score: 26 + Math.min(maxThreat, 40) * 0.5 + Math.min(20, n.gold / (150 * G)) + (building ? 8 : 0) + drive * 10, run: () => doDraft(s, nid, world, null) });
     }
-    // 진휼: 반란 위험 지역
-    const sad = mine.filter((r) => (s.regions[r].loyalty ?? 100) < 28 && (s.regions[r].reliefTurn === undefined || s.turn - s.regions[r].reliefTurn >= RELIEF_COOLDOWN)).sort((a, b) => s.regions[a].loyalty - s.regions[b].loyalty)[0];
-    if (sad !== undefined && n.gold >= reliefCost(s, sad) + 40 * G) opts.push({ score: 27, run: () => doRelief(s, nid, sad) });
     if (n.ap >= 2 && n.gold >= 110 * G) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
       if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
@@ -404,7 +388,7 @@ export function aiActions(s, world, nid) {
       if (pt !== undefined && n.gold >= (island ? 160 : 220) * G) opts.push({ score: island ? 32 : 13, run: () => doBuild(s, world, nid, pt, 'port') });
     }
     // 공성병기: 성벽 있는 적지와 맞닿은 전선
-    // 매수: 돈이 넉넉하면 장수 곁의 민심 낮은 땅·중립지를 돈으로
+    // 매수: 돈이 넉넉하면 장수 곁의 땅·중립지를 돈으로
     if (n.gold >= 150 * G && n.ap >= 1) {
       let best = null;
       for (const g of nationGenerals(s, nid)) {
@@ -621,13 +605,3 @@ export function onProposalDeclined(s, prop) {
   }
 }
 
-// AI 세율: 국고 사정과 민심에 따라 조정
-export function aiTaxPolicy(s, nid) {
-  const n = s.nations[nid];
-  const mine = nationRegions(s, nid);
-  const avgLoy = mine.reduce((a, r) => a + (s.regions[r].loyalty ?? 100), 0) / Math.max(1, mine.length);
-  if (avgLoy < 45) n.taxRate = 'low';
-  else if (n.gold < 60 * G && avgLoy > 60) n.taxRate = 'high';
-  else if (n.gold > 350 * G) n.taxRate = 'low';
-  else n.taxRate = 'normal';
-}

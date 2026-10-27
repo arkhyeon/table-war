@@ -1,12 +1,12 @@
 import { stateRng } from './rng.js';
-import { TERRAIN, TAX, DIFFICULTY } from './rules.js';
+import { TERRAIN, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
-import { aiActions, aiDiplomacy, aiPrisoners, aiTaxPolicy } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, effTax, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, governorOf, governorBonus, buildResolveQueue, resolveAll, arriveReinforcements } from './engine.js';
+import { aiActions, aiDiplomacy, aiPrisoners } from './ai.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, buildResolveQueue, resolveAll, arriveReinforcements } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests } from './rise.js';
+import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests, generalDrama } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -37,23 +37,6 @@ function historyNotes(s) {
 import { trackStats, checkAchievements } from './achievements.js';
 import { updateExplored, encodeOwners } from './fog.js';
 import { hashString } from './rng.js';
-
-function revolt(s, world, rid, rng) {
-  const r = s.regions[rid];
-  const old = r.owner;
-  const rebels = Math.max(Math.round(r.troops * 0.6), Math.round(r.pop * 150));
-  const own = world.regions[rid].neighbors.map((x) => x.id).filter((x) => s.regions[x].owner === old && !s.regions[x].sea);
-  for (const g of gensIn(s, rid, old)) g.region = own[0] ?? s.nations[old].capital;
-  r.owner = null;
-  r.troops = Math.round(rebels / 100) * 100;
-  r.loyalty = 50;
-  if (s.nations[old].capital === rid) {
-    const rest = nationRegions(s, old);
-    s.nations[old].capital = rest.sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0] ?? null;
-  }
-  log(s, `🔥 ${r.name}에서 반란이 일어나 ${s.nations[old].name}의 지배에서 벗어났습니다! (반란군 ${fmtTroops(r.troops)})`, [old], 'warn');
-  checkElimination(s, world, old);
-}
 
 // 세력 균형: 국력이 평균의 2배를 넘으면 주변국의 경계, 1위가 2.5배를 넘으면 대동맹 결성
 function balanceOfPower(s, world) {
@@ -154,9 +137,6 @@ function upkeep(s, world) {
   }
   const volunteers = {};
   const supply = {};
-  const sizes = {};
-  for (const r of s.regions) if (r.owner !== null && !r.sea) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
-  const land = landCount(s);
   for (const n of s.nations) if (n.alive) supply[n.id] = supplied(s, world, n.id);
   for (let i = 0; i < s.regions.length; i++) {
     const r = s.regions[i];
@@ -173,36 +153,22 @@ function upkeep(s, world) {
       }
       continue;
     }
-    const tax = r.owner === null ? TAX.normal : TAX[effTax(s, i)];
     const gens = r.owner === null ? [] : gensIn(s, i, r.owner);
     const df = s.df || 1;
     const cap = (((TERRAIN[world.regions[i].terrain].pop || 10) * 1.6 + (r.buildings.market ? 8 : 0)) * (r.plain ? 1.3 : 1)) / df;
-    if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * tax.growth * (1 + tv(gens, '농정'))) + (0.3 * tax.growth) / df);
+    if (r.pop < cap && !w.noGrowth) r.pop = Math.min(cap, r.pop * (1 + 0.025 * (1 + tv(gens, '농정'))) + 0.3 / df);
     if (r.buildings.walls > 0 && r.buildings.walls < WALL_MAX && r.siegedTurn !== s.turn) r.buildings.walls = Math.min(WALL_MAX, r.buildings.walls + 1 + (tv(gens, '축성') ? 1 : 0));
     r.pop = Math.round(r.pop * 10) / 10;
-    r.conscripted = false;
     if (r.owner === null) {
       if (s.turn % 3 === 0 && r.troops < 12000 / (s.df || 1)) r.troops += Math.max(100, Math.round(1000 / (s.df || 1) / 100) * 100);
       continue;
     }
-    // 민심: 매 턴 회복, 세율·주둔군·수도·인덕 장수 반영
-    const garrison = r.troops >= 3000 ? 2 : 0;
-    const isCap = s.nations[r.owner].capital === i ? 3 : 0;
-    // 보급이 끊긴 지역: 병력 1~10% 감소, 민심 하락
+    // 보급이 끊긴 지역: 병력 1~10% 감소
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
-    // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
-    // 통치 부담은 내륙(국경에 닿지 않은 곳)만, 상한 -5. 국경은 전쟁 중이니 민심이 덜 흔들리고, 내륙은 진휼로 관리
-    const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner);
-    const sprawl = inner ? Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8)) : 0;
-    // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
-    const martial = r.troops >= r.pop * 250;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty + (r.plain ? 1 : 0) - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
-    if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
-    // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
-    const minLoy = danger[r.owner] ? 40 : 60;
-    if (r.loyalty >= minLoy && !cut && !s.nations[r.owner].horde) {
-      const rate = (r.loyalty >= 80 ? 0.004 : 0.0025) * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병')) * (r.buildings.barracks ? 2 : 1);
+    // 자원병: 보급이 이어진 땅에서 매 턴 조금씩, 나라가 위태로우면 4배 (병영 2배, 인덕·모병 장수)
+    if (!cut && !s.nations[r.owner].horde) {
+      const rate = 0.003 * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병') + tv(gens, '인덕') * 0.2) * (r.buildings.barracks ? 2 : 1);
       const v = Math.floor((r.pop * 1000 * rate) / 100) * 100;
       if (v > 0) {
         r.troops += v;
@@ -309,7 +275,6 @@ export function endTurnPlan(s, world) {
   const order = rng.shuffle(s.nations.filter((n) => n.alive && !n.isPlayer).map((n) => n.id));
   for (const id of order) {
     if (!s.nations[id].alive) continue;
-    aiTaxPolicy(s, id);
     aiDiplomacy(s, world, id);
     aiPrisoners(s, id);
     aiActions(s, world, id);
@@ -335,6 +300,7 @@ export function endTurnFinish(s, world) {
   upkeep(s, world);
   // 새 턴: 모든 부대가 다시 움직일 수 있음
   for (const r of s.regions) delete r.moved;
+  generalDrama(s, world, stateRng(s));
   riseNations(s, world, stateRng(s));
   fortune(s, world, stateRng(s));
   spawnHorde(s, world, stateRng(s));

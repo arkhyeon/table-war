@@ -1,14 +1,15 @@
-import { TERRAIN, BUILDINGS, COST, EDGE, TAX } from '../game/rules.js';
+import { TERRAIN, BUILDINGS, COST, EDGE } from '../game/rules.js';
 import { traitLabel, traitDesc } from '../game/traits.js';
 import { gradeOf, gradeScore } from '../game/generals.js';
+import { PERSONA } from '../game/rise.js';
 import EditableName from './EditableName.jsx';
 import { fmtTroops, fmtGold } from '../game/format.js';
 import { CIVS } from '../game/civs.js';
 import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
-  doBuild, regionTax, buildCost, conscriptMax, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, effTax, supplied, WALL_MAX, landCount, doRelief, reliefCost, RELIEF_COOLDOWN, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
+  doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, gensIn, nationRegions, nationGenerals, appearChance, getRel,
+  poachChance, doPoach, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
 import { revokeFief, pacifyCost, pacifyChance, doPacify } from '../game/rise.js';
 
@@ -38,29 +39,16 @@ export function GenLine({ g, extra }) {
   const lv = g.level || 1;
   return (
     <div className="gen">
-      <b>{g.name}</b> <span className="tag">{g.role === 'civ' ? '문관' : '무관'} Lv{lv}</span> {g.title && <span className="tag ally">{g.title}</span>} <TraitTags g={g} />
+      <b>{g.name}</b> {g.persona && <span className="tag" title={PERSONA[g.persona].desc}>{PERSONA[g.persona].icon}{g.persona}</span>} <span className="tag">{g.role === 'civ' ? '문관' : '무관'} Lv{lv}</span> {g.title && <span className="tag ally">{g.title}</span>} <TraitTags g={g} />
       <div className="stats4">
-        무{g.war} 통{g.lead} 지{g.intel} 정{g.pol} · 충성 {g.loyalty} · 경험 {g.exp || 0}/{lv * 100}
+        무{g.war} 통{g.lead} 지{g.intel} 정{g.pol} ·{' '}
+        <span style={{ color: (g.loyalty ?? 60) < 40 ? 'var(--danger)' : undefined }} title={(g.loyalty ?? 60) < 40 ? '충성 40 미만: 지키던 땅을 들고 봉기할 수 있음 (장수 창에서 포상)' : ''}>
+          충성 {Math.round(g.loyalty ?? 60)}{(g.loyalty ?? 60) < 40 && '⚠️'}
+        </span>{' '}
+        · 경험 {g.exp || 0}/{lv * 100}
       </div>
       {extra}
     </div>
-  );
-}
-
-function TaxButtons({ value, onPick, withDefault }) {
-  return (
-    <span className="row" style={{ gap: 4 }}>
-      {withDefault && (
-        <button className={'sm' + (!value ? ' primary' : '')} onClick={() => onPick(null)} title="국가 일괄 세율을 따름">
-          일괄
-        </button>
-      )}
-      {Object.entries(TAX).map(([k, t]) => (
-        <button key={k} className={'sm' + (value === k ? ' primary' : '')} title={t.desc} onClick={() => onPick(k)}>
-          {t.name}
-        </button>
-      ))}
-    </span>
   );
 }
 
@@ -68,7 +56,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
   const pid = game.playerId;
   const me = game.nations[pid];
   const myRegions = nationRegions(game, pid);
-  const lowLoy = myRegions.filter((x) => !game.regions[x].sea && (game.regions[x].loyalty ?? 100) < 40).length;
   const incoming = (game.reinforce || []).filter((o) => o.n === pid);
   const inc = income(game, pid);
   // 맞닿은 나라들 (전선 투입 대상)
@@ -76,7 +63,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
   const nextGold = me.gold + inc.net;
   const ruler = game.generals[me.ruler];
   const lord = game.nations.find((o) => o.alive && isVassalOf(game, pid, o.id));
-  const overrides = myRegions.filter((r) => game.regions[r].tax).length;
   const supply = supplied(game, world, pid);
   const cut = myRegions.filter((r) => !supply.has(r)).length;
 
@@ -90,13 +76,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
   const gens = r && view === 'visible' ? Object.values(game.generals).filter((g) => g.status === 'active' && g.region === selected) : [];
   const orderTo = (g) => (g.order ? (game.orders || []).find((o) => o.id === g.order) : null);
   const w = r ? WEATHER[game.weather?.[selected] || 'clear'] : null;
-
-  const setBulk = (k) =>
-    act((s) => {
-      s.nations[pid].taxRate = k;
-      for (const x of s.regions) if (x.owner === pid) delete x.tax;
-      return { ok: true, msg: `전 지역 세율을 '${TAX[k].name}'(으)로 일괄 설정했습니다.` };
-    });
 
   return (
     <div className={'side' + (sheetOpen ? ' open' : '')}>
@@ -143,8 +122,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           )}
           {me.rally?.to != null && game.regions[me.rally.to]?.owner === pid && <span>🚩 집결: {game.regions[me.rally.to].name}</span>}
           {!spectator && openLoyalty && (
-            <button className="sm" onClick={openLoyalty} title="민심 낮은 순으로 지역을 보고 진휼">
-              📋 지역 목록{lowLoy ? ` (민심 위험 ${lowLoy})` : ''}
+            <button className="sm" onClick={openLoyalty} title="내 지역을 병력·인구 순으로 보고 바로 이동">
+              📋 지역 목록
             </button>
           )}
           {incoming.length > 0 && <span title={incoming.map((o) => `${game.regions[o.to].name} ${fmtTroops(o.count)} (${o.arrive - game.turn}턴 뒤)`).join('\n')}>🪖 증원 이동 중 {incoming.length}</span>}
@@ -152,14 +131,14 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
         </div>
         {!spectator && nextGold < 0 && (
           <div className="warn-box">
-            ⚠️ 다음 턴 파산 예상 — 수입 {fmtGold(inc.gross)} − 지출 {fmtGold(inc.upkeep)} = {fmtGold(inc.net)}/턴, 국고 {fmtGold(me.gold)}. 이대로면 못 준 녹봉만큼(약 {fmtTroops(-nextGold)}) 병사가 탈영합니다. 지역에서 🏳️해산하거나 세율을 올리세요. (병사 1명당 1금)
+            ⚠️ 다음 턴 파산 예상 — 수입 {fmtGold(inc.gross)} − 지출 {fmtGold(inc.upkeep)} = {fmtGold(inc.net)}/턴, 국고 {fmtGold(me.gold)}. 이대로면 못 준 녹봉만큼(약 {fmtTroops(-nextGold)}) 병사가 탈영합니다. 지역에서 🏳️해산하거나 징병을 멈추세요. (병사 1명당 1금)
           </div>
         )}
         {!spectator && nextGold >= 0 && inc.net < 0 && nextGold + inc.net * 2 < 0 && (
           <div className="warn-box soft">💸 적자 {fmtGold(inc.net)}/턴 — 약 {Math.max(1, Math.floor(me.gold / -inc.net))}턴 뒤 파산. 병력 유지비가 {fmtGold(inc.army)}입니다.</div>
         )}
         <details className="more">
-          <summary>자세히 (수입·세율·장수·승리 조건)</summary>
+          <summary>자세히 (수입·장수·승리 조건)</summary>
         <div className="kv">
             <span>군주</span>
             <span>{ruler ? ruler.name : '없음'}</span>
@@ -173,11 +152,6 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             <span>수입</span>
             <span>
               세금 +{fmtGold(inc.gross)} − 병력 유지비 {fmtGold(inc.army)} − 장수 녹봉 {fmtGold(inc.salary)}{inc.admin ? ` − 통치비 ${fmtGold(inc.admin)}` : ''} = <b style={{ color: inc.net < 0 ? 'var(--danger)' : undefined }}>{fmtGold(inc.net)}</b>금/턴
-            </span>
-            <span>세율 일괄</span>
-            <span>
-              <TaxButtons value={me.taxRate || 'normal'} onPick={setBulk} />
-              {overrides > 0 && <small className="muted"> 개별 설정 {overrides}곳 (일괄 선택 시 초기화)</small>}
             </span>
             <span>장수</span>
             <span>
@@ -269,14 +243,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               🪖 <b>{showT ? fmtTroops(r.troops) : '?'}</b>
               {mine && (r.moved || 0) > 0 && <small className="muted"> (이동 가능 {fmtTroops(movable(game, selected))})</small>}
             </span>
-            {r.owner !== null && view === 'visible' && (
-              <span title="민심" style={{ color: r.loyalty < 25 ? 'var(--danger)' : r.loyalty < 50 ? 'var(--accent)' : undefined }}>
-                ❤️ {Math.round(r.loyalty ?? 100)}
-                {r.loyalty < 25 && ' 반란 위험'}
-              </span>
-            )}
             <span title={TERRAIN[wr.terrain].desc}>⛰️ {TERRAIN[wr.terrain].name}</span>
-            {r.plain && <span title="대평야: 세금 +20%, 인구 상한 +30%, 민심 +1/턴">🌾 대평야</span>}
+            {r.plain && <span title="대평야: 세금 +20%, 인구 상한 +30%">🌾 대평야</span>}
             <span title={w.desc}>
               {w.icon} {w.name}
             </span>
@@ -325,15 +293,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 <button className={moveMode ? 'primary' : ''} onClick={() => setMoveMode(!moveMode)} disabled={r.troops < 2}>
                   🚩 이동·공격 (M)
                 </button>
-                <button onClick={openConscript} disabled={r.conscripted || me.ap < COST.conscript}>
-                  🪖 징병 (최대 {fmtTroops(conscriptMax(game, selected, pid))})
-                </button>
-                <button
-                  onClick={() => act((s) => doRelief(s, pid, selected))}
-                  disabled={me.gold < reliefCost(game, selected) || (r.loyalty ?? 100) >= 100 || (r.reliefTurn !== undefined && game.turn - r.reliefTurn < RELIEF_COOLDOWN)}
-                  title={`민심 40 미만이면 +14, 아니면 +7. 지역마다 ${RELIEF_COOLDOWN}턴에 한 번`}
-                >
-                  🍚 진휼 ({fmtGold(reliefCost(game, selected))}금)
+                <button onClick={openConscript} disabled={!!draftCheck(game, pid)} title={draftCheck(game, pid) || `모든 내 땅에서 징병해 이곳으로 보냄 (행동력 ${DRAFT_AP})`}>
+                  🪖 여기로 징병
                 </button>
                 <button
                   className={me.rally?.to === selected ? 'primary' : ''}
@@ -358,7 +319,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   <button
                     onClick={() => act((s) => doMoveCapital(s, world, pid, selected))}
                     disabled={!!capitalMoveCheck(game, world, pid, selected)}
-                    title={capitalMoveCheck(game, world, pid, selected) || `수도를 이곳으로 옮깁니다. 새 수도 민심 +10, 옛 수도 -10. ${CAPITAL_COOLDOWN}턴에 한 번`}
+                    title={capitalMoveCheck(game, world, pid, selected) || `수도를 이곳으로 옮깁니다. ${CAPITAL_COOLDOWN}턴에 한 번`}
                   >
                     🏯 천도 ({fmtGold(capitalMoveCost(game, pid))}금·3AP)
                   </button>
@@ -399,7 +360,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   </span>
                   <span>세수</span>
                   <span>
-                    {fmtGold(regionTax(game, selected))}금/턴 <small className="muted">세율 {TAX[effTax(game, selected)].name}</small>
+                    {fmtGold(regionTax(game, selected))}금/턴
                   </span>
                 </>
               )}
@@ -411,7 +372,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   <span>
                     {(() => {
                       const gv = governorOf(game, selected), b = governorBonus(gv);
-                      return `${gv.name} (정${gv.pol}${gv.role === 'civ' ? '' : ', 무관 절반'}) · 세수 +${Math.round(b.tax * 100)}%${b.loyalty ? ` · 민심 +${b.loyalty}/턴` : ''}`;
+                      return `${gv.name} (정${gv.pol}${gv.role === 'civ' ? '' : ', 무관 절반'}) · 세수 +${Math.round(b.tax * 100)}%`;
                     })()}
                   </span>
                 </>

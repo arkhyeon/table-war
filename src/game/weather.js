@@ -11,19 +11,19 @@ export const yearOf = (turn, start = 1) => {
 };
 export const fmtYear = (y) => (y < 0 ? `기원전 ${-y}년` : `${y}년`);
 
-// 날씨 효과: att=공격력 배율(전장 기준), ap=진입 행동력 추가, tax=세수 배율, loyalty=민심 변화, noSea=항해 불가
+// 날씨 효과: att=공격력 배율(전장 기준), ap=진입 행동력 추가, tax=세수 배율, noSea=항해 불가
 export const WEATHER = {
-  clear: { name: '맑음', icon: '', att: 1, ap: 0, tax: 1, loyalty: 0 },
-  rain: { name: '비', icon: '🌧️', att: 0.9, river: 0.85, ap: 0, tax: 1, loyalty: 0, desc: '공격 -10%, 도강 추가 -15%' },
-  storm: { name: '폭풍', icon: '🌀', att: 0.85, ap: 0, tax: 0.9, loyalty: 0, noSea: true, seaLoss: 0.1, desc: '공격 -15%, 항해 불가, 세수 -10%, 함대 손실 10%' },
-  snow: { name: '눈', icon: '❄️', att: 0.75, ap: 1, tax: 0.75, loyalty: -1, noGrowth: true, desc: '공격 -25%, 진입 행동력 +1, 세수 -25%, 인구 정체, 민심 -1' },
-  drought: { name: '가뭄', icon: '☀️', att: 1, ap: 0, tax: 0.65, loyalty: -2, noGrowth: true, desc: '세수 -35%, 인구 정체, 민심 -2' },
-  harvest: { name: '풍년', icon: '🌾', att: 1, ap: 0, tax: 1.35, loyalty: 2, desc: '세수 +35%, 민심 +2' },
+  clear: { name: '맑음', icon: '', att: 1, ap: 0, tax: 1 },
+  rain: { name: '비', icon: '🌧️', att: 0.9, river: 0.85, ap: 0, tax: 1, desc: '공격 -10%, 도강 추가 -15%' },
+  storm: { name: '폭풍', icon: '🌀', att: 0.85, ap: 0, tax: 0.9, noSea: true, seaLoss: 0.1, desc: '공격 -15%, 항해 불가, 세수 -10%, 함대 손실 10%' },
+  snow: { name: '눈', icon: '❄️', att: 0.75, ap: 1, tax: 0.75, noGrowth: true, desc: '공격 -25%, 진입 행동력 +1, 세수 -25%, 인구 정체' },
+  drought: { name: '가뭄', icon: '☀️', att: 1, ap: 0, tax: 0.65, noGrowth: true, desc: '세수 -35%, 인구 정체' },
+  harvest: { name: '풍년', icon: '🌾', att: 1, ap: 0, tax: 1.35, desc: '세수 +35%' },
   // 바다 날씨
-  rough: { name: '풍랑', icon: '🌊', att: 0.8, ap: 0, tax: 1, loyalty: 0, seaLoss: 0.05, desc: '해전·상륙 -20%, 함대 손실 5%' },
-  tailwind: { name: '순풍', icon: '⛵', att: 1.15, ap: 0, tax: 1, loyalty: 0, seaLoss: 0, desc: '해전·상륙 +15%, 함대 손실 없음' },
-  waterspout: { name: '용오름', icon: '🌪️', att: 0.8, ap: 0, tax: 1, loyalty: 0, noSea: true, seaLoss: 0.15, desc: '항해 불가, 함대 손실 15%' },
-  seafog: { name: '해무', icon: '🌫️', att: 1.15, ap: 0, tax: 1, loyalty: 0, seaLoss: 0.02, desc: '짙은 안개로 기습: 상륙·해전 +15%' },
+  rough: { name: '풍랑', icon: '🌊', att: 0.8, ap: 0, tax: 1, seaLoss: 0.05, desc: '해전·상륙 -20%, 함대 손실 5%' },
+  tailwind: { name: '순풍', icon: '⛵', att: 1.15, ap: 0, tax: 1, seaLoss: 0, desc: '해전·상륙 +15%, 함대 손실 없음' },
+  waterspout: { name: '용오름', icon: '🌪️', att: 0.8, ap: 0, tax: 1, noSea: true, seaLoss: 0.15, desc: '항해 불가, 함대 손실 15%' },
+  seafog: { name: '해무', icon: '🌫️', att: 1.15, ap: 0, tax: 1, seaLoss: 0.02, desc: '짙은 안개로 기습: 상륙·해전 +15%' },
 };
 
 function hash(a, b, c) {

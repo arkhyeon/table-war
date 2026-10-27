@@ -53,12 +53,6 @@ export const TREATY = {
   vassal: '종속',
 };
 
-// 세율 정책: 매 턴 자동 징수
-export const TAX = {
-  low: { name: '낮음', mult: 0.6, loyalty: 3, growth: 1.6, desc: '세수 60% · 민심 +3/턴 · 인구 증가 빠름' },
-  normal: { name: '보통', mult: 1, loyalty: 0, growth: 1, desc: '세수 100%' },
-  high: { name: '높음', mult: 1.45, loyalty: -4, growth: 0.3, desc: '세수 145% · 민심 -4/턴 · 인구 정체' },
-};
 
 // 전투 종류 (다시보기·기록 표시용)
 export const BATTLE_KIND = {
