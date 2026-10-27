@@ -142,6 +142,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             <>
               <span style={{ marginLeft: 12 }}>국가 수 {nationCount}</span>
               <input type="range" min={4} max={14} value={nationCount} onChange={(e) => setNationCount(+e.target.value)} />
+              <button className="sm" title="국가 수를 4~14 중 무작위로" onClick={() => setNationCount(4 + Math.floor(Math.random() * 11))}>🎲</button>
             </>
           )}
           <span className="muted" style={{ fontSize: 12 }}>

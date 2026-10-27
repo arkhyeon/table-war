@@ -23,6 +23,15 @@ function civNear(s, world, rid) {
   return civ;
 }
 
+// 변방 가중치: 살아 있는 나라 수도들의 한가운데에서 멀수록 큼 (새 나라·도적은 변방에서 일어남)
+function edgeWeight(s, world) {
+  const caps = s.nations.filter((n) => n.alive && n.capital !== null && n.capital !== undefined).map((n) => world.regions[n.capital]);
+  if (!caps.length) return () => 1;
+  const mx = caps.reduce((a, c) => a + c.cx, 0) / caps.length, my = caps.reduce((a, c) => a + c.cy, 0) / caps.length;
+  const far = Math.max(1, ...world.regions.filter((r) => !r.sea).map((r) => Math.hypot(r.cx - mx, r.cy - my)));
+  return (rid) => 0.03 + 6 * (Math.hypot(world.regions[rid].cx - mx, world.regions[rid].cy - my) / far) ** 3;
+}
+
 function freshName(s, civ, rng) {
   const used = new Set(s.nations.filter((n) => n.alive).map((n) => n.name));
   const dead = new Set(s.nations.filter((n) => !n.alive).map((n) => n.name));
@@ -138,7 +147,8 @@ function tryRise(s, world, rng) {
     }
   }
   if (!opts.length) return false;
-  const o = rng.weighted(opts, (x) => x.w);
+  const ew = edgeWeight(s, world);
+  const o = rng.weighted(opts, (x) => x.w * ew(x.rids[0]));
   const civ = civNear(s, world, o.rids[0]);
   const lead = leaderFor(s, civ, rng);
   const n = newNation(s, civ, freshName(s, civ, rng));
@@ -401,7 +411,8 @@ export function spawnHorde(s, world, rng) {
     } else if (s.nations[r.owner].capital !== rid && (r.loyalty ?? 100) < 30 && !s.nations[r.owner].horde) opts.push({ rids: [rid], w: 1, mult: 1.2, from: r.owner });
   }
   if (!opts.length) return;
-  const o = rng.weighted(opts, (x) => x.w);
+  const ew = edgeWeight(s, world);
+  const o = rng.weighted(opts, (x) => x.w * ew(x.rids[0]));
   const civ = civNear(s, world, o.rids[0]);
   const lead = leaderFor(s, civ, rng);
   const n = newNation(s, civ, hordeName(s, civ, rng));
