@@ -128,8 +128,9 @@ function upkeep(s, world) {
     n.gold = Math.round(n.gold + net);
     if (n.gold < 0) {
       n.gold = 0;
-      for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.floor(r.troops * 0.009) * 100);
-      log(s, `💸 ${n.name}의 국고가 바닥나 병사들이 탈영했습니다.`, [n.id], 'warn');
+      // 국고가 바닥나면 매 턴 병력의 20%가 탈영 (한 번에 증발하지 않게)
+      for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.floor((r.troops * 0.8) / 100) * 100);
+      log(s, `💸 ${n.name}의 국고가 바닥나 병사 20%가 탈영했습니다. 병력을 줄이거나 세금을 올리세요.`, [n.id], 'warn');
     }
   }
   // 위기 판단: 영토를 잃었거나 수도 주변 적병이 수도 수비대보다 많으면 '나라가 위태로움'
@@ -150,6 +151,7 @@ function upkeep(s, world) {
     n.lastCount = count;
   }
   const volunteers = {};
+  const overstack = {};
   const supply = {};
   const sizes = {};
   for (const r of s.regions) if (r.owner !== null && !r.sea) sizes[r.owner] = (sizes[r.owner] || 0) + 1;
@@ -188,6 +190,13 @@ function upkeep(s, world) {
     // 보급이 끊긴 지역: 병력 1~10% 감소, 민심 하락
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
+    // 대군 보급난: 한 지역에 너무 많이 모이면 넘친 병력의 5%가 매 턴 흩어짐 (인구가 많을수록 많이 버팀)
+    const stackCap = Math.round((50000 + r.pop * 2000) / df);
+    if (r.troops > stackCap) {
+      const lost = Math.round(((r.troops - stackCap) * 0.05 * (1 - tv(gens, '보급'))) / 100) * 100;
+      r.troops -= lost;
+      if (lost > 0) overstack[r.owner] = (overstack[r.owner] || 0) + lost;
+    }
     // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
     // 통치 부담은 내륙(국경에 닿지 않은 곳)만, 상한 -5. 국경은 전쟁 중이니 민심이 덜 흔들리고, 내륙은 진휼로 관리
     const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner);
@@ -213,6 +222,7 @@ function upkeep(s, world) {
       if (govern + drill >= 1) gainExp(s, g, govern + drill);
     }
   }
+  for (const [nid, v] of Object.entries(overstack)) if (+nid === s.playerId && !s.spectator) log(s, `🍞 한 지역에 대군이 몰려 보급난으로 ${fmtTroops(v)}이(가) 흩어졌습니다. (지역당 약 ${fmtTroops(Math.round(50000 / (s.df || 1)))} + 인구에 비례해 버팀)`, [+nid], 'warn');
   for (const [nid, v] of Object.entries(volunteers)) {
     if (+nid === s.playerId && !s.spectator) log(s, `🙋 ${s.nations[nid].name}${danger[nid] ? '이(가) 위기에 처하자 백성들이 앞다퉈' : '에'} 자원 입대했습니다. (총 +${fmtTroops(v)})`, [+nid], 'info');
   }
