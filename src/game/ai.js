@@ -90,7 +90,9 @@ function updateGoal(s, world, nid) {
   let best = null, bv = -Infinity;
   for (const [o, base] of cand) {
     if (!hostile(s, nid, o) || getRel(s, nid, o).type !== 'none') continue;
-    const v = base + (myP / Math.max(1, nationPower(s, o))) * 30 - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
+    const theirP = Math.max(1, nationPower(s, o));
+    // 나보다 센 나라는 목표로 삼지 않음 (약한 나라부터)
+    const v = base + (myP / theirP) * 30 - (theirP > myP * 1.15 ? 35 : 0) - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
     if (v > bv) { bv = v; best = o; }
   }
   n.goal = best;
@@ -266,7 +268,8 @@ export function aiActions(s, world, nid) {
         if (t.owner !== null && s.turn <= 3) continue; // 초반 3턴은 국가 간 전쟁 유예
         const cost = moveCost(world, r, nb.id, s);
         if (cost > n.ap) continue;
-        let keep = reg.sea ? 0 : threat[r] > 0 ? Math.min(Math.floor(reg.troops / 3), Math.ceil(threat[r] * 300)) : 0;
+        // 사방이 적이면 비운 땅을 노린 기회 공격을 막도록 수비를 더 남김
+        let keep = reg.sea ? 0 : threat[r] > 0 ? Math.min(Math.floor(reg.troops * ((n.fronts || 0) >= 3 ? 0.6 : 0.33)), Math.ceil(threat[r] * ((n.fronts || 0) >= 3 ? 700 : 300))) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
         const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep);
         if (count < 2000 && !reg.sea) continue;
@@ -526,14 +529,15 @@ export function aiDiplomacy(s, world, nid) {
   // 다 거절하면 → 새 전선을 열지 않고 목표만 치며 수비(n.fronts로 공격 판단에 반영)
   const foes = [...neighbors].filter((o) => !s.nations[o].horde && getRel(s, nid, o).type === 'none');
   n.fronts = foes.length;
-  if (foes.length >= 3 && (s.turn < 40 || (n.lost || 0) > 0) && rng.chance(0.5)) {
+  // 중원 나라는 처음부터(15턴 안) 넉넉한 금(+50%)으로 이웃과 화친을 청함
+  if ((foes.length >= 3 && (s.turn < 40 || (n.lost || 0) > 0) && rng.chance(0.5)) || (n.heartland && s.turn <= 15 && foes.length >= 2)) {
     n.napTried = n.napTried || {};
     const cand = foes.filter((o) => o !== n.goal && (n.napTried[o] ?? -99) < s.turn - 5).sort((a, b) => nationPower(s, b) - nationPower(s, a))[0];
     if (cand !== undefined) {
       n.napTried[cand] = s.turn;
       const deal = emptyDeal();
       deal.treaty = 'nap';
-      deal.give.gold = Math.min(Math.round(n.gold * 0.25), Math.round(nationPower(s, cand) * 0.1) * G);
+      deal.give.gold = Math.min(Math.round(n.gold * (n.heartland ? 0.35 : 0.25)), Math.round(nationPower(s, cand) * (n.heartland ? 0.2 : 0.1)) * G);
       if (!validateDeal(s, world, nid, cand, deal)) {
         if (s.nations[cand].isPlayer) {
           if (s.proposals.length < 2) s.proposals.push({ from: nid, deal, text: describeDeal(s, nid, cand, deal) + ' (사방이 적이라 화친을 청함)' });

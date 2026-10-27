@@ -292,6 +292,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   for (const { n, mine } of around) {
     if (!chosen.has(n.id) || mine.length < 2) continue;
     n.heartland = true;
+    n.gold = Math.round(n.gold * 1.5); // 넉넉한 금으로 초반 외교
     for (const i of mine) {
       const r = s.regions[i];
       r.plain = true;
