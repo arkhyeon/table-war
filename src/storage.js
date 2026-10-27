@@ -12,7 +12,7 @@ export function loadSave() {
 
 export function writeSave(data) {
   try {
-    localStorage.setItem(SAVE, JSON.stringify(data));
+    localStorage.setItem(SAVE, JSON.stringify({ ...data, savedAt: Date.now() }));
   } catch {
     /* 저장 실패는 무시 */
   }
@@ -21,6 +21,33 @@ export function writeSave(data) {
 export function clearSave() {
   try {
     localStorage.removeItem(SAVE);
+  } catch {
+    /* 무시 */
+  }
+}
+
+// 수동 저장 슬롯 (자동 저장과 별개)
+export const SLOT_COUNT = 3;
+const slotKey = (k) => `tablewar-slot-${k}`;
+export function loadSlot(k) {
+  try {
+    const raw = localStorage.getItem(k === 0 ? SAVE : slotKey(k));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+export function writeSlot(k, data) {
+  try {
+    localStorage.setItem(slotKey(k), JSON.stringify({ ...data, savedAt: Date.now() }));
+    return true;
+  } catch {
+    return false; // 용량 부족 등
+  }
+}
+export function deleteSlot(k) {
+  try {
+    localStorage.removeItem(slotKey(k));
   } catch {
     /* 무시 */
   }

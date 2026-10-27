@@ -423,7 +423,7 @@ export function canSail(s, nid, from, genIds) {
 export const movable = (s, rid) => Math.max(0, s.regions[rid].troops - (s.regions[rid].moved || 0));
 const arrive = (r, n) => (r.moved = Math.min(r.troops, (r.moved || 0) + n));
 
-export function moveCheck(s, world, nid, from, to, count, genIds = []) {
+export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const fr = s.regions[from], tr = s.regions[to];
   if (fr.owner !== nid) return '내 지역에서만 출발할 수 있습니다.';
   const e = edgeBetween(world, from, to) || (marchVia(world, s, from, to) !== null ? { type: 'march' } : null);
@@ -443,7 +443,7 @@ export function moveCheck(s, world, nid, from, to, count, genIds = []) {
       if (genIds.length) return '원군에는 장수를 보낼 수 없습니다. (장수 선택 해제)';
     }
   }
-  return canAct(s, nid, moveCost(world, from, to, s));
+  return canAct(s, nid, opts.auto ? 0 : moveCost(world, from, to, s));
 }
 
 function betray(s, nid, victim) {
@@ -567,10 +567,11 @@ function trackMove(s, from, to, nid, count, kind) {
 
 // ───────── 이동 계획: 계획만 세우고(병력은 출발), 턴 끝에 모든 나라의 계획을 함께 처리 ─────────
 export function planMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
-  const err = moveCheck(s, world, nid, from, to, count, genIds);
+  const err = moveCheck(s, world, nid, from, to, count, genIds, opts);
   if (err) return fail(err);
   const fr = s.regions[from], tr = s.regions[to];
-  const cost = moveCost(world, from, to, s);
+  // 자동 집결 행군(내 땅 안 이동)은 행동력을 쓰지 않음
+  const cost = opts.auto ? 0 : moveCost(world, from, to, s);
   const engines = Math.min(opts.engines || 0, fr.engines || 0);
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === nid && g.region === from && !g.order);
   s.orderSeq = (s.orderSeq || 0) + 1;
@@ -586,6 +587,55 @@ export function planMove(s, world, nid, from, to, count, genIds = [], opts = {})
   (s.orders = s.orders || []).push(o);
   const hostile = tr.owner !== null && tr.owner !== nid && getRel(s, nid, tr.owner).type !== 'alliance';
   return { ok: true, order: o, msg: `${fr.name} → ${tr.name}: ${fmtTroops(count)} ${hostile || (tr.owner === null && !tr.sea) ? '공격' : '이동'} 계획 (턴 종료 때 모든 나라가 함께 움직입니다)` };
+}
+
+// 집결: 후방 병력을 집결지(또는 가장 가까운 전선)로 내 땅 안에서 자동 행군 (행동력 없음)
+// s.nations[nid].rally = { to: 지역 | null, front: 전선 자동 투입 }
+export const RALLY_KEEP = 1000;
+export function frontierOf(s, world, nid) {
+  const out = new Set();
+  for (const r of nationRegions(s, nid)) {
+    if (s.regions[r].sea) continue;
+    if (world.regions[r].neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== nid)) out.add(r);
+  }
+  return out;
+}
+export function autoMarch(s, world, nid) {
+  const n = s.nations[nid];
+  const ral = n.rally;
+  if (!ral || (!ral.front && (ral.to === null || ral.to === undefined))) return 0;
+  if (ral.to !== null && ral.to !== undefined && s.regions[ral.to].owner !== nid) ral.to = null;
+  const goals = ral.to !== null && ral.to !== undefined ? new Set([ral.to]) : ral.front ? frontierOf(s, world, nid) : new Set();
+  if (!goals.size) return 0;
+  // 내 땅(육지·강)으로만 이어진 거리
+  const dist = new Map([...goals].map((g) => [g, 0]));
+  const q = [...goals];
+  for (let k = 0; k < q.length; k++) {
+    for (const e of world.regions[q[k]].neighbors) {
+      if ((e.type !== 'land' && e.type !== 'river') || dist.has(e.id) || s.regions[e.id].owner !== nid || s.regions[e.id].sea) continue;
+      dist.set(e.id, dist.get(q[k]) + 1);
+      q.push(e.id);
+    }
+  }
+  let sent = 0;
+  for (const [r, d] of dist) {
+    if (d === 0) continue;
+    const reg = s.regions[r];
+    const keep = n.capital === r ? RALLY_KEEP * 3 : RALLY_KEEP;
+    const cnt = Math.floor((Math.min(movable(s, r), reg.troops - keep)) / 100) * 100;
+    if (cnt < 1000) continue;
+    // 2칸 앞으로 갈 수 있으면 2칸, 아니면 1칸
+    let to = null;
+    for (const a of world.regions[r].neighbors) {
+      if (dist.get(a.id) !== d - 1) continue;
+      to = a.id;
+      const far = world.regions[a.id].neighbors.find((b) => dist.get(b.id) === d - 2 && marchVia(world, s, r, b.id) !== null);
+      if (far) { to = far.id; break; }
+    }
+    if (to === null) continue;
+    if (planMove(s, world, nid, r, to, cnt, [], { auto: true }).ok) sent += cnt;
+  }
+  return sent;
 }
 
 export function cancelOrder(s, id) {

@@ -380,11 +380,10 @@ export function aiActions(s, world, nid) {
       // 내 땅 안에서는 2칸 행군으로 더 빨리 전선에 닿음
       const far = world.regions[nb.id].neighbors.find((x) => x.id !== r && dist[x.id] < dist[nb.id] && marchVia(world, s, r, x.id) !== null);
       if (far) nb = far;
-      if (moveCost(world, r, nb.id, s) > n.ap) continue;
       const gens = gensIn(s, r, nid).map((g) => g.id);
       const mv = Math.min(movable(s, r), reg.troops - 1000);
-      if (mv < 1000 || moveCheck(s, world, nid, r, nb.id, mv, gens)) continue;
-      opts.push({ score: 14 + (mv / 1000) * 0.4, run: () => planMove(s, world, nid, r, nb.id, mv, gens, { engines: reg.engines || 0 }) });
+      if (mv < 1000 || moveCheck(s, world, nid, r, nb.id, mv, gens, { auto: true })) continue;
+      opts.push({ score: 14 + (mv / 1000) * 0.4, run: () => planMove(s, world, nid, r, nb.id, mv, gens, { engines: reg.engines || 0, auto: true }) });
     }
     // 원군: 위협받는 동맹국 땅에 여유 병력을 보냄
     for (const r of mine) {

@@ -157,7 +157,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -586,6 +586,11 @@ export default function MapView({ world, regions, nations, selected, targets, on
               );
             })}
           </g>
+          {rally != null && world.regions[rally] && (
+            <g transform={`translate(${world.regions[rally].cx},${world.regions[rally].cy - s * 2.2 * (world.regions[rally].mk || 1)}) scale(${world.regions[rally].mk || 1})`} pointerEvents="none">
+              <text fontSize={s * 1.6} textAnchor="middle" stroke="#15171b" strokeWidth={s * 0.15} paintOrder="stroke">🚩</text>
+            </g>
+          )}
           {compact &&
             nations
               .filter((n) => n.alive && n.capital !== null)

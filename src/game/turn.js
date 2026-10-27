@@ -187,10 +187,12 @@ function upkeep(s, world) {
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
     // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
-    const sprawl = Math.floor(((sizes[r.owner] || 0) / land) * 8);
+    // 상한 -5, 국경에 닿지 않은 후방은 +2 (내륙은 안정적)
+    const sprawl = Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8));
+    const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner) ? 2 : 0;
     // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
     const martial = r.troops >= r.pop * 250;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty + inner - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;
@@ -253,7 +255,17 @@ export function checkGameOver(s) {
 }
 
 // 턴 종료 1단계: 컴퓨터들도 이동 계획을 세움 (플레이어 계획으로 빠져나간 병력은 모르는 채로)
+// 턴 요약용: 플레이어의 영토·병력·국고
+export function playerStat(s) {
+  const pid = s.playerId;
+  let regions = 0, troops = 0;
+  for (const r of s.regions) if (r.owner === pid) { troops += r.troops; if (!r.sea) regions++; }
+  for (const o of s.orders || []) if (o.n === pid) troops += o.count;
+  return { regions, troops, gold: s.nations[pid].gold, gens: Object.values(s.generals).filter((g) => g.status === 'active' && g.nation === pid).length };
+}
+
 export function endTurnPlan(s, world) {
+  s.prevStat = playerStat(s);
   s.turnNews = [];
   s.turnEvents = [];
   s.battles = [];

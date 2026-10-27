@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, ConscriptModal, TakeoverModal, GodModal, SaveModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -15,7 +15,7 @@ import { fixJosa } from '../game/josa.js';
 import { clearSave } from '../storage.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
 
-export default function Game({ world, scn, game, setGame, onExit }) {
+export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const [selected, setSelected] = useState(game.nations[game.playerId].capital);
   const [moveMode, setMoveModeRaw] = useState(false);
   // 모바일: 정보 패널을 바텀시트로 (이동 대상 고를 땐 내려감)
@@ -78,7 +78,20 @@ export default function Game({ world, scn, game, setGame, onExit }) {
     endTurnFinish(s, world);
     afterTurn(s, before);
   };
+  // 큰 지도는 턴 처리에 시간이 걸리므로 '처리 중' 표시를 먼저 그린 뒤 계산
+  const [busy, setBusy] = useState(false);
   const doEndTurn = () => {
+    if (busy) return;
+    setBusy(true);
+    setTimeout(() => {
+      try {
+        endTurnNow();
+      } finally {
+        setBusy(false);
+      }
+    }, 30);
+  };
+  const endTurnNow = () => {
     setMoveMode(false);
     const s = structuredClone(game);
     const before = visibleSet(game, world, pid);
@@ -87,7 +100,10 @@ export default function Game({ world, scn, game, setGame, onExit }) {
       setGame(s);
       return;
     }
+    // 집결지·전선 자동 행군 (행동력 없음)
+    const sent = autoMarch(s, world, pid);
     endTurnPlan(s, world);
+    if (sent) log(s, `🚩 후방 병력 ${fmtTroops(sent)}이(가) ${s.nations[pid].rally?.to != null ? `집결지 ${s.regions[s.nations[pid].rally.to].name}` : '전선'}(으)로 행군합니다.`, [pid], 'info');
     runResolve(s, before);
   };
   const afterTurn = (s, before) => {
@@ -302,6 +318,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
           {menu && (
             <div className="menu" style={{ top: menu.top, left: menu.left }} onClick={() => setMenu(false)}>
               <button onClick={() => setShowLog((v) => !v)}>📜 기록 {showLog ? '숨기기' : '보기'}</button>
+              <button onClick={() => setModal({ type: 'save' })}>💾 저장·불러오기</button>
               <button onClick={() => setModal({ type: 'chronicle' })}>📽️ 연대기</button>
               <button onClick={() => setModal({ type: 'help' })}>❓ 게임 방법</button>
               <button onClick={() => confirmIt('메인 화면으로 나갈까요? (자동 저장됨)', onExit)}>🚪 메인 화면으로</button>
@@ -328,6 +345,7 @@ export default function Game({ world, scn, game, setGame, onExit }) {
             flash={flashSet}
             orders={myOrders}
             home={game.nations[pid]?.capital}
+            rally={game.nations[pid]?.rally?.to}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}
             onClick={onRegionClick}
@@ -411,8 +429,24 @@ export default function Game({ world, scn, game, setGame, onExit }) {
       {modal?.type === 'chronicle' && <ChronicleModal world={world} game={game} view={view} onClose={() => setModal(null)} />}
       {modal?.type === 'diplo' && <DiplomacyModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} />}
       {modal?.type === 'gens' && <GeneralsModal world={world} game={game} act={act} confirmIt={confirmIt} onClose={() => setModal(null)} onFocus={(rid) => { setSelected(rid); setModal(null); }} />}
+      {busy && !spect && (
+        <div className="loading" style={{ position: 'fixed' }}>
+          <div className="spinner" />
+          각 나라가 움직이는 중…
+        </div>
+      )}
+      {modal?.type === 'save' && (
+        <SaveModal
+          game={game}
+          toast={toast}
+          onClose={() => setModal(null)}
+          onLoad={(d) => {
+            if (!onLoad(d)) toast('이 저장은 불러올 수 없습니다(이전 버전).', true);
+          }}
+        />
+      )}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
-      {modal?.type === 'news' && <NewsModal news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
+      {modal?.type === 'news' && <NewsModal game={game} news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
       {showProposal && <ProposalModal world={world} game={game} act={act} />}
       {ask && (
         <ConfirmModal

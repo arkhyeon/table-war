@@ -14,6 +14,8 @@ import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LA
 import { onProposalDeclined } from '../game/ai.js';
 import { rating } from '../game/generals.js';
 import { fixJosa } from '../game/josa.js';
+import { playerStat } from '../game/turn.js';
+import SaveSlots from './SaveSlots.jsx';
 import { fmtTroops, fmtGold } from '../game/format.js';
 import { relTag, GenLine, TraitTags, GradeTag } from './SidePanel.jsx';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -21,7 +23,7 @@ import EditableName from './EditableName.jsx';
 import Slider from './Slider.jsx';
 import { G } from '../game/rules.js';
 
-function Modal({ title, onClose, wide, children }) {
+export function Modal({ title, onClose, wide, children }) {
   return (
     <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
       <div className={'modal' + (wide ? ' wide' : '')}>
@@ -659,11 +661,35 @@ export function ProposalModal({ world, game, act }) {
   );
 }
 
-export function NewsModal({ news, events = [], turn, onClose }) {
+function TurnSummary({ game }) {
+  const a = game.prevStat;
+  if (!a) return null;
+  const b = playerStat(game);
+  const pid = game.playerId;
+  const bt = (game.battles || []).filter((x) => x.attacker === pid || x.defender === pid);
+  const won = bt.filter((x) => (x.attacker === pid) === !!x.win).length;
+  const d = (v, f) => <b style={{ color: v > 0 ? 'var(--ok)' : v < 0 ? 'var(--danger)' : 'var(--muted)' }}>{v > 0 ? '+' : ''}{f(v)}</b>;
+  return (
+    <div className="turn-sum">
+      <span>🗺️ 영토 {b.regions}곳 {d(b.regions - a.regions, (v) => v)}</span>
+      <span>🪖 병력 {fmtTroops(b.troops)} {d(b.troops - a.troops, fmtTroops)}</span>
+      <span>💰 국고 {fmtGold(b.gold)} {d(b.gold - a.gold, fmtGold)}</span>
+      {bt.length > 0 && <span>⚔️ 전투 {bt.length}회 · {won}승 {bt.length - won}패</span>}
+      {b.gens !== a.gens && <span>⭐ 장수 {b.gens}명 {d(b.gens - a.gens, (v) => v)}</span>}
+    </div>
+  );
+}
+
+export function NewsModal({ game, news, events = [], turn, onClose }) {
+  const [tab, setTab] = useState('mine');
   const evHeads = events.map((e) => `${e.icon} ${e.title}`);
-  const rest = news.filter((n) => !evHeads.some((h) => n.startsWith(h)));
+  const mine = news.filter((n) => !evHeads.some((h) => n.startsWith(h)));
+  const pid = game?.playerId;
+  const world = (game?.log || []).filter((l) => l.turn >= turn - 1 && !(l.nations || []).includes(pid)).map((l) => l.text);
+  const rest = tab === 'mine' ? mine : world;
   return (
     <Modal title={`📰 ${turn}턴 소식`} onClose={onClose}>
+      {game && <TurnSummary game={game} />}
       {events.length > 0 && (
         <div className="col" style={{ marginBottom: 12 }}>
           {events.map((e, i) => (
@@ -677,8 +703,13 @@ export function NewsModal({ news, events = [], turn, onClose }) {
           ))}
         </div>
       )}
-      <div className="col" style={{ fontSize: 14 }}>
-        {rest.slice(0, 30).map((n, i) => (
+      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+        <button className={tab === 'mine' ? 'primary sm' : 'sm'} onClick={() => setTab('mine')}>내 소식 {mine.length}</button>
+        <button className={tab === 'world' ? 'primary sm' : 'sm'} onClick={() => setTab('world')}>세계 소식 {world.length}</button>
+      </div>
+      <div className="col" style={{ fontSize: 14, maxHeight: '40vh', overflow: 'auto' }}>
+        {!rest.length && <div className="muted">소식이 없습니다.</div>}
+        {rest.slice(0, 40).map((n, i) => (
           <div key={i}>{fixJosa(n)}</div>
         ))}
       </div>
@@ -1116,6 +1147,16 @@ export function GodModal({ game, onGift, onClose }) {
         </div>
         <div className="muted" style={{ fontSize: 12 }}>판을 지켜보다 원하는 나라를 밀어줄 수 있습니다. 준 내역은 기록에 남습니다.</div>
       </div>
+    </Modal>
+  );
+}
+
+// ───────── 저장·불러오기 ─────────
+export function SaveModal({ game, onLoad, toast, onClose }) {
+  return (
+    <Modal title="💾 저장·불러오기" onClose={onClose}>
+      <SaveSlots current={game ? { scenarioId: game.scenarioId, seed: game.seed, state: game } : null} onLoad={onLoad} onSaved={toast} />
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>자동 저장은 매 행동마다 갱신됩니다. 저장은 이 브라우저(기기)에만 남습니다.</div>
     </Modal>
   );
 }

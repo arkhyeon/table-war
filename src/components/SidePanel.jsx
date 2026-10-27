@@ -110,6 +110,20 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
           <span title="영토">🗺️ {myRegions.length}곳</span>
           <span title="총 병력">🪖 {fmtTroops(inc.troops)}</span>
           {cut > 0 && <span style={{ color: 'var(--danger)' }}>✂ 보급 끊김 {cut}</span>}
+          {!spectator && (
+            <label title="집결지가 없을 때, 후방 병력이 매 턴 가장 가까운 국경으로 자동 행군 (행동력 없음)" style={{ whiteSpace: 'nowrap' }}>
+              <input
+                type="checkbox"
+                checked={!!me.rally?.front}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  act((s) => ((s.nations[pid].rally = { ...(s.nations[pid].rally || { to: null }), front: on }), { ok: true, msg: on ? '후방 병력이 매 턴 전선으로 자동 행군합니다.' : '전선 자동 투입을 껐습니다.' }));
+                }}
+              />{' '}
+              🚩 전선 자동 투입
+            </label>
+          )}
+          {me.rally?.to != null && game.regions[me.rally.to]?.owner === pid && <span>🚩 집결: {game.regions[me.rally.to].name}</span>}
           {game.coalition && <span style={{ color: 'var(--danger)' }}>⚔️ 대동맹: {game.nations[game.coalition.target].name}</span>}
         </div>
         <details className="more">
@@ -261,6 +275,20 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 </button>
                 <button onClick={() => act((s) => doBuildEngine(s, pid, selected))} disabled={me.ap < 1 || me.gold < engineCost(game, selected) || (r.engines || 0) >= ENGINE_MAX} title="포위 공격 시 성벽 피해 +1, 성벽 방어 효과 감소. 병영이 있으면 저렴">
                   🛠️ 공성병기 {r.engines || 0}/{ENGINE_MAX} ({fmtGold(engineCost(game, selected))}금·1AP)
+                </button>
+                <button
+                  className={me.rally?.to === selected ? 'primary' : ''}
+                  title="후방(국경에 닿지 않은 내 땅) 병력이 매 턴 자동으로 이곳에 모입니다. 행동력 없음, 각 지역에 1천(수도 3천)은 남김."
+                  onClick={() =>
+                    act((s) => {
+                      const n = s.nations[pid];
+                      const on = n.rally?.to === selected;
+                      n.rally = { ...(n.rally || {}), to: on ? null : selected };
+                      return { ok: true, msg: on ? '집결지를 해제했습니다.' : `${s.regions[selected].name}을(를) 집결지로 정했습니다. 턴 종료 때마다 후방 병력이 이곳으로 행군합니다.` };
+                    })
+                  }
+                >
+                  🚩 {me.rally?.to === selected ? '집결 해제' : '집결지로'}
                 </button>
                 {me.capital !== selected && (
                   <button

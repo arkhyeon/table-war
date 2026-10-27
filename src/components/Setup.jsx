@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
+import SaveSlots from './SaveSlots.jsx';
 import { SCENARIOS, canWorld, worldVariant } from '../game/scenarios.js';
 import { generateWorld, MAP_DETAIL } from '../game/mapgen.js';
 import { fmtYear } from '../game/weather.js';
@@ -20,6 +21,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [scope, setScope] = useState('region');
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
+  const [showSaves, setShowSaves] = useState(false);
   const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
@@ -27,16 +29,25 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const scn = scope === 'world' && canWorld(baseScn) ? worldVariant(baseScn) : baseScn;
   const opts = useMemo(() => ({ ...(scn.procedural ? { nationCount } : {}), histStats: rules.histStats, difficulty: rules.difficulty }), [scn, nationCount, rules.histStats, rules.difficulty]);
 
-  const world = useMemo(() => {
-    try {
-      return generateWorld(scn, seed, detail);
-    } catch (e) {
-      console.error(e);
-      return null;
-    }
+  // 지도 생성은 큰 지도에서 몇 초 걸리므로 로딩 표시를 먼저 그린 뒤 만듦
+  const [world, setWorld] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    const t = setTimeout(() => {
+      try {
+        setWorld(generateWorld(scn, seed, detail));
+      } catch (e) {
+        console.error(e);
+        setWorld(null);
+      }
+      setLoading(false);
+    }, 30);
+    return () => clearTimeout(t);
   }, [scn, seed, detail]);
 
-  const preview = useMemo(() => (world ? createGame(world, scn, seed, 0, opts) : null), [world, scn, seed, opts]);
+  const ready = world && !loading && world.scenarioId === scn.id && world.seed === seed && world.detail === detail;
+  const preview = useMemo(() => (ready ? createGame(world, scn, seed, 0, opts) : null), [ready, world, scn, seed, opts]); // eslint-disable-line react-hooks/exhaustive-deps
   const pid = preview && player < preview.nations.length ? player : 0;
 
   const start = (spectator = false) => {
@@ -59,17 +70,17 @@ export default function Setup({ onStart, onResume, hasSave }) {
             <div className="muted">역사 속 문명과 장수로 펼치는 턴제 땅따먹기 전략 게임</div>
           </div>
           {hasSave && (
-            <button
-              className="primary"
-              onClick={() => {
-                if (!onResume()) setError('저장된 게임을 불러올 수 없습니다.');
-              }}
-            >
-              ▶ 이어하기
+            <button className="primary" onClick={() => setShowSaves((v) => !v)}>
+              📂 이어하기·불러오기
             </button>
           )}
         </div>
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
+        {showSaves && (
+          <div style={{ marginTop: 12 }}>
+            <SaveSlots onLoad={(d) => { if (!onResume(d)) setError('이 저장은 불러올 수 없습니다(이전 버전).'); }} />
+          </div>
+        )}
         <h3 style={{ marginTop: 18 }}>1. 시나리오</h3>
         <h4 className="scn-head">🌍 연도별 세계사</h4>
         <div className="timeline">
@@ -163,8 +174,14 @@ export default function Setup({ onStart, onResume, hasSave }) {
         <h3>3. 국가 선택</h3>
         <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>나라 이름은 ✏️로 바꿀 수 있습니다. 장수 이름은 게임 중 장수 목록에서 바꿉니다.</p>
         <div className="setup-body">
-          <div className="preview">
-            {world && preview ? (
+          <div className="preview" style={{ position: 'relative' }}>
+            {!ready && (
+              <div className="loading">
+                <div className="spinner" />
+                지도를 만드는 중… {scn.scope === 'world' ? '(세계판은 몇 초 걸립니다)' : ''}
+              </div>
+            )}
+            {ready && preview ? (
               <MapView
                 world={world}
                 regions={preview.regions}
@@ -202,10 +219,10 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <span className="muted">
             {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
-          <button disabled={!world} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행하고, 원할 때 아무 나라로 난입">
+          <button disabled={!ready} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행하고, 원할 때 아무 나라로 난입">
             👁️ 관전으로 시작
           </button>
-          <button className="primary" disabled={!world} onClick={() => start(false)}>
+          <button className="primary" disabled={!ready} onClick={() => start(false)}>
             게임 시작 ▶
           </button>
         </div>
