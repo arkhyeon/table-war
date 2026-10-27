@@ -187,12 +187,12 @@ function upkeep(s, world) {
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
     // 대제국일수록 통치 부담: 지도 대비 영토 비율로(큰 지도에서 과하지 않게), 전 육지의 1/8마다 -1
-    // 상한 -5, 국경에 닿지 않은 후방은 +2 (내륙은 안정적)
-    const sprawl = Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8));
-    const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner) ? 2 : 0;
+    // 통치 부담은 국경 지역만 (상한 -5). 국경에 닿지 않은 내륙은 세금·보급·사건이 없으면 그대로 안정
+    const inner = world.regions[i].neighbors.every((x) => s.regions[x.id].sea || s.regions[x.id].owner === r.owner);
+    const sprawl = inner ? 0 : Math.min(5, Math.floor(((sizes[r.owner] || 0) / land) * 8));
     // 계엄: 인구 대비 대군이 주둔하면 반란은 막지만 민심 회복이 더디다
     const martial = r.troops >= r.pop * 250;
-    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty + inner - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
+    r.loyalty = Math.max(0, Math.min(100, (r.loyalty ?? 100) + 3 + tax.loyalty + garrison + isCap + w.loyalty + tv(gens, '인덕') + governorBonus(governorOf(s, i)).loyalty - (cut ? 3 : 0) - sprawl - (martial ? 1 : 0)));
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;
