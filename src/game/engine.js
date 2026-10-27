@@ -127,6 +127,8 @@ export function governorBonus(g) {
 
 // 병력 유지비는 1명 단위로 계산(2,500명당 1금), 장수 녹봉 1금
 export function income(s, nid) {
+  // 도적 무리: 세금도 유지비도 없음 (대신 매 턴 흩어짐)
+  if (s.nations[nid]?.horde) return { gross: 0, upkeep: 0, army: 0, salary: 0, admin: 0, net: 0, troops: s.regions.reduce((a, r) => a + (r.owner === nid ? r.troops : 0), 0) };
   let inc = 0, troops = 0;
   s.regions.forEach((r, i) => {
     if (r.owner !== nid) return;

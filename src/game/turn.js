@@ -116,6 +116,8 @@ function upkeep(s, world) {
     if (n.lost) n.lost = n.lost < 0.3 ? 0 : Math.round(n.lost * 0.85 * 100) / 100;
     const inc = income(s, n.id);
     let net = inc.net;
+    // 도적 무리는 매 턴 4%씩 흩어짐 (오래 버티면 저절로 약해짐)
+    if (n.horde) for (const r of s.regions) if (r.owner === n.id) r.troops = Math.max(100, Math.round((r.troops * 0.96) / 100) * 100);
     if (!n.isPlayer && inc.gross > 0) net += Math.round(inc.gross * (DIFFICULTY[s.opts?.difficulty]?.tax || 0));
     const lord = s.nations.find((o) => o.alive && isVassalOf(s, n.id, o.id));
     if (lord && inc.gross > 0) {
@@ -196,7 +198,7 @@ function upkeep(s, world) {
     if (!martial && r.loyalty < 25 && rng() < ((25 - r.loyalty) / 70) * (1 - tv(gens, '치안'))) revolt(s, world, i, rng);
     // 자원병: 민심이 높으면 스스로 입대, 나라가 위태로우면 더 많이 (민심 영향 없음)
     const minLoy = danger[r.owner] ? 40 : 60;
-    if (r.loyalty >= minLoy && !cut) {
+    if (r.loyalty >= minLoy && !cut && !s.nations[r.owner].horde) {
       const rate = (r.loyalty >= 80 ? 0.004 : 0.0025) * (danger[r.owner] ? 4 : 1) * (1 + tv(gens, '모병'));
       const v = Math.floor((r.pop * 1000 * rate) / 100) * 100;
       if (v > 0) {

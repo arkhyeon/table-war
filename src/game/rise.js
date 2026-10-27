@@ -391,7 +391,7 @@ export function spawnHorde(s, world, rng) {
   const civ = civNear(s, world, o.rids[0]);
   const lead = leaderFor(s, civ, rng);
   const n = newNation(s, civ, hordeName(s, civ, rng));
-  Object.assign(n, { horde: true, aggression: 1, color: 'hsl(25, 12%, 30%)' });
+  Object.assign(n, { horde: true, aggression: 1, color: 'hsl(25, 12%, 30%)', gold: 0 });
   seize(s, world, n, o.rids, o.mult);
   const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng, true);
   finish(s, n, king);

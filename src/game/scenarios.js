@@ -1,6 +1,6 @@
 // 시나리오: bbox = [서경, 남위, 동경, 북위]
 // 국가: [이름, 문명, 경도, 위도, 초기 지역 수, 수도명, 군주(이름|무|통|지|정|특성), 장수 풀(선택)]
-const N = (name, civ, lon, lat, size, capital, ruler, pools) => ({ name, civ, lon, lat, size, capital, ruler, pools });
+const N = (name, civ, lon, lat, size, capital, ruler, pools, power) => ({ name, civ, lon, lat, size, capital, ruler, pools, power });
 
 export const SCENARIOS = [
   {
@@ -129,7 +129,7 @@ export const SCENARIOS = [
       [220, '조조가 죽고 조비가 위나라를 세웠습니다.', '조조'],
     ],
     nations: [
-      N('조조', 'tk', 113.8, 34.0, 7, '허창', '조조|75|96|95|95|책략', ['tk_cao', 'tk_free']),
+      N('조조', 'tk', 113.8, 34.0, 7, '허창', '조조|75|96|95|95|책략', ['tk_cao', 'tk_free'], 1.5),
       N('원소', 'tk', 114.5, 36.3, 7, '업', '원소|70|85|72|78|인덕', ['tk_yuan', 'tk_free']),
       N('손권', 'tk', 119.5, 31.0, 5, '건업', '손권|67|76|80|89|인덕', ['tk_sun', 'tk_free']),
       N('유표', 'tk', 112.1, 32.0, 5, '양양', '유표|40|60|75|85|정치', ['tk_liu_biao', 'tk_free']),

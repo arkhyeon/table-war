@@ -153,7 +153,8 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
       }
     }
     const isCap = plan.find((n) => n.region === i);
-    const troops = Math.max(5, Math.round((owner[i] === null ? rng.int(20, 70) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90)) / df)) * 100;
+    // 역사적으로 강했던 나라는 power로 초기 병력 보정 (시나리오에서 지정)
+    const troops = Math.max(5, Math.round((owner[i] === null ? rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0) : rng.int(50, 90) * (plan[owner[i]].power || 1)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
       owner: owner[i],
@@ -200,7 +201,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   };
   for (const n of plan) {
     const capReg = regions[n.region];
-    capReg.troops = Math.round(((12 + n.size0 * 2) * 1000 * (n.id === playerId && !opts.spectator ? 1 : DIFFICULTY[opts.difficulty]?.troops || 1)) / 100) * 100;
+    capReg.troops = Math.round(((12 + n.size0 * 2) * 1000 * (n.power || 1) * (n.id === playerId && !opts.spectator ? 1 : DIFFICULTY[opts.difficulty]?.troops || 1)) / 100) * 100;
     capReg.loyalty = 100;
     capReg.buildings.walls = 3;
     capReg.buildings.market = 1;
