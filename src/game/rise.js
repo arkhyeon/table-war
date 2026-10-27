@@ -3,6 +3,7 @@ import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
 import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, checkElimination, canAct } from './engine.js';
 import { fmtGold } from './format.js';
+import { emptyDeal, describeDeal, applyDeal } from './diplomacy.js';
 import { colorFor } from './setup.js';
 
 // 신흥국 출현: 몰락한 왕의 부흥, 빈 땅의 봉기, 민심이 바닥난 지역의 독립
@@ -151,7 +152,7 @@ function tryRise(s, world, rng) {
 // 천운: 한 나라가 크게 앞서면 가끔(언제일지 모름) 판을 흔드는 일이 생김
 // 앞설수록 잦아짐(25%부터, 최대 턴당 10%), 한 번 일어나면 8턴은 조용
 export function fortune(s, world, rng) {
-  if (s.turn < 15 || s.opts?.noRise) return;
+  if (s.turn < 15 || s.opts?.noRise || topShare(s).share >= ENDGAME) return;
   if (s.fortuneTurn !== undefined && s.turn - s.fortuneTurn < 8) return;
   const land = s.regions.filter((r) => !r.sea).length;
   const alive = s.nations.filter((n) => n.alive);
@@ -224,8 +225,42 @@ export function fortune(s, world, rng) {
   }
 }
 
+// 통일 막바지: 한 나라(속국 포함)가 육지 80% 이상이면 새 나라·도적·천운이 더는 생기지 않고, 작은 나라들이 스스로 속국을 청함
+export function topShare(s) {
+  const land = s.regions.filter((r) => !r.sea).length;
+  let best = null, bs = 0;
+  for (const n of s.nations) {
+    if (!n.alive) continue;
+    const lord = s.nations.find((o) => o.alive && getRel(s, n.id, o.id).type === 'vassal' && getRel(s, n.id, o.id).overlord === o.id);
+    if (lord) continue;
+    const mine = s.nations.filter((m) => m.alive && (m.id === n.id || (getRel(s, m.id, n.id).type === 'vassal' && getRel(s, m.id, n.id).overlord === n.id)));
+    const sz = mine.reduce((a, m) => a + nationRegions(s, m.id).length, 0);
+    if (sz > bs) { bs = sz; best = n; }
+  }
+  return { leader: best, share: bs / land };
+}
+export const ENDGAME = 0.8;
+export function endgame(s, world, rng) {
+  const { leader, share } = topShare(s);
+  if (!leader || share < ENDGAME) return;
+  const land = s.regions.filter((r) => !r.sea).length;
+  for (const n of s.nations) {
+    if (!n.alive || n.id === leader.id || n.horde || n.fief || getRel(s, n.id, leader.id).type === 'vassal') continue;
+    if (nationRegions(s, n.id).length > Math.max(4, Math.round(share * land * 0.1)) || rng() >= 0.15) continue;
+    const deal = emptyDeal();
+    deal.treaty = 'vassal_me';
+    if (leader.isPlayer) {
+      if ((s.proposals || []).some((p) => p.from === n.id) || (s.proposals || []).length >= 2) continue;
+      (s.proposals = s.proposals || []).push({ from: n.id, deal, text: `천하의 대세가 기울었습니다. ${describeDeal(s, n.id, leader.id, deal)}` });
+    } else {
+      applyDeal(s, world, n.id, leader.id, deal);
+      log(s, `🙇 ${n.name}이(가) 대세를 받아들여 ${leader.name}의 속국이 되었습니다.`, [n.id, leader.id], 'diplo');
+    }
+  }
+}
+
 export function riseNations(s, world, rng) {
-  if (s.turn < 10 || s.opts?.noRise) return;
+  if (s.turn < 10 || s.opts?.noRise || topShare(s).share >= ENDGAME) return;
   if (rng() < 0.08 && tryRestore(s, world, rng)) return;
   if (rng() < 0.03) tryRise(s, world, rng);
 }
@@ -340,7 +375,7 @@ export function hordeName(s, civ, rng) {
   return rng.shuffle(list.slice()).find((x) => !used.has(x)) || `${rng.pick(list)} ${s.turn}`;
 }
 export function spawnHorde(s, world, rng) {
-  if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS) return;
+  if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
   if (s.nations.filter((n) => n.alive && n.horde).length >= 3 || rng() >= 0.025) return;
   const opts = [];
   for (let rid = 0; rid < s.regions.length; rid++) {

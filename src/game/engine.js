@@ -683,7 +683,18 @@ export function autoMarch(s, world, nid) {
   const ral = n.rally;
   if (!ral || (!ral.front && (ral.to === null || ral.to === undefined))) return 0;
   if (ral.to !== null && ral.to !== undefined && s.regions[ral.to].owner !== nid) ral.to = null;
-  const goals = ral.to !== null && ral.to !== undefined ? new Set([ral.to]) : ral.front ? frontierOf(s, world, nid) : new Set();
+  // 전선 자동 투입: 국경 중에서도 맞닿은 적이 내 병력보다 많은(위협받는) 곳을 우선, 없으면 모든 국경
+  let goals = new Set();
+  if (ral.to !== null && ral.to !== undefined) goals = new Set([ral.to]);
+  else if (ral.front) {
+    const front = frontierOf(s, world, nid);
+    const enemyNear = (r) => world.regions[r].neighbors.reduce((a, x) => {
+      const t = s.regions[x.id];
+      return a + (!t.sea && t.owner !== null && t.owner !== nid && getRel(s, nid, t.owner).type === 'none' ? t.troops : 0);
+    }, 0);
+    const hot = [...front].filter((r) => enemyNear(r) > s.regions[r].troops);
+    goals = new Set(hot.length ? hot : front);
+  }
   if (!goals.size) return 0;
   // 내 땅(육지·강)으로만 이어진 거리
   const dist = new Map([...goals].map((g) => [g, 0]));
@@ -695,11 +706,16 @@ export function autoMarch(s, world, nid) {
       q.push(e.id);
     }
   }
+  // 국경 지역은 맞닿은 적 병력만큼은 남김 (집결 때문에 다른 국경이 비지 않게)
+  const enemyNear = (r) => world.regions[r].neighbors.reduce((a, x) => {
+    const t = s.regions[x.id];
+    return a + (!t.sea && t.owner !== null && t.owner !== nid && getRel(s, nid, t.owner).type === 'none' ? t.troops : 0) + (!t.sea && t.owner === null ? t.troops * 0.3 : 0);
+  }, 0);
   let sent = 0;
   for (const [r, d] of dist) {
     if (d === 0) continue;
     const reg = s.regions[r];
-    const keep = n.capital === r ? RALLY_KEEP * 3 : RALLY_KEEP;
+    const keep = Math.max(n.capital === r ? RALLY_KEEP * 3 : RALLY_KEEP, Math.round(enemyNear(r) * (n.capital === r ? 1.2 : 0.9)));
     const cnt = Math.floor((Math.min(movable(s, r), reg.troops - keep)) / 100) * 100;
     if (cnt < 1000) continue;
     // 2칸 앞으로 갈 수 있으면 2칸, 아니면 1칸

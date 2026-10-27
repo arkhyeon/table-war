@@ -439,6 +439,8 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
                 strokeWidth={2.4}
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
+                data-target={kind}
+                data-target-rid={rid}
               />
             ))}
           {selected !== null && selected !== undefined && !world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
@@ -461,6 +463,8 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 stroke={kind === 'attack' ? '#ff5544' : kind === 'blocked' ? '#888' : '#ffe066'}
                 strokeWidth={2.4}
                 strokeDasharray={kind === 'blocked' ? '3 3' : undefined}
+                data-target={kind}
+                data-target-rid={rid}
               />
             ))}
           {selected !== null && selected !== undefined && world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
