@@ -5,7 +5,7 @@ import { POOLS, rating, randomStats, fairTarget, gradeScore } from './generals.j
 import { fixJosa } from './josa.js';
 import { weatherOf } from './weather.js';
 import { simulateDuel, duelist } from './duel.js';
-import { tv, initTraits, growTrait, TITLES, traitLabel } from './traits.js';
+import { tv, initTraits, growTrait, TITLES, traitLabel, MIL as MIL_TRAITS, CIV as CIV_TRAITS } from './traits.js';
 
 // ───────── 조회 헬퍼 ─────────
 export const relKey = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
@@ -126,6 +126,16 @@ export function governorBonus(g) {
 }
 
 // 병력 유지비는 1명 단위로 계산(2,500명당 1금), 장수 녹봉 1금
+// 의형제: 함께 있는 장수 중 맺어진 짝이 있나
+export const hasBond = (gens) => gens.some((g) => (g.bonds || []).some((b) => gens.some((x) => x.id === b)));
+export function makeBond(s, a, b) {
+  if (!a || !b || a.id === b.id) return;
+  a.bonds = [...new Set([...(a.bonds || []), b.id])];
+  b.bonds = [...new Set([...(b.bonds || []), a.id])];
+}
+// 명소: 이름난 고을. 가진 곳마다 나라 전체 세수 +5%
+export const landmarkBonus = (s, nid) => 1 + 0.05 * (s.landmarks || []).filter((r) => s.regions[r]?.owner === nid).length;
+
 export function income(s, nid) {
   // 도적 무리: 세금도 유지비도 없음 (대신 매 턴 흩어짐)
   if (s.nations[nid]?.horde) return { gross: 0, upkeep: 0, army: 0, salary: 0, admin: 0, net: 0, troops: s.regions.reduce((a, r) => a + (r.owner === nid ? r.troops : 0), 0) };
@@ -135,7 +145,7 @@ export function income(s, nid) {
     inc += regionTax(s, i);
     troops += r.troops;
   });
-  inc = Math.round(inc * (1 + nationTrait(s, nid, '상업')));
+  inc = Math.round(inc * (1 + nationTrait(s, nid, '상업')) * landmarkBonus(s, nid));
   // 병사 1명당 1금, 장수 녹봉 1인당 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금
   const army = Math.round(troops * (1 - nationTrait(s, nid, '병참')));
   const salary = nationGenerals(s, nid).length * G;
@@ -281,6 +291,8 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   if (attSupply < 1) mods.push(`보급 끊김 -${Math.round((1 - attSupply) * 100)}%`);
   let buffA = nationBuff(s, nid, 'att');
   if (buffA !== 1) mods.push(`특수 효과 ${buffA > 1 ? '+' : ''}${Math.round((buffA - 1) * 100)}%`);
+  // 의형제가 함께 싸우면 +10%
+  if (hasBond(att)) { buffA *= 1.1; mods.push('🤝 의형제 +10%'); }
 
   let d = 0; // 장수로 인한 방어 보정 합 (상한 적용 전)
   if (def.length) {
@@ -301,6 +313,7 @@ export function battleFactors(s, world, nid, from, to, genIds, opts = {}) {
   const capital = tr.owner !== null && !wr.sea && s.nations[tr.owner].capital === to ? 1.1 : 1;
   const defSupply = tr.owner === null || supplied(s, world, tr.owner).has(to) ? 1 : 0.8;
   let buffD = tr.owner === null ? 1 : nationBuff(s, tr.owner, 'def');
+  if (hasBond(def)) buffD *= 1.1;
   // 대동맹 연합군은 패권국을 칠 때 사기가 오름
   if (s.coalition && s.coalition.target === tr.owner && s.coalition.members?.includes(nid)) {
     buffA *= 1.1;
@@ -594,6 +607,29 @@ export function checkElimination(s, world, nid, by = null) {
 const STAT_NAME = { war: '무력', lead: '통솔', intel: '지력', pol: '정치' };
 
 // 장수 성장: 레벨마다 100×레벨 경험치. 레벨업 시 역할에 맞는 능력치 상승, 3·5·7·9레벨에 특성 획득/승급과 칭호
+// 레벨업 특성 선택: [기존 특성 승급, 새 특성] 중 가능한 것 둘
+export function traitChoices(g, rng) {
+  const cat = g.role === 'civ' ? CIV_TRAITS : MIL_TRAITS;
+  const out = [];
+  const up = g.traits.filter(([, t]) => t < 3);
+  if (up.length) { const tr = rng.pick(up); out.push({ kind: 'up', t: tr[0], lv: tr[1] + 1 }); }
+  const fresh = cat.filter((t) => !g.traits.some(([x]) => x === t));
+  if (fresh.length && g.traits.length < 4) { const t = rng.pick(fresh); out.push({ kind: 'new', t, lv: 1 }); }
+  if (up.length > 1 && out.length < 2) { const tr = rng.pick(up.filter(([x]) => x !== out[0]?.t)); out.push({ kind: 'up', t: tr[0], lv: tr[1] + 1 }); }
+  return out.length >= 2 ? out : null;
+}
+export function pickTrait(s, idx) {
+  const c = (s.levelChoices || [])[0];
+  if (!c) return fail('고를 특성이 없습니다.');
+  s.levelChoices.shift();
+  const g = s.generals[c.gid];
+  const o = c.opts[idx];
+  if (!g || !o) return { ok: true };
+  if (o.kind === 'up') { const tr = g.traits.find(([x]) => x === o.t); if (tr) tr[1] = o.lv; }
+  else g.traits.push([o.t, 1]);
+  return { ok: true, msg: `${g.name}: 「${o.t}${['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][o.lv]}」${o.kind === 'up' ? ' 승급' : ' 새 특성'}` };
+}
+
 export function gainExp(s, g, amt) {
   if (!g || g.status === 'dead') return;
   g.exp = (g.exp || 0) + Math.round(amt * (1 + nationTrait(s, g.nation, '학문')));
@@ -611,8 +647,15 @@ export function gainExp(s, g, amt) {
     });
     let extra = '';
     if ([3, 5, 7, 9].includes(g.level)) {
-      const grown = growTrait(g, rng);
-      if (grown) extra += ` · ${grown}`;
+      // 플레이어 장수는 특성 두 갈래 중 고름 (창에서), 컴퓨터는 무작위
+      const choice = s.nations[g.nation]?.isPlayer && !s.spectator ? traitChoices(g, rng) : null;
+      if (choice) {
+        (s.levelChoices = s.levelChoices || []).push({ gid: g.id, opts: choice });
+        extra += ' · 특성 선택 대기';
+      } else {
+        const grown = growTrait(g, rng);
+        if (grown) extra += ` · ${grown}`;
+      }
       const t = TITLES[g.role || 'mil'].filter(([lv]) => g.level >= lv).pop();
       if (t && t[1] !== g.title) {
         g.title = t[1];
@@ -1212,6 +1255,11 @@ export function doExecute(s, nid, gid) {
   if (s.nations[g.nation].alive) s.opinion[g.nation][nid] -= 30;
   const ruler = isRulerId(s, g.id);
   if (ruler !== null) succession(s, ruler);
+  // 의형제를 처형하면 그 형제들이 원한을 품음
+  for (const b of g.bonds || []) {
+    const x = s.generals[b];
+    if (x?.status === 'active' && x.nation === nid) x.loyalty = Math.max(0, (x.loyalty ?? 60) - 30);
+  }
   const msg = `🗡️ ${n.name}이(가) ${g.name}을(를) 처형했습니다. (평판 -4)`;
   log(s, msg, [nid, g.nation], 'general');
   return { ok: true, msg };
@@ -1357,6 +1405,9 @@ export function spawnGeneral(s, nid, rng, forced = false) {
   return gen;
 }
 
+// 역사 속 의형제·벗
+const BONDS = [['유비', '관우', '장비'], ['손책', '주유'], ['하후돈', '하후연'], ['관평', '관우'], ['김유신', '김춘추'], ['오다 노부나가', '도쿠가와 이에야스'], ['도요토미 히데요시', '마에다 도시이에'], ['칭기즈 칸', '자무카'], ['리처드 1세', '로뱅 드 로크'], ['이순신', '유성룡']];
+
 export function addGeneral(s, data, nid, region, rng, ruler = false) {
   if (!s.opts?.histStats) {
     const mine = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && g.base);
@@ -1370,6 +1421,11 @@ export function addGeneral(s, data, nid, region, rng, ruler = false) {
   const gen = { ...data, role, traits, level: 1, exp: 0, nation: nid, origin: nid, region, status: 'active', captor: null, loyalty: rng.int(55, 90), persona };
   s.generals[gen.id] = gen;
   s.usedGen[gen.id] = 1;
+  // 인연: 역사 속 의형제는 같은 나라에 있으면 맺어지고, 그 밖엔 가끔(15%) 같은 나라 장수와 의형제를 맺음
+  const mates = Object.values(s.generals).filter((x) => x.id !== gen.id && x.nation === nid && x.status === 'active');
+  const hist = BONDS.find((set) => set.includes(gen.name));
+  if (hist) for (const x of mates) if (hist.includes(x.name)) makeBond(s, gen, x);
+  if (!gen.bonds && mates.length && rng() < 0.15) makeBond(s, gen, rng.pick(mates));
   s.appearHistory[gen.id] = (s.appearHistory[gen.id] || 0) + 1;
   return gen;
 }

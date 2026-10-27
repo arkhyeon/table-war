@@ -614,7 +614,7 @@ function breakAway(s, world, host, g, rids, rng) {
   // 그 땅의 다른 장수: 절반은 따라가고 절반은 옛 주군에게 돌아감
   for (const rid of rids) for (const x of gensIn(s, rid, host)) {
     if (x.id === g.id) continue;
-    if (x.persona !== '충신' && rng() < 0.5) Object.assign(x, { nation: n.id, loyalty: 60 });
+    if ((g.bonds || []).includes(x.id) || (x.persona !== '충신' && rng() < 0.5)) Object.assign(x, { nation: n.id, loyalty: 60 });
     else x.region = H.capital ?? x.region;
   }
   delete g.order;
@@ -672,7 +672,9 @@ export function generalDrama(s, world, rng) {
     if (g.status !== 'active') continue;
     const n = s.nations[g.nation];
     if (!n?.alive || n.horde || n.ruler === g.id) continue;
-    const rep = (n.reputation - 50) / 3 + nationTrait(s, n.id, '인덕') * 5;
+    // 의형제가 같은 나라에 있으면 떠나지 않음 (+10)
+    const bro = (g.bonds || []).some((b) => s.generals[b]?.status === 'active' && s.generals[b].nation === g.nation) ? 10 : 0;
+    const rep = (n.reputation - 50) / 3 + nationTrait(s, n.id, '인덕') * 5 + bro;
     const target = g.persona === '충신' ? 100 : g.persona === '야심' ? 30 + rep : 65 + rep;
     const step = g.persona === '충신' ? 1 : 0.5;
     let loy = (g.loyalty ?? 60) + Math.max(-step, Math.min(step, target - (g.loyalty ?? 60)));

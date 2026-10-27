@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -842,6 +842,10 @@ export function HelpModal({ onClose }) {
           <li><b>장수 충성·성격</b>: 🔥야심가는 충성이 쉽게 떨어지고 🛡️충신은 점점 오릅니다. 충성 40 미만 장수는 지키던 땅을 들고 <b>영웅 봉기</b>로 독립할 수 있으니 장수 창에서 🎁포상하세요(금, 장수마다 6턴에 한 번). 평판·인덕 군주가 충성을 받쳐 줍니다.</li>
           <li><b>군주의 죽음·계승 분쟁</b>: 군주는 늙거나 전사·처형으로 죽을 수 있습니다. 큰 나라(8곳↑)에서 새 군주가 즉위하면 야심가나 충성 낮은 2인자가 왕위를 다투며 나라를 둘로 가를 수 있습니다.</li>
           <li><b>군단 명령</b>: 분봉한 군단에 ⚔️자유·🛡️수비·🎯○○ 공략을 명할 수 있습니다(국가 카드 또는 군단 땅을 눌러서).</li>
+          <li><b>명소 🏛️</b>: 이름난 큰 고을. 가진 곳마다 나라 전체 세수 +5%.</li>
+          <li><b>적의 의도</b>: 내 땅과 맞닿은 적 대군(내 수비의 1.2배↑)에 빨간 점선 화살표가 그려집니다.</li>
+          <li><b>레벨업 특성 선택</b>: 내 장수가 Lv3·5·7·9가 되면 승급·새 특성 중 고릅니다.</li>
+          <li><b>의형제 🤝</b>: 함께 싸우면 +10%, 같은 나라에 있으면 충성 +10, 봉기할 땐 함께 떠남, 형제를 처형하면 충성 -30.</li>
           <li><b>사건 카드</b>: 가끔 선택지가 있는 사건이 옵니다(흉년·혼인 동맹·기습 간언·무기 상인·명의·인재 천거 등). 역사 시나리오에는 그 시대의 역사 카드도 나옵니다.</li>
           <li><b>변방 침입</b>: 나라들 한가운데에서 먼 변방에 이민족(흉노·여진·바이킹…)이나 해적(왜구·바르바리…)이 쳐들어와 땅을 빼앗습니다. 변방국일수록 등이 위험합니다.</li>
           <li><b>후방 징병</b>: 징병 창의 「보낼 곳」에서 다른 내 지역을 고르면, 내 땅 3칸마다 1턴 걸려 그곳에 도착(🗺️ 지도에서 고르기 가능)(도착지를 잃으면 출발지로).</li>
@@ -1459,6 +1463,28 @@ export function ChoiceModal({ world, game, act }) {
           <button key={i} className={i === 0 ? 'primary' : ''} style={{ textAlign: 'left' }} onClick={() => act((s) => answerCard(s, world, i))}>
             <b>{o.label}</b>
             <div style={{ fontSize: 12, opacity: 0.85 }}>{o.desc}</div>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+// 레벨업: 특성 두 갈래 중 고르기
+export function LevelChoiceModal({ game, act }) {
+  const c = game.levelChoices[0];
+  const g = game.generals[c.gid];
+  const roman = ['', 'Ⅰ', 'Ⅱ', 'Ⅲ'];
+  return (
+    <Modal title={`🎖️ ${g?.name} Lv${g?.level} — 특성 고르기`}>
+      <div className="col" style={{ gap: 8 }}>
+        {c.opts.map((o, i) => (
+          <button key={i} className={i === 0 ? 'primary' : ''} style={{ textAlign: 'left' }} onClick={() => act((s) => pickTrait(s, i))}>
+            <b>
+              {o.kind === 'up' ? '⬆️ 승급' : '✨ 새 특성'} 「{o.t}
+              {roman[o.lv]}」
+            </b>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>{traitDesc(o.t, o.lv)}</div>
           </button>
         ))}
       </div>

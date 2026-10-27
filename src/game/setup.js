@@ -203,12 +203,20 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     const near = coasts.sort((a, b) => Math.hypot(a.cx - wr.cx, a.cy - wr.cy) - Math.hypot(b.cx - wr.cx, b.cy - wr.cy))[0];
     regions[i].name = near ? `${regions[near.id].name} 앞바다` : '먼바다';
   });
+  // 명소: 인구가 가장 많은 고을들 (서로 2칸 이상 떨어지게), 나라 수의 60%쯤
+  const landmarks = [];
+  const nearMark = (i) => landmarks.some((m) => m === i || world.regions[m].neighbors.some((x) => x.id === i || world.regions[x.id].neighbors.some((y) => y.id === i)));
+  for (const i of world.regions.map((r, k) => k).filter((k) => !world.regions[k].sea).sort((a, b) => world.regions[b].pop - world.regions[a].pop)) {
+    if (landmarks.length >= Math.max(4, Math.round(plan.length * 0.6))) break;
+    if (!nearMark(i)) landmarks.push(i);
+  }
   const s = {
     version: 5,
     scenarioId: scn.id,
     seed,
     opts,
     // 처음부터 큰 제국이 있으면 승리 기준을 그만큼 높임 (시작하자마자 이기지 않게)
+    landmarks,
     winShare: Math.min(0.9, Math.max(scn.winShare || 0.6, Math.max(...plan.map((n) => counts[n.id])) / Math.max(1, world.landCount) + 0.2)),
     df,
     turn: 1,

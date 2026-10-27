@@ -35,7 +35,7 @@ export function TraitTags({ g }) {
   ))];
 }
 
-export function GenLine({ g, extra }) {
+export function GenLine({ g, extra, game }) {
   const lv = g.level || 1;
   return (
     <div className="gen">
@@ -47,6 +47,7 @@ export function GenLine({ g, extra }) {
         </span>{' '}
         · 경험 {g.exp || 0}/{lv * 100}
       </div>
+      {g.bonds?.length > 0 && <div className="muted" style={{ fontSize: 12 }}>🤝 의형제: {game ? g.bonds.map((b) => game.generals[b]?.name).filter(Boolean).join(', ') : `${g.bonds.length}명`} (함께 싸우면 +10%)</div>}
       {extra}
     </div>
   );
@@ -277,6 +278,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
             </span>
             <span title={TERRAIN[wr.terrain].desc}>⛰️ {TERRAIN[wr.terrain].name}</span>
             {r.plain && <span title="대평야: 세금 +20%, 인구 상한 +30%">🌾 대평야</span>}
+            {(game.landmarks || []).includes(selected) && <span title="명소: 가진 나라의 전체 세수 +5%">🏛️ 명소</span>}
             <span title={w.desc}>
               {w.icon} {w.name}
             </span>
@@ -440,6 +442,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                 <GenLine
                   key={g.id}
                   g={g}
+                  game={game}
                   extra={
                     orderTo(g) ? (
                       <small className="muted">🚩 이번 턴 {game.regions[orderTo(g).to].name || '바다'}(으)로 출발 예정</small>

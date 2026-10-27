@@ -157,7 +157,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally, threats, landmarks }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
@@ -303,6 +303,17 @@ export default function MapView({ world, regions, nations, selected, targets, on
       <g key={i}>
         <path d={d} fill="none" stroke="#111" strokeWidth={s * 0.62} strokeLinecap="round" opacity={0.75} />
         <path d={d} fill="none" stroke={col} strokeWidth={s * 0.36} strokeLinecap="round" strokeDasharray={b.win ? undefined : `${s * 0.6} ${s * 0.4}`} markerEnd={`url(#${clipId}-ah)`} />
+      </g>
+    );
+  });
+  // 적의 의도: 다음 턴 쳐들어올 것 같은 적 대군 (빨간 점선)
+  const threatArrows = (threats || []).map((o) => {
+    const a = world.regions[o.from], t = world.regions[o.to];
+    const dx = t.cx - a.cx, dy = t.cy - a.cy, L = Math.hypot(dx, dy) || 1;
+    const x1 = a.cx + (dx / L) * s * 0.9, y1 = a.cy + (dy / L) * s * 0.9, x2 = t.cx - (dx / L) * s * 1.2, y2 = t.cy - (dy / L) * s * 1.2;
+    return (
+      <g key={'t' + o.from + '-' + o.to} pointerEvents="none">
+        <path d={`M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`} fill="none" stroke="#e2655a" strokeWidth={s * 0.3} strokeLinecap="round" strokeDasharray={`${s * 0.35} ${s * 0.3}`} markerEnd={`url(#${clipId}-ah)`} opacity={0.9} />
       </g>
     );
   });
@@ -476,6 +487,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
             </g>
           ))}
           {arrows}
+          {!compact && threatArrows}
           {planArrows}
           {!compact && moves && showArmy && <MoveLayer world={world} nations={nations} moves={moves} visible={(rid) => viewOf(rid) === 'visible'} outline={statics.outline} s={s} />}
           {/* 안개: 지도 전체(바다 포함)를 덮고 내가 아는 지역만 뚫음 */}
@@ -521,7 +533,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const t = known ? fmt(reg.troops) : reg.name;
               const fs = known ? s * 0.8 : s * 0.62;
               const bw = Math.max(s * 1.9, String(t).length * fs * (known ? 0.62 : 0.95) + s * 0.6);
-              const rebel = visible && reg.loyalty !== undefined && reg.owner !== null && reg.loyalty < 30;
+              const mark = landmarks?.has(r.id);
               const wx = weather ? WEATHER[weather[r.id]] : null;
               const cut = cutSet?.has(r.id);
               const gc = visible ? genCount?.[r.id] || 0 : 0;
@@ -554,7 +566,14 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       </text>
                     </g>
                   )}
-                  {rebel && <circle cx={bw / 2} cy={-s * 0.7} r={s * 0.38} fill="#e2655a" stroke="#fffdf6" strokeWidth={s * 0.1} />}
+                  {mark && (
+                    <g transform={`translate(${bw / 2 - s * 0.1},${-s * 0.95})`}>
+                      <circle r={ib * 0.55} fill="#3a2c5a" stroke="#d9c2ff" strokeWidth={s * 0.08} />
+                      <text dy={ib * 0.28} fontSize={ib * 0.72} textAnchor="middle">
+                        🏛️
+                      </text>
+                    </g>
+                  )}
                   {capitals.has(r.id) && (
                     <g transform={`translate(${-bw / 2 - s * 0.55},0)`}>
                       <circle r={ib * 0.62} fill="#2a2210" stroke="#ffd34d" strokeWidth={s * 0.1} />

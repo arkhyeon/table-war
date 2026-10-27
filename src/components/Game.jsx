@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './MapView.jsx';
 import SidePanel from './SidePanel.jsx';
-import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal } from './Modals.jsx';
+import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log } from '../game/engine.js';
@@ -270,9 +270,25 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const flashSet = useMemo(() => new Set((game.turnEvents || []).flatMap((e) => e.rids || [])), [game.turnEvents]);
   const myEvents = (game.turnEvents || []).filter((e) => e.global || e.nations.includes(pid) || e.nations.length > 3 || e.nations.some((id) => vis.has(game.nations[id]?.capital)));
 
+  // 적의 의도: 내 땅과 맞닿은, 보이는 적 대군 (내 수비보다 1.2배↑)
+  const threats = useMemo(() => {
+    if (spect || !me.alive) return [];
+    const out = [];
+    for (const r of nationRegions(game, pid)) {
+      if (game.regions[r].sea) continue;
+      for (const x of world.regions[r].neighbors) {
+        const t = game.regions[x.id];
+        if (t.sea || t.owner === null || t.owner === pid || !vis.has(x.id) || getRel(game, pid, t.owner).type !== 'none') continue;
+        if (t.troops >= 3000 && t.troops > game.regions[r].troops * 1.2) out.push({ from: x.id, to: r, k: t.troops / Math.max(1, game.regions[r].troops) });
+      }
+    }
+    return out.sort((a, b) => b.k - a.k).slice(0, 8);
+  }, [game, world, pid, vis, spect, me.alive]);
+  const landmarks = useMemo(() => new Set(game.landmarks || []), [game.landmarks]);
   const proposal = game.proposals[0];
-  const showChoice = (game.choices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
-  const showProposal = proposal && !showChoice && !modal && !replay && !game.gameOver;
+  const showLevel = (game.levelChoices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
+  const showChoice = !showLevel && (game.choices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
+  const showProposal = proposal && !showChoice && !showLevel && !modal && !replay && !game.gameOver;
 
   return (
     <div className="game">
@@ -377,6 +393,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             orders={myOrders}
             home={game.nations[pid]?.capital}
             rally={game.nations[pid]?.rally?.to}
+            threats={threats}
+            landmarks={landmarks}
             moves={game.moves}
             showArmy={game.opts?.showArmy !== false}
             onClick={onRegionClick}
@@ -507,6 +525,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       )}
       {modal?.type === 'help' && <HelpModal onClose={() => setModal(null)} />}
       {modal?.type === 'news' && <NewsModal game={game} news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
+      {showLevel && <LevelChoiceModal game={game} act={act} />}
       {showChoice && <ChoiceModal world={world} game={game} act={act} />}
       {showProposal && <ProposalModal world={world} game={game} act={act} />}
       {ask && (
