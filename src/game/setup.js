@@ -141,6 +141,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
   // 지명: 역사 지도는 실제 지명 사전에서 그 시대 이름을, 나머지는 문명 음절로 지은 이름 (역사 지도는 시드와 무관하게 고정)
   const namer = makeNamer(makeRng(`names:${scn.id}:${scn.procedural ? seed : 'fixed'}`));
   const real = world.geo ? assignRealNames(world, scn.startYear ?? 1, new Set(plan.map((n) => n.capital).filter(Boolean))) : {};
+  // 나라들의 한가운데(수도 평균)와 퍼진 정도
+  const capPts = plan.map((n) => world.regions[n.region]);
+  const mid = [capPts.reduce((a, c) => a + c.cx, 0) / capPts.length, capPts.reduce((a, c) => a + c.cy, 0) / capPts.length];
+  const spread = Math.max(1, Math.max(...capPts.map((c) => Math.hypot(c.cx - mid[0], c.cy - mid[1]))) * 1.3);
   const regions = world.regions.map((wr, i) => {
     if (wr.sea) return { name: '', sea: true, owner: null, troops: 0, pop: 0, buildings: {}, loyalty: 100 };
     const river = !!wr.river;
@@ -157,8 +161,10 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     const isCap = plan.find((n) => n.region === i);
     // 역사적으로 강했던 나라는 power로 초기 병력 보정 (시나리오에서 지정)
     // 빈 땅의 토착 세력: 대부분 4.5천~1만, 가끔(15%) 2~3배 강한 토호의 산채
+    // 변방(나라들의 한가운데에서 멀수록)일수록 최대 1.8배 강함 → 변방국이 공짜로 커지지 못하고 중앙과 맞붙게
     const strong = owner[i] === null && rng() < 0.15;
-    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) : rng.int(50, 90) * (plan[owner[i]].power || 1)) / df)) * 100;
+    const edge = owner[i] === null ? 1 + 0.8 * Math.min(1, Math.hypot(wr.cx - mid[0], wr.cy - mid[1]) / spread) : 1;
+    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
       owner: owner[i],

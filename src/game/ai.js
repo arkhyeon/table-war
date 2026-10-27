@@ -91,8 +91,9 @@ function updateGoal(s, world, nid) {
   for (const [o, base] of cand) {
     if (!hostile(s, nid, o) || getRel(s, nid, o).type !== 'none') continue;
     const theirP = Math.max(1, nationPower(s, o));
-    // 나보다 센 나라는 목표로 삼지 않음 (약한 나라부터)
-    const v = base + (myP / theirP) * 30 - (theirP > myP * 1.15 ? 35 : 0) - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
+    // 중원 나라: 약한 이웃과는 화친하고, 비슷하거나 센 맞수(국력 0.7배↑)를 목표로
+    const rival = n.heartland && s.turn <= 60 ? (theirP >= myP * 0.7 ? 40 : -25) : 0;
+    const v = base + (myP / theirP) * 30 + rival - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
     if (v > bv) { bv = v; best = o; }
   }
   n.goal = best;
@@ -532,7 +533,8 @@ export function aiDiplomacy(s, world, nid) {
   // 중원 나라는 처음부터(15턴 안) 넉넉한 금(+50%)으로 이웃과 화친을 청함
   if ((foes.length >= 3 && (s.turn < 40 || (n.lost || 0) > 0) && rng.chance(0.5)) || (n.heartland && s.turn <= 15 && foes.length >= 2)) {
     n.napTried = n.napTried || {};
-    const cand = foes.filter((o) => o !== n.goal && (n.napTried[o] ?? -99) < s.turn - 5).sort((a, b) => nationPower(s, b) - nationPower(s, a))[0];
+    // 중원 나라는 약한 이웃부터(잘 받아줌), 나머지는 센 나라부터 화친
+    const cand = foes.filter((o) => o !== n.goal && (n.napTried[o] ?? -99) < s.turn - 5).sort((a, b) => (n.heartland ? 1 : -1) * (nationPower(s, a) - nationPower(s, b)))[0];
     if (cand !== undefined) {
       n.napTried[cand] = s.turn;
       const deal = emptyDeal();
