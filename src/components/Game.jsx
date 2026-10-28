@@ -500,7 +500,15 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
               ))}
             </div>
           )}
-          <button className="primary end-turn" onClick={doEndTurn} disabled={!!game.gameOver || (!me.alive && !spect)}>
+          <button
+            className="primary end-turn"
+            onClick={() => {
+              // 행동력이 남았으면 한 번 물어봄 (실수로 넘기지 않게)
+              if (!spect && me.alive && me.ap > 0) confirmIt(`행동력이 ${me.ap} 남았습니다. 정말 턴을 끝낼까요?`, doEndTurn);
+              else doEndTurn();
+            }}
+            disabled={!!game.gameOver || (!me.alive && !spect)}
+          >
             턴 종료 ⏭
           </button>
           {!spect && me.alive && (

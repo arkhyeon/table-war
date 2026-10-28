@@ -944,6 +944,15 @@ export function HelpModal({ onClose }) {
 }
 
 export function ConfirmModal({ text, onYes, onNo }) {
+  // Enter = 확인, Esc = 취소
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); onYes(); }
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); onNo(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onYes, onNo]);
   return (
     <div className="modal-bg" style={{ zIndex: 20 }} onMouseDown={(e) => e.target === e.currentTarget && onNo()}>
       <div className="modal" style={{ width: 'min(400px, 100%)' }}>
