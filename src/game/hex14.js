@@ -112,8 +112,9 @@ function pickCities(world, grid, base) {
   // 그 밖(삼국지가 아닌 판): 큰 지역부터 도시로
   if (!/^threekingdoms/.test(base.scenarioId) || !world.geo) {
     const land = world.regions.filter((r) => !r.sea && grid.castleTile[r.id] >= 0);
-    const want = Math.max(out.length, Math.round(land.length / 4));
-    const gap = Math.max(4, Math.round(Math.sqrt(grid.region.filter((r) => r >= 0).length / want) * 0.8));
+    // 지역 4곳당 1곳, 나라가 많고 땅이 좁으면 나라마다 2~3곳은 되게
+    const want = Math.max(out.length, Math.round(land.length / 4), Math.round(base.nations.filter((n) => n.alive).length * 2.5));
+    const gap = Math.max(3, Math.round(Math.sqrt(grid.region.filter((r) => r >= 0).length / want) * 0.75));
     const order = land.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
     for (const r of order) {
       if (out.length >= want) break;
@@ -231,7 +232,7 @@ const leader = (s, u) => gensOf(s, u.gens).reduce((a, b) => (b.lead + b.war > a.
 const has = (g, t) => (g.traits || []).some(([x]) => x === t);
 export const unitStats = (s, u) => {
   const gs = gensOf(s, u.gens);
-  const best = (k) => Math.max(...gs.map((g) => g[k]));
+  const best = (k) => (gs.length ? Math.max(...gs.map((g) => g[k])) : 30); // 대장을 잃은 부대는 약함
   return { atk: 40 + best('war') * 0.4 + best('lead') * 0.6, def: 40 + best('lead') * 0.6 + best('intel') * 0.4, intel: best('intel') };
 };
 // 지휘 한도: 가장 통솔 높은 장수 8천+통솔×800, 부장은 절반씩
