@@ -316,3 +316,5 @@ details.more > .kv { margin-top: 6px; }
   .h14 .topbar { gap: 8px; font-size: 13px; padding: 4px 8px; }
 }
 .h14-day { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: #000b; color: #ffe9a8; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 15px; pointer-events: none; }
+.h14-tabs { gap: 4px; flex-wrap: wrap; }
+.h14-panel select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px; }

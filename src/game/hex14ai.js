@@ -1,10 +1,11 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (출진·공성·요격·귀환) ─────────
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14 } from './hex14.js';
+import { foodUse } from './hex14gov.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy } from './hex14.js';
 
 // 성 주변 위협: 6칸 안 적 부대 병력 합
 function threatNear(s, grid, c) {
   let t = 0;
-  for (const u of s.units) if (u.nation !== c.owner && grid.dist(u.tile, c.tile) <= 6 * grid.k) t += u.troops;
+  for (const u of s.units) if (enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 6 * grid.k) t += u.troops;
   return t;
 }
 
@@ -18,7 +19,7 @@ export function aiTurn14(s, grid, nid) {
     const home = nearestCastle(s, grid, u.tile, nid);
     if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }
     const o = u.order;
-    const bad = !o || (o.kind === 'castle' && s.castles[o.id].owner === nid && o.id !== home?.id) || (o.kind === 'unit' && !s.units.some((x) => x.id === o.id)) || (o.kind === 'tile' && !u.path.length);
+    const bad = !o || (o.kind === 'castle' && !enemy(s, nid, s.castles[o.id].owner) && o.id !== home?.id) || (o.kind === 'unit' && !s.units.some((x) => x.id === o.id)) || (o.kind === 'tile' && !u.path.length);
     if (bad || !u.path.length) {
       const t = pickTarget(s, grid, nid, u.tile, u.troops);
       if (t) order(s, grid, u, 'castle', t.id);
@@ -27,7 +28,7 @@ export function aiTurn14(s, grid, nid) {
   }
   // 2) 성에 다가온 적 부대를 요격
   for (const c of mine) {
-    const foe = s.units.filter((u) => u.nation !== nid && grid.dist(u.tile, c.tile) <= 4 * grid.k).sort((a, b) => a.troops - b.troops)[0];
+    const foe = s.units.filter((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 4 * grid.k).sort((a, b) => a.troops - b.troops)[0];
     if (!foe) continue;
     const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
     if (!gs.length || c.troops < foe.troops * 1.3 + 2000) continue;
@@ -51,7 +52,8 @@ export function aiTurn14(s, grid, nid) {
     if (r.ok) order(s, grid, r.unit, 'castle', t.id);
   }
   // 4) 징병: 금이 남으면 장수 있는 성부터 (유지비 1명당 0.5금/턴을 감당할 만큼)
-  if (n.gold > 50000) {
+  // 병량이 1년 넘게 버틸 때만 (더 뽑으면 굶음)
+  if (n.gold > 50000 && n.food > foodUse(s, nid) * 30) {
     const hub = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active')).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const per = Math.floor((n.gold - 30000) / 5 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
     for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
@@ -81,7 +83,7 @@ export function aiTurn14(s, grid, nid) {
 function pickTarget(s, grid, nid, from, troops) {
   let best = null, bv = Infinity;
   for (const c of s.castles) {
-    if (c.owner === nid) continue;
+    if (!enemy(s, nid, c.owner)) continue;
     const d = grid.dist(c.tile, from);
     if (d > 25 * grid.k) continue;
     const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
