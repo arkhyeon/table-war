@@ -297,3 +297,18 @@ details.more > .kv { margin-top: 6px; }
 .checklist .sm { background: var(--panel, #1d2128); opacity: 0.95; }
 .checklist .muted { background: rgba(0,0,0,0.45); color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 12px; align-self: center; }
 .fast-btn { position: absolute; right: 16px; bottom: 76px; z-index: 5; }
+
+/* 실시간 전장 */
+.field-bg { position: fixed; inset: 0; z-index: 60; background: #15171b; display: flex; flex-direction: column; }
+.field-top { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; font-size: 13px; gap: 8px; flex-wrap: wrap; }
+.field-map { position: relative; flex: 1; min-height: 0; touch-action: none; user-select: none; }
+.field-bottom { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; flex-wrap: wrap; font-size: 13px; }
+.field-btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.field-hint { position: absolute; left: 8px; bottom: 6px; font-size: 11px; pointer-events: none; }
+.field-over { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: 40px; font-weight: 800; color: #ffe066; text-shadow: 0 2px 8px #000; pointer-events: none; }
+.musou { background: #4a3a10; color: #ffe066; border: 1px solid #ffe06666; font-weight: 800; }
+.musou.ready { background: #ffb300; color: #1a1a1a; animation: pulse 0.8s ease-in-out infinite alternate; }
+@keyframes pulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+.joy { position: absolute; width: 90px; height: 90px; border-radius: 50%; border: 2px solid #ffffff55; background: #ffffff14; pointer-events: none; }
+.joy-k { position: absolute; left: 25px; top: 25px; width: 40px; height: 40px; border-radius: 50%; background: #ffe066aa; }
+@media (max-width: 700px) { .field-hint { display: none; } .field-top { font-size: 11px; } }

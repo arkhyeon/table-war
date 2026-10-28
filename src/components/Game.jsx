@@ -7,6 +7,7 @@ import Tutorial, { tutorialSeen } from './Tutorial.jsx';
 import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
+import FieldBattle from './FieldBattle.jsx';
 import { ACHIEVEMENTS } from '../game/achievements.js';
 import { SEASONS, seasonOf, yearOf, TURNS_PER_SEASON, fmtYear } from '../game/weather.js';
 import { spawnGeneral } from '../game/engine.js';
@@ -70,11 +71,17 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   );
 
   // 턴 종료: ① 컴퓨터 계획 ② 모든 계획을 하나씩 처리(플레이어 일기토는 창을 띄워 멈춤) ③ 마무리
-  const runResolve = (s, before, duel) => {
-    let first = duel;
+  const runResolve = (s, before, duel, field) => {
+    let first = duel, fieldRes = field;
     for (let k = 0; k < 5000; k++) {
-      const r = resolveStep(s, world, first);
+      const r = resolveStep(s, world, first, fieldRes);
       first = undefined;
+      fieldRes = undefined;
+      if (r.needField) {
+        setGame(s);
+        setModal({ type: 'field', ...r.needField, pending: s, before });
+        return;
+      }
       if (r.needDuel) {
         setGame(s);
         setModal({ type: 'duel', ...r.needDuel, pending: s, before });
@@ -591,6 +598,25 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           }}
         />
       )}
+      {modal?.type === 'field' && (() => {
+        const s0 = modal.pending;
+        const tr = s0.regions[modal.to];
+        const owner = tr.owner === null ? null : s0.nations[tr.owner];
+        return (
+          <FieldBattle
+            att={{ name: s0.nations[pid].name, color: s0.nations[pid].color, troops: modal.count, hero: s0.generals[modal.heroId], mult: modal.attMult }}
+            def={{ name: owner ? owner.name : tr.bandit || '토착 세력', color: owner ? owner.color : '#8a7a66', troops: Math.max(500, modal.defTroops), hero: modal.enemyHeroId !== null ? s0.generals[modal.enemyHeroId] : null, mult: modal.defMult }}
+            terrain={modal.terrain}
+            walls={modal.walls}
+            onFinish={(res) => {
+              const m = modal;
+              const s = structuredClone(m.pending);
+              setModal(null);
+              runResolve(s, m.before, undefined, res);
+            }}
+          />
+        );
+      })()}
       {modal?.type === 'takeover' && <TakeoverModal game={game} onPick={takeOver} onClose={() => setModal(null)} />}
       {modal?.type === 'god' && <GodModal game={game} onGift={gift} onClose={() => setModal(null)} />}
       {modal?.type === 'plot' && <PlotModal world={world} game={game} rid={modal.rid} act={act} onClose={() => setModal(null)} />}
