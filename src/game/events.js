@@ -78,7 +78,7 @@ const EVENTS = [
   {
     w: 2,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde));
       const g = (80 + rng.int(0, 120)) * G;
       n.gold += g;
       announce(s, { icon: '⛏️', title: '금광 발견', story: `${n.name}의 산중에서 금맥이 발견되었습니다.`, effect: `${n.name} 국고 +${fmtGold(g)}금`, nations: [n.id] });
@@ -87,7 +87,7 @@ const EVENTS = [
   {
     w: 2,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive && nationRegions(s, x.id).some((r) => s.regions[r].buildings.port)));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde && nationRegions(s, x.id).some((r) => s.regions[r].buildings.port)));
       if (!n) return;
       const ports = nationRegions(s, n.id).filter((r) => s.regions[r].buildings.port).length;
       const g = ports * 40 * G;
@@ -98,7 +98,7 @@ const EVENTS = [
   {
     w: 2,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde));
       const regs = nationRegions(s, n.id);
       const coast = regs.filter((r) => w.regions[r].coastal);
       if (!coast.length) return;
@@ -112,7 +112,7 @@ const EVENTS = [
   {
     w: 2,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde));
       // 수도에서 가장 먼 땅에 도적이 들끓음
       const cap = n.capital !== null ? w.regions[n.capital] : null;
       const regs = nationRegions(s, n.id).filter((r) => !s.regions[r].sea);
@@ -135,7 +135,7 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde));
       const g = (30 + nationRegions(s, n.id).length * 4) * G;
       n.gold += g;
       announce(s, { icon: '🎉', title: '태평성대', story: `${n.name} 곳곳에서 풍악이 울립니다.`, effect: `국고 +${fmtGold(g)}금`, nations: [n.id] });
@@ -144,7 +144,7 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive && x.capital !== null));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde && x.capital !== null));
       const r = s.regions[n.capital];
       if (!r.buildings.market) return;
       r.buildings.market = 0;
@@ -154,7 +154,7 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive && nationGenerals(s, x.id).length));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde && nationGenerals(s, x.id).length));
       if (!n) return;
       const g = rng.pick(nationGenerals(s, n.id));
       gainExp(s, g, 80);
@@ -164,12 +164,13 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive && x.reputation < 45));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde && x.reputation < 45));
       if (!n) return;
       const g = nationGenerals(s, n.id).filter((x) => x.id !== n.ruler && x.loyalty < 65).sort((a, b) => a.loyalty - b.loyalty)[0];
       if (!g) return;
-      const others = s.nations.filter((x) => x.alive && x.id !== n.id && x.capital !== null);
+      const others = s.nations.filter((x) => x.alive && x.id !== n.id && x.capital !== null && !x.horde);
       const to = rng.pick(others);
+      if (!to) return;
       g.nation = to.id;
       g.region = to.capital;
       g.loyalty = 55;
@@ -179,7 +180,7 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive && x.gold >= 80 * G && x.capital !== null));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde && x.gold >= 80 * G && x.capital !== null));
       if (!n) return;
       const troops = 8000;
       n.gold -= 60 * G;
@@ -200,7 +201,7 @@ const EVENTS = [
   {
     w: 1,
     run: (s, w, rng) => {
-      const n = rng.pick(s.nations.filter((x) => x.alive));
+      const n = rng.pick(s.nations.filter((x) => x.alive && !x.horde));
       let sum = 0;
       for (const r of nationRegions(s, n.id)) {
         const reg = s.regions[r];
