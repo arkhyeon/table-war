@@ -335,16 +335,16 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
         mine.push(add);
       }
     }
-    n.gold = Math.round(n.gold * 1.5); // 넉넉한 금으로 초반 외교
+    n.gold = Math.round(n.gold * 2.5); // 넉넉한 금으로 초반 외교·징병
     for (const i of mine) {
       const r = s.regions[i];
       r.plain = true;
       r.home = n.id; // 중원 본토: 지킬 때 결집 보너스
-      r.pop = Math.round(r.pop * 1.3 * 10) / 10;
-      r.troops = Math.round((r.troops * 1.25) / 100) * 100;
+      r.pop = Math.round(r.pop * 1.5 * 10) / 10;
+      r.troops = Math.round((r.troops * 1.6) / 100) * 100;
     }
-    for (let q = 0; q < 2; q++) spawnGeneral(s, n.id, rng, true);
-    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +2, 병력 +25%, 시작 땅이 대평야(세금 +20%·인구 +30%)입니다.`, nations: [n.id], kind: 'info' });
+    for (let q = 0; q < 3; q++) spawnGeneral(s, n.id, rng, true);
+    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +3, 병력 +60%, 금 2.5배, 시작 땅이 대평야(세금 +20%·인구 +50%)입니다.`, nations: [n.id], kind: 'info' });
   }
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다.${scn.procedural ? ` (시드: ${seed})` : ''}`, nations: [playerId], kind: 'info' });
   return s;

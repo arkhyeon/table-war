@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, frontsOf } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -101,9 +101,7 @@ function updateGoal(s, world, nid) {
     const theirP = Math.max(1, nationPower(s, o));
     // 중원 나라: 약한 이웃과는 화친하고, 비슷하거나 센 맞수(국력 0.7배↑)를 목표로
     const rival = n.heartland && s.turn <= 60 ? (theirP >= myP * 0.7 ? 40 : -25) : 0;
-    // 이미 여러 나라에게 몰매 맞는 나라에는 덜 끼어듦 (결사항전으로 손해가 큼)
-    const pile = Math.max(0, frontsOf(s, o, nid) - 1) * 18;
-    const v = base + (myP / theirP) * 30 + rival - pile - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
+    const v = base + (myP / theirP) * 30 + rival - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
     if (v > bv) { bv = v; best = o; }
   }
   n.goal = best;

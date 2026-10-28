@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, draftMax, manpower, DRAFT_GOLD, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, draftBase, draftAfford, DRAFT_GOLD, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -863,7 +863,7 @@ export function HelpModal({ onClose }) {
           <li><b>지출</b>: 병사 1명당 1금/턴, 장수 녹봉 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금. 국고가 바닥나면 탈영.</li>
           <li><b>부대 (삼국지14식)</b>: 지역을 눌러 ⚔️출진 → 장수와 병력을 고르면 지도에 부대 말이 생깁니다. 부대 말을 누르고 목적지를 누르면 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다(불리하면 국경에서 대기, ⚔️무리해서 공격 가능). 지역 패널에서 ➕보충·⏹멈춤·🏠귀환.</li>
           <li><b>계략 🧠</b>: 지역 패널의 🧠계략 — 화계(맞닿은 적 땅 병력 -15~25%)·유언비어(적 장수 충성 -15)·매복(이번 턴 수비 +25%). 지력 50↑ 장수, 장수마다 턴에 한 번, 행동력 1.</li>
-          <li><b>병력 상한</b>: 나라 인구의 35%까지만 병사를 둘 수 있습니다(징병·자원병). 땅을 넓히거나 인구가 늘어야 더 뽑습니다.</li>
+          <li><b>징병</b>: 지도에서 내 땅 여러 곳을 골라 슬라이더로 인원을 정하면 처음 고른 곳으로 모입니다. 인구 상한 없이 금(1명당 5금)이 닿는 만큼, 대신 뽑은 땅은 인구가 줄어 세수가 떨어지고 병사마다 유지비 1금/턴. <b>자원병</b>: 순수입이 흑자인 나라의 보급된 땅마다 매 턴 100명(병영 2배, 위기 3배).</li>
           <li><b>⏩ 빠른 진행·체크리스트</b>: 내게 일이 생길 때까지 자동으로 턴을 넘기고, 지도 왼쪽 위에 이번 턴 챙길 것을 보여 줍니다.</li>
           <li><b>요격·협공</b>: 공격받는 땅과 맞닿은 같은 나라 땅에 장수가 있으면 그 부대가 달려와 함께 싸웁니다(병력 절반). 한 턴에 두 곳 이상에서 같은 땅을 치면 협공 +15%. 적 부대도 지도에 부대 말로 보입니다.</li>
           <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(4천+통솔×300, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
@@ -1457,63 +1457,70 @@ function SowBox({ game, act }) {
   );
 }
 
-// 징병: 지도에서 고른 지역마다 슬라이더로 인원을 정해 그 자리에서 뽑음 (행동력 2, 한 턴 1회)
+// 징병: 지도에서 고른 지역마다 슬라이더로 인원을 정해 뽑고, 처음 고른 지역으로 모음 (행동력 2, 한 턴 1회)
+// 인구 상한 없음 — 금(1명당 5금)이 닿는 만큼. 뽑은 땅은 인구가 줄어 세수가 떨어짐
 export function DraftModal({ world, game, act, onClose, init = {}, onPickRegions, onPickDest }) {
   const pid = game.playerId;
   const me = game.nations[pid];
+  const ok = (rid) => game.regions[rid]?.owner === pid && !game.regions[rid].sea;
+  const [order, setOrder] = useState(() => (init.order || (init.rid != null ? [init.rid] : [])).filter(ok));
   const [want, setWant] = useState(() => {
-    if (init.picks) return init.picks;
-    const o = {};
-    if (init.rid != null && draftMax(game, pid, init.rid) >= 100) o[init.rid] = draftMax(game, pid, init.rid);
+    const o = { ...(init.picks || {}) };
+    for (const r of order) if (o[r] === undefined) o[r] = draftBase(game, pid, r);
     return o;
   });
+  const [stay, setStay] = useState(!!init.stay);
   const [dest, setDest] = useState(init.dest ?? null);
-  const room = manpower(game, pid).room;
-  const rows = Object.keys(want).map(Number).filter((rid) => draftMax(game, pid, rid) >= 100).map((rid) => ({ rid, max: draftMax(game, pid, rid) }));
-  const men = rows.reduce((a, o) => a + (want[o.rid] || 0), 0);
+  const afford = draftAfford(game, pid);
+  const men = order.reduce((a, r) => a + (want[r] || 0), 0);
   const gold = men * DRAFT_GOLD;
-  const over = men > room;
-  const dist = useMemo(() => (dest !== null ? ownDistances(game, world, pid, dest) : null), [game, world, pid, dest]);
-  const far = dist ? Math.max(0, ...rows.filter((o) => o.rid !== dest && dist.has(o.rid)).map((o) => dist.get(o.rid))) : 0;
+  const target = stay ? null : dest ?? order[0] ?? null;
+  const dist = useMemo(() => (target !== null ? ownDistances(game, world, pid, target) : null), [game, world, pid, target]);
+  const far = dist ? Math.max(0, ...order.filter((r) => r !== target && dist.has(r)).map((r) => dist.get(r))) : 0;
+  const cut = dist ? order.filter((r) => r !== target && !dist.has(r)).length : 0;
   const base = draftCheck(game, pid);
-  const err = base || (!men ? '징병할 지역을 고르고 인원을 정하세요.' : over ? `병력 상한까지 ${fmtTroops(room)}만 더 뽑을 수 있습니다.` : me.gold < gold ? '금이 부족합니다.' : null);
-  const all = () => { const o = {}; for (const r of nationRegions(game, pid)) { const m = draftMax(game, pid, r); if (m >= 100) o[r] = m; } setWant(o); };
+  const err = base || (!men ? '징병할 지역을 고르고 인원을 정하세요.' : me.gold < gold ? '금이 부족합니다.' : null);
+  const remove = (r) => { setOrder(order.filter((x) => x !== r)); const w = { ...want }; delete w[r]; setWant(w); };
+  const state = () => ({ picks: want, order, stay, dest });
   return (
     <Modal title="💂 징병" onClose={onClose} wide>
       <div className="col">
         <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-          {onPickRegions && <button className="sm primary" onClick={() => onPickRegions(want, dest)}>🗺️ 지도에서 지역 고르기</button>}
-          <button className="sm" onClick={all}>모든 내 땅</button>
-          <button className="sm" onClick={() => setWant({})}>비우기</button>
-          <small className="muted">지역마다 최대 인구의 4%(병영 8%) · 1명당 {DRAFT_GOLD}금 · 더 뽑을 수 있는 병력 {fmtTroops(room)}</small>
+          {onPickRegions && <button className="sm primary" onClick={() => onPickRegions(state())}>🗺️ 지도에서 지역 고르기</button>}
+          <button className="sm" onClick={() => { setOrder([]); setWant({}); }}>비우기</button>
+          <small className="muted">1명당 {DRAFT_GOLD}금 · 금으로 최대 {fmtTroops(afford)} · 뽑은 만큼 그 땅 인구가 줄어 세수가 떨어집니다</small>
         </div>
         <div className="col" style={{ maxHeight: '42vh', overflow: 'auto', gap: 4 }}>
-          {!rows.length && <div className="muted">아직 고른 지역이 없습니다. 지도에서 징병할 내 땅을 골라 주세요.</div>}
-          {rows.map((o) => (
-            <div key={o.rid} className="row" style={{ gap: 8, fontSize: 13 }}>
-              <span style={{ width: 120 }}>{game.regions[o.rid].name}{game.regions[o.rid].buildings.barracks ? ' 🏕️' : ''}</span>
-              <Slider min={0} max={o.max} step={100} value={want[o.rid] || 0} onChange={(v) => setWant({ ...want, [o.rid]: v })} style={{ flex: 1 }} />
-              <span style={{ width: 120, textAlign: 'right' }}>{fmtTroops(want[o.rid] || 0)} / {fmtTroops(o.max)}</span>
-              <button className="sm" onClick={() => setWant({ ...want, [o.rid]: o.max })}>최대</button>
-              <button className="sm" onClick={() => { const w = { ...want }; delete w[o.rid]; setWant(w); }}>✕</button>
-            </div>
-          ))}
+          {!order.length && <div className="muted">아직 고른 지역이 없습니다. 지도에서 징병할 내 땅을 골라 주세요. 처음 고른 곳으로 병사가 모입니다.</div>}
+          {order.map((r, i) => {
+            const max = Math.max(want[r] || 0, afford - (men - (want[r] || 0)));
+            return (
+              <div key={r} className="row" style={{ gap: 8, fontSize: 13 }}>
+                <span style={{ width: 130 }}>{i === 0 && !stay && dest === null ? '🚩 ' : ''}{game.regions[r].name} <small className="muted">인구 {game.regions[r].pop}천</small></span>
+                <Slider min={0} max={Math.max(100, max)} step={100} value={want[r] || 0} onChange={(v) => setWant({ ...want, [r]: v })} style={{ flex: 1 }} />
+                <span style={{ width: 90, textAlign: 'right' }}>{fmtTroops(want[r] || 0)}</span>
+                <button className="sm" onClick={() => setWant({ ...want, [r]: Math.max(0, max) })}>최대</button>
+                <button className="sm" onClick={() => remove(r)}>✕</button>
+              </div>
+            );
+          })}
         </div>
         <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-          <span>뽑은 병사</span>
-          <button className={'sm' + (dest === null ? ' primary' : '')} onClick={() => setDest(null)}>뽑은 자리에 둠</button>
-          {onPickDest && <button className={'sm' + (dest !== null ? ' primary' : '')} onClick={() => onPickDest(want)}>🗺️ 한 곳으로 모으기{dest !== null ? ` → ${game.regions[dest].name}` : ''}</button>}
-          {dest !== null && <small className="muted">내 땅 3칸에 1턴 (가장 먼 곳 {reinforceTurns(far)}턴)</small>}
+          <span>모일 곳</span>
+          <button className={'sm' + (!stay && dest === null ? ' primary' : '')} onClick={() => { setStay(false); setDest(null); }}>🚩 처음 고른 곳{order[0] != null ? ` (${game.regions[order[0]].name})` : ''}</button>
+          {onPickDest && <button className={'sm' + (!stay && dest !== null ? ' primary' : '')} onClick={() => onPickDest(state())}>🗺️ 다른 곳{dest !== null ? ` → ${game.regions[dest].name}` : ''}</button>}
+          <button className={'sm' + (stay ? ' primary' : '')} onClick={() => setStay(true)}>뽑은 자리에 둠</button>
+          {target !== null && order.length > 1 && <small className="muted">내 땅 3칸에 1턴 (가장 먼 곳 {reinforceTurns(far)}턴){cut > 0 && ` · 길이 이어지지 않은 ${cut}곳은 제자리`}</small>}
         </div>
         <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <span className="muted">합계 <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {DRAFT_AP}</span>
+          <span className="muted">합계 <b>{fmtTroops(men)}</b> · 금 {fmtGold(gold)} · 행동력 {DRAFT_AP} · 유지비 +{fmtGold(men)}/턴</span>
           {err && <small style={{ color: 'var(--danger)' }}>{err}</small>}
           <button onClick={onClose}>취소</button>
           <button
             className="primary"
             disabled={!!err}
             onClick={() => {
-              const res = act((s) => doDraft(s, pid, world, dest, rows.map((o) => ({ rid: o.rid, amt: want[o.rid] || 0 }))));
+              const res = act((s) => doDraft(s, pid, world, target, order.map((r) => ({ rid: r, amt: want[r] || 0 }))));
               if (res?.ok) onClose();
             }}
           >

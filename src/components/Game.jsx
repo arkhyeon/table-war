@@ -4,7 +4,7 @@ import SidePanel from './SidePanel.jsx';
 import { MoveModal, DiplomacyModal, GeneralsModal, HelpModal, ProposalModal, NewsModal, GameOverModal, ConfirmModal, DuelModal, BattleReplay, ChronicleModal, TakeoverModal, GodModal, SaveModal, LoyaltyModal, BribeModal, FiefModal, CallModal, DisbandModal, DraftModal, ChoiceModal, LevelChoiceModal, FormArmyModal, PlotModal } from './Modals.jsx';
 import { endTurn, endTurnPlan, endTurnFinish, playerStat } from '../game/turn.js';
 import Tutorial, { tutorialSeen } from './Tutorial.jsx';
-import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck, draftMax } from '../game/engine.js';
+import { edgeBetween, income, gensIn, supplied, nationRegions, moveCheck, getRel, movable, resolveStep, cancelOrder, marchVia, autoMarch, log, armyMarch, setArmyTarget, syncArmies, commandCap, draftCheck } from '../game/engine.js';
 import { visibleSet, viewOf, troopsShown, updateExplored } from '../game/fog.js';
 import { duelist } from '../game/duel.js';
 import { ACHIEVEMENTS } from '../game/achievements.js';
@@ -585,27 +585,22 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
           init={modal.init}
           act={act}
           onClose={() => setModal(null)}
-          onPickRegions={(picks, dest) => {
-            const back = () => setModal({ type: 'draft', init: { picks, dest } });
+          onPickRegions={(st) => {
             setModal(null);
             setSheet(false);
-            const valid = new Set(nationRegions(game, pid).filter((r) => draftMax(game, pid, r) >= 100));
+            const valid = new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea));
             setPick({
-              hint: '징병할 내 땅을 누르세요 (다시 누르면 빠짐)',
+              hint: '징병할 내 땅을 누르세요 (처음 누른 곳으로 모임, 다시 누르면 빠짐)',
               valid,
-              chosen: new Set(Object.keys(picks).map(Number).filter((r) => valid.has(r))),
-              onCancel: back,
-              onPick: (set) => {
-                const o = {};
-                for (const r of set) o[r] = picks[r] ?? draftMax(game, pid, r);
-                setModal({ type: 'draft', init: { picks: o, dest } });
-              },
+              chosen: new Set(st.order.filter((r) => valid.has(r))),
+              onCancel: () => setModal({ type: 'draft', init: st }),
+              onPick: (set) => setModal({ type: 'draft', init: { ...st, order: [...set] } }),
             });
           }}
-          onPickDest={(picks) => {
+          onPickDest={(st) => {
             setModal(null);
             setSheet(false);
-            setPick({ hint: '징병한 병사들을 모을 내 땅을 누르세요', valid: new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea)), onCancel: () => setModal({ type: 'draft', init: { picks } }), onPick: (d) => setModal({ type: 'draft', init: { picks, dest: d } }) });
+            setPick({ hint: '징병한 병사들을 모을 내 땅을 누르세요', valid: new Set(nationRegions(game, pid).filter((r) => !game.regions[r].sea)), onCancel: () => setModal({ type: 'draft', init: st }), onPick: (d) => setModal({ type: 'draft', init: { ...st, stay: false, dest: d } }) });
           }}
         />
       )}

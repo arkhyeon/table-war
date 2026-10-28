@@ -2,7 +2,7 @@ import { stateRng } from './rng.js';
 import { TERRAIN, DIFFICULTY } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { aiActions, aiDiplomacy, aiPrisoners } from './ai.js';
-import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, buildResolveQueue, resolveAll, arriveReinforcements, syncArmies, manpower, desperate } from './engine.js';
+import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, nationRegions, gensIn, checkElimination, supplied, WALL_MAX, nationPower, gainExp, landCount, nationTrait, buildResolveQueue, resolveAll, arriveReinforcements, syncArmies } from './engine.js';
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
@@ -137,9 +137,9 @@ function upkeep(s, world) {
     n.lastCount = count;
   }
   const volunteers = {};
-  // 병력 상한까지 남은 인원 (자원병도 이 안에서)
-  const room = {};
-  for (const n of s.nations) if (n.alive) room[n.id] = manpower(s, n.id).room;
+  // 자원병은 먹고살 만한 나라(순수입 흑자)에만 모임 — 위기 때는 적자여도
+  const fed = {};
+  for (const n of s.nations) if (n.alive) fed[n.id] = income(s, n.id).net > 0;
   const supply = {};
   for (const n of s.nations) if (n.alive) supply[n.id] = supplied(s, world, n.id);
   for (let i = 0; i < s.regions.length; i++) {
@@ -170,13 +170,12 @@ function upkeep(s, world) {
     // 보급이 끊긴 지역: 병력 1~10% 감소
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
-    // 자원병: 보급이 이어진 땅에서 매 턴 조금씩, 나라가 위태로우면 4배 (병영 2배, 인덕·모병 장수)
-    if (!cut && !s.nations[r.owner].horde && (room[r.owner] ?? 0) > 0) {
-      const rate = 0.003 * (danger[r.owner] || desperate(s, r.owner) ? 4 : 1) * (1 + tv(gens, '모병') + tv(gens, '인덕') * 0.2) * (r.buildings.barracks ? 2 : 1);
-      const v = Math.floor((r.pop * 1000 * rate) / 100) * 100;
+    // 자원병: 보급이 이어진 땅마다 매 턴 100명, 나라가 위태로우면 3배 (병영 2배, 인덕·모병 장수). 인구와 무관
+    if (!cut && !s.nations[r.owner].horde && (fed[r.owner] || danger[r.owner])) {
+      const mult = (danger[r.owner] ? 3 : 1) * (1 + tv(gens, '모병') + tv(gens, '인덕') * 0.2) * (r.buildings.barracks ? 2 : 1);
+      const v = Math.round((100 * mult) / (s.df || 1) / 100) * 100;
       if (v > 0) {
         r.troops += v;
-        room[r.owner] -= v;
         volunteers[r.owner] = (volunteers[r.owner] || 0) + v;
       }
     }
