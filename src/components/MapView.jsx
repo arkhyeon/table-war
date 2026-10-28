@@ -346,6 +346,14 @@ export default function MapView({ world, regions, nations, selected, targets, on
   };
   const click = (rid, e) => {
     if (drag.current?.moved) return;
+    // 멀리서 작은 땅을 누르면 그쪽으로 2배 확대 (좁은 곳이 다닥다닥 붙어 누르기 힘들지 않게)
+    const r = world.regions[rid];
+    if (!compact && (world.W / vb[2]) * (r.mk || 1) < 0.95)
+      setVb(([, , w, h]) => {
+        // 그 땅이 자세히 보일 만큼(배율×크기 1.8) 확대
+        const nw = Math.max(minW, Math.min(w, (world.W * (r.mk || 1)) / 1.9)), nh = nw * (h / w);
+        return [r.cx - nw / 2, r.cy - nh / 2, nw, nh];
+      });
     onClick?.(rid, e);
   };
   const context = (rid, e) => {
@@ -402,6 +410,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
     );
   });
   const zoomed = vb[2] < world.W * 0.55;
+  const zl = world.W / vb[2]; // 확대 배율
   const viewOf = (rid) => (view ? view(rid) : 'visible');
   const fogKey = view ? world.regions.map((r) => viewOf(r.id)[0]).join('') : '';
   const fog = useMemo(() => {
@@ -613,14 +622,19 @@ export default function MapView({ world, regions, nations, selected, targets, on
                 );
               const army = showArmy && own !== null && known && reg.troops > 0;
               const ib = s * 0.95; // 아이콘 배지 크기
+              // 땅마다 '확대 배율 × 땅 크기'로 얼마나 자세히 그릴지 정함 (작은 땅은 더 확대해야 자세히)
+              //  0.95↑ 병사 그림 · 1.8↑ 이름·날씨·건물·깃발 (고른 땅은 항상 자세히)
+              const eff = zl * (r.mk || 1);
+              const tiny = eff < 0.95 && selected !== r.id;
+              const full = eff >= 1.8 || selected === r.id;
               return (
                 <g key={r.id} transform={`translate(${r.cx},${r.cy})${r.mk < 1 ? ` scale(${r.mk.toFixed(2)})` : ''}`}>
-                  {army && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.72} y={-s * 0.85} />}
+                  {army && (full || !tiny) && <Army tier={armyTier(reg.troops)} color={col} u={s * 0.72} y={-s * 0.85} />}
                   <rect x={-bw / 2} y={-s * 0.8} width={bw} height={s * 1.6} rx={s * 0.8} fill={known ? '#fffdf6' : '#e9e4d6'} stroke={col} strokeWidth={s * 0.22} />
                   <text textAnchor="middle" dy={fs * 0.36} fontSize={fs} fontWeight="700" fill={known ? '#1d1d1d' : '#55524a'}>
                     {t}
                   </text>
-                  {wx && wx.icon && (
+                  {wx && wx.icon && full && (
                     <g transform={`translate(${-bw / 2 - s * 0.15},${-s * 0.85})`}>
                       <circle r={ib * 0.62} fill="#1d2a36" stroke="#fffdf6" strokeWidth={s * 0.08} opacity={0.92} />
                       <text dy={ib * 0.3} fontSize={ib * 0.85} textAnchor="middle">
@@ -636,7 +650,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       </text>
                     </g>
                   )}
-                  {mark && (
+                  {mark && (full || !tiny) && (
                     <g transform={`translate(${bw / 2 - s * 0.1},${-s * 0.95})`}>
                       <circle r={ib * 0.55} fill="#3a2c5a" stroke="#d9c2ff" strokeWidth={s * 0.08} />
                       <text dy={ib * 0.28} fontSize={ib * 0.72} textAnchor="middle">
@@ -652,7 +666,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       </text>
                     </g>
                   )}
-                  {gc > 0 && !(armies || []).some((a) => a.enemy && a.rid === r.id) && (
+                  {gc > 0 && (full || !tiny) && !(armies || []).some((a) => a.enemy && a.rid === r.id) && (
                     <g transform={`translate(${bw / 2 + s * 0.35},${-s * 0.2})`}>
                       {/* 군단 깃발: 대장 이름 첫 글자, 장수가 여럿이면 수 */}
                       <line y1={s * 0.9} y2={-s * 1.3} stroke="#3b2b1a" strokeWidth={s * 0.14} strokeLinecap="round" />
@@ -667,7 +681,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       )}
                     </g>
                   )}
-                  {icons.length > 0 && (
+                  {icons.length > 0 && (full || (!tiny && icons.length <= 2)) && (
                     <g transform={`translate(0,${s * 1.55})`}>
                       <rect x={(-icons.length * ib) / 2 - s * 0.15} y={-ib * 0.55} width={icons.length * ib + s * 0.3} height={ib * 1.1} rx={ib * 0.45} fill="#fffdf6" stroke={col} strokeWidth={s * 0.1} opacity={0.95} />
                       {icons.map((ic, k) => (
@@ -677,7 +691,7 @@ export default function MapView({ world, regions, nations, selected, targets, on
                       ))}
                     </g>
                   )}
-                  {zoomed && known && (
+                  {full && known && (
                     <text dy={army ? -s * 2.4 : -s * 1.25} fontSize={s * 0.66} textAnchor="middle" fill="#fffdf6" stroke="#15171b" strokeWidth={s * 0.22} paintOrder="stroke" fontWeight="600">
                       {reg.name}
                     </text>
@@ -709,25 +723,32 @@ export default function MapView({ world, regions, nations, selected, targets, on
         {/* 부대 말: 누르면 고르고, 지도에서 목적지를 누르면 진군 */}
         {!compact && (armies || []).length > 0 && (
           <g>
-            {(armies || []).map((a, k) => {
+            {(armies || []).map((a) => {
               const r = world.regions[a.rid];
               const same = armies.filter((b) => b.rid === a.rid);
               const idx = same.indexOf(a);
-              const x = r.cx + s * 1.4 + idx * s * 2.6, y = r.cy - s * 1.6;
               const on = selArmy === a.id;
+              // 멀리서는 작은 말만 (땅 크기에 맞춰), 확대하거나 고르면 이름·병력까지
+              const big = on || zl * (r.mk || 1) >= 1.8;
+              const k = big ? 1 : Math.max(0.45, Math.min(1, r.mk || 1) * 0.7);
+              const x = r.cx + s * 1.4 * k + idx * s * 2.6 * k, y = r.cy - s * 1.6 * k;
               const tgt = a.target != null ? world.regions[a.target] : null;
               return (
                 <g key={a.id}>
                   {tgt && <path d={`M${x} ${y}L${tgt.cx} ${tgt.cy}`} stroke={a.color} strokeWidth={s * 0.18} strokeDasharray={`${s * 0.3} ${s * 0.3}`} opacity={0.75} pointerEvents="none" />}
-                  <g transform={`translate(${x},${y})`} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onArmy?.(a.id); }}>
+                  <g transform={`translate(${x},${y}) scale(${k})`} style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); onArmy?.(a.id); }}>
                     <circle r={s * 1.35} fill={on ? '#ffe066' : a.enemy ? '#3a2a24' : '#fffdf6'} stroke={on ? '#ff9a3c' : a.color} strokeWidth={s * (on ? 0.35 : 0.22)} opacity={0.95} />
                     <g transform={`translate(${-s * 0.35},${s * 0.75})`}>
                       <Rider u={s * 0.5} color={a.color} />
                     </g>
-                    <rect x={-s * 1.6} y={s * 1.15} width={s * 3.2} height={s * 1.15} rx={s * 0.5} fill={a.color} stroke="#1a1a1a" strokeWidth={s * 0.08} />
-                    <text y={s * 1.98} fontSize={s * 0.72} textAnchor="middle" fill="#fff" fontWeight="800" stroke="#1a1a1a" strokeWidth={s * 0.12} paintOrder="stroke">
-                      {a.ch.slice(0, 3)} {fmt(a.troops)}
-                    </text>
+                    {big && (
+                      <>
+                        <rect x={-s * 1.6} y={s * 1.15} width={s * 3.2} height={s * 1.15} rx={s * 0.5} fill={a.color} stroke="#1a1a1a" strokeWidth={s * 0.08} />
+                        <text y={s * 1.98} fontSize={s * 0.72} textAnchor="middle" fill="#fff" fontWeight="800" stroke="#1a1a1a" strokeWidth={s * 0.12} paintOrder="stroke">
+                          {a.ch.slice(0, 3)} {fmt(a.troops)}
+                        </text>
+                      </>
+                    )}
                   </g>
                 </g>
               );
