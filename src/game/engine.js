@@ -1208,7 +1208,7 @@ export function buildResolveQueue(s) {
 }
 
 // 계획 하나 처리. 플레이어가 일기토를 원하면 { needDuel } 를 돌려주고 멈춤 → duel 결과를 넣어 다시 호출
-export function resolveStep(s, world, duel, field) {
+export function resolveStep(s, world, duel) {
   const q = s.resolveQueue || [];
   if (!q.length) {
     s.orders = [];
@@ -1223,14 +1223,6 @@ export function resolveStep(s, world, duel, field) {
   const gens = o.gens.map((id) => s.generals[id]).filter((g) => g && g.status === 'active' && g.nation === o.n && g.order === o.id);
   const n = s.nations[o.n];
   const hostile = tr.owner !== o.n && tr.troops > 0 && (tr.owner === null || getRel(s, o.n, tr.owner).type !== 'alliance');
-  // 직접 지휘: 플레이어가 고른 공격은 실시간 전장 창을 띄우고 멈춤
-  if (field === undefined && duel === undefined && n.alive && n.isPlayer && o.opts.field && hostile && !tr.sea && gens.length) {
-    const hero = gens.reduce((a, b) => (b.war > a.war ? b : a)); // 무력이 가장 높은 장수가 앞장섬
-    const foes = tr.owner === null ? [] : gensIn(s, o.to, tr.owner);
-    const eh = foes.length ? foes.reduce((a, b) => (b.war > a.war ? b : a)) : null;
-    const f = battleFactors(s, world, o.n, o.from, o.to, gens.map((g) => g.id), { count: o.count, mode: 'assault' });
-    return { needField: { orderId: o.id, from: o.from, to: o.to, count: o.count, defTroops: engagedOf(s, o.to), heroId: hero.id, enemyHeroId: eh?.id ?? null, attMult: f.attMult, defMult: f.defMult, terrain: world.regions[o.to].terrain, walls: (tr.buildings?.walls || 0) > 0 } };
-  }
   if (duel === undefined && n.alive && n.isPlayer && o.opts.wantDuel && hostile && tr.owner !== null) {
     const ag = duelist(gens), dg = duelist(gensIn(s, o.to, tr.owner));
     if (ag && dg) {
@@ -1245,7 +1237,7 @@ export function resolveStep(s, world, duel, field) {
   let res = { ok: false };
   if (n.alive) {
     const dOpt = duel !== undefined ? duel : n.isPlayer && !o.opts.wantDuel ? false : undefined;
-    res = doMove(s, world, o.n, o.from, o.to, o.count, o.gens, { ...o.opts, transit: true, orderId: o.id, duel: field ? false : dOpt, fieldRes: field || undefined });
+    res = doMove(s, world, o.n, o.from, o.to, o.count, o.gens, { ...o.opts, transit: true, orderId: o.id, duel: dOpt });
   }
   // 부대: 이긴 곳으로 옮겨 남은 병력이 곧 부대, 졌거나 포위만 했으면 출발지로 살아 돌아온 만큼
   const a = o.opts.army && s.armies?.[o.opts.army];
@@ -1325,9 +1317,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     if (rel.type === 'nap' || rel.type === 'vassal') betray(s, nid, defender);
   }
   const hasWalls = !tr.sea && (tr.buildings.walls || 0) > 0;
-  // 직접 지휘한 실시간 전투(opts.fieldRes)는 성벽이 있어도 강습으로 처리 (전장에서 결판)
-  const fr0 = opts.fieldRes || null;
-  const mode = hasWalls ? (fr0 ? 'assault' : opts.mode || 'siege') : 'field';
+  const mode = hasWalls ? opts.mode || 'siege' : 'field';
   const f = battleFactors(s, world, nid, from, to, gens.map((g) => g.id), { mode, engines, count });
   const defName = defender === null ? tr.bandit || '중립 세력' : s.nations[defender].name;
   const et = edgeBetween(world, from, to)?.type;
@@ -1337,7 +1327,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
 
   // 일기토: 플레이어가 직접 치른 결과(opts.duel) 또는 자동 진행
   let duel = opts.duel || null;
-  if (!duel && opts.duel !== false && !fr0 && tr.troops > 0) {
+  if (!duel && opts.duel !== false && tr.troops > 0) {
     const ag = duelist(gens), dg = duelist(f.def);
     if (ag && dg && rng() < 0.7 && (dg.war >= ag.war - 15 || rng() < 0.3)) duel = simulateDuel(rng, ag, dg);
   }
@@ -1382,19 +1372,14 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   if (sup) lines.push(`요격: ${support.map((x) => `${x.name}(${fmtTroops(x.amt)})`).join(', ')}`);
   // 요격 부대 손실: 수비 병력 비율만큼 나눠 짐
   const hitSupport = (frac) => { for (const x of support) s.regions[x.rid].troops = Math.max(100, s.regions[x.rid].troops - Math.round((x.amt * frac) / 100) * 100); };
-  let A = tot * f.attMult * duelMult * pincer * rng.range(0.85, 1.15);
+  const A = tot * f.attMult * duelMult * pincer * rng.range(0.85, 1.15);
   // 수비는 지휘 한도만큼만 출전, 나머지는 예비대
   const eng = engagedOf(s, to);
   const reserve = tr.troops - eng;
   if (reserve > 0) lines.push(`수비군 ${fmtTroops(eng)} 출전, 예비대 ${fmtTroops(reserve)}`);
   const dp = defPower(s, to, eng, sup, f);
   if (dp.outC > 0 && dp.inC > 0) lines.push(`성 안 ${fmtTroops(dp.inC)}, 성 밖 ${fmtTroops(dp.outC)}`);
-  let D = dp.power * rng.range(0.85, 1.15);
-  if (fr0) {
-    // 전장 결과로 승패를 정함
-    A = fr0.win ? Math.max(A, D * 1.0001 + 1) : Math.min(A, D * 0.9999);
-    lines.push(`🎮 직접 지휘 — ${fr0.win ? '전장 승리' : fr0.retreat ? '후퇴' : '전장 패배'}`);
-  }
+  const D = dp.power * rng.range(0.85, 1.15);
   take();
   (s.battles = s.battles || []).push(battle);
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
@@ -1445,8 +1430,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   if (A > D) {
     const ratio = D / A;
     const loss = Math.min(tot - 1, Math.round(tot * ratio * 0.7 * assaultLoss));
-    // 직접 지휘해도 자동 전투 손실의 절반 아래로는 안 줄어듦 (직접 지휘만 고르면 손해가 없는 허점 방지)
-    const survivors = fr0 ? Math.max(1, Math.min(count, Math.round(fr0.attLeft), own(tot - Math.round(loss * 0.5)))) : Math.max(1, own(tot - loss));
+    const survivors = Math.max(1, own(tot - loss));
     // 수비군은 깼지만 예비대가 아직 많으면(한도의 절반 초과) 땅은 지킴 — 공격군은 돌아가고 예비대가 남음
     if (reserve > defenseCap(s, to) * 0.5) {
       report.win = false;
@@ -1515,12 +1499,12 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const ratio = D > 0 ? A / D : 1;
   // 패잔병은 출발지로 돌아감 (계획 처리 중 출발지를 잃었으면 돌아갈 곳이 없음)
   const home = fr.owner === nid;
-  const back = fr.sea || tr.sea || !home ? 0 : fr0 ? Math.min(count, Math.round(fr0.attLeft)) : Math.round(count * (0.25 + tv(atkGens, '노련')) * rng());
+  const back = fr.sea || tr.sea || !home ? 0 : Math.round(count * (0.25 + tv(atkGens, '노련')) * rng());
   report.win = false;
   report.attLoss = count - back;
   const archery = 1 + 2 * tv(defGens, '궁술');
   const pool = eng + sup;
-  const lossAll = fr0 ? Math.max(0, Math.min(pool - 1, Math.round(eng - fr0.defLeft))) : Math.max(0, Math.min(pool - 1, Math.round((pool * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
+  const lossAll = Math.max(0, Math.min(pool - 1, Math.round((pool * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
   report.defLoss = lossAll;
   const supFrac = pool > 0 ? sup / pool : 0;
   tr.troops = Math.max(1, tr.troops - Math.round(lossAll * (1 - supFrac)));
