@@ -315,3 +315,4 @@ details.more > .kv { margin-top: 6px; }
   .h14-close { display: block; position: absolute; right: 8px; top: 8px; z-index: 1; }
   .h14 .topbar { gap: 8px; font-size: 13px; padding: 4px 8px; }
 }
+.h14-day { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: #000b; color: #ffe9a8; padding: 6px 16px; border-radius: 8px; font-weight: bold; font-size: 15px; pointer-events: none; }

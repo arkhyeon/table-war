@@ -4,7 +4,7 @@ import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14 }
 // 성 주변 위협: 6칸 안 적 부대 병력 합
 function threatNear(s, grid, c) {
   let t = 0;
-  for (const u of s.units) if (u.nation !== c.owner && grid.dist(u.tile, c.tile) <= 6) t += u.troops;
+  for (const u of s.units) if (u.nation !== c.owner && grid.dist(u.tile, c.tile) <= 6 * grid.k) t += u.troops;
   return t;
 }
 
@@ -27,7 +27,7 @@ export function aiTurn14(s, grid, nid) {
   }
   // 2) 성에 다가온 적 부대를 요격
   for (const c of mine) {
-    const foe = s.units.filter((u) => u.nation !== nid && grid.dist(u.tile, c.tile) <= 4).sort((a, b) => a.troops - b.troops)[0];
+    const foe = s.units.filter((u) => u.nation !== nid && grid.dist(u.tile, c.tile) <= 4 * grid.k).sort((a, b) => a.troops - b.troops)[0];
     if (!foe) continue;
     const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
     if (!gs.length || c.troops < foe.troops * 1.3 + 2000) continue;
@@ -35,10 +35,10 @@ export function aiTurn14(s, grid, nid) {
     if (r.ok) order(s, grid, r.unit, 'unit', foe.id);
   }
   // 3) 출진: 남는 병력이 있는 성에서 가까운 약한 성을 노림
-  const maxUnits = Math.max(2, Math.ceil(mine.length * 0.6));
+  const maxUnits = Math.max(2, Math.ceil(mine.length * 1.2));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
     if (s.units.filter((u) => u.nation === nid).length >= maxUnits) break;
-    const reserve = 2500 + threatNear(s, grid, c) * 0.8;
+    const reserve = Math.max(2500, c.troops * 0.35) + threatNear(s, grid, c) * 0.8;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
     const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
@@ -62,7 +62,7 @@ export function aiTurn14(s, grid, nid) {
     if (hubs.includes(c) || threatNear(s, grid, c) > 0) continue;
     const extra = c.troops - 1500;
     if (extra < 1000) continue;
-    const to = hubs.map((h) => [h, grid.dist(h.tile, c.tile)]).filter(([, d]) => d <= 12).sort((a, b) => a[1] - b[1])[0];
+    const to = hubs.map((h) => [h, grid.dist(h.tile, c.tile)]).filter(([, d]) => d <= 12 * grid.k).sort((a, b) => a[1] - b[1])[0];
     if (!to) continue;
     c.troops -= extra;
     to[0].troops += Math.round(extra * 0.95);
@@ -83,12 +83,12 @@ function pickTarget(s, grid, nid, from, troops) {
   for (const c of s.castles) {
     if (c.owner === nid) continue;
     const d = grid.dist(c.tile, from);
-    if (d > 25) continue;
-    const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3).reduce((a, u) => a + u.troops, 0);
+    if (d > 25 * grid.k) continue;
+    const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
     // 이미 그 성으로 가는 우리 부대와 힘을 합침
     const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
-    if (guard > (troops + ours) * 1.1) continue;
-    const v = d * 1.5 + guard / 2000 + (c.owner === null || c.owner === -1 ? -3 : 0);
+    if (guard * (c.dur > c.maxDur * 0.3 ? 1.8 : 1) > (troops + ours) * 1.1) continue;
+    const v = d * 1.5 / grid.k + guard / 2000 + (c.owner === null || c.owner === -1 ? -3 : 0);
     if (v < bv) { bv = v; best = c; }
   }
   return best;
