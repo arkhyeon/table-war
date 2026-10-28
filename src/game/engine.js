@@ -351,7 +351,11 @@ export function estimateBattle(s, world, nid, from, to, count, genIds, opts = {}
     }
   }
   if (sup) f.mods.push(`요격 부대 +${fmtTroops(Math.round(sup / 100) * 100)}`);
-  const D = (tr.troops + sup) * f.defMult;
+  const eng = engagedOf(s, to);
+  if (eng < tr.troops) f.mods.push(`수비군 ${fmtTroops(eng)} 출전 (예비대 ${fmtTroops(tr.troops - eng)})`);
+  const dp = defPower(s, to, eng, sup, f);
+  if (dp.outC > 0 && dp.inC > 0) f.mods.push(`성 안 ${fmtTroops(dp.inC)}, 성 밖 ${fmtTroops(dp.outC)} (성벽 보정 없음)`);
+  const D = dp.power;
   let wins = 0;
   const trials = 300;
   for (let i = 0; i < trials; i++) {
@@ -523,6 +527,7 @@ export function doBuild(s, world, nid, rid, kind) {
   n.gold -= cost;
   n.ap -= b.ap;
   r.buildings[kind] = kind === 'walls' ? WALL_MAX : 1;
+  if (kind === 'walls') r.wallLv = r.wallLv || 1;
   return { ok: true, msg: repair ? `${r.name}의 성벽을 보수했습니다.` : `${r.name}에 ${b.name}을(를) 건설했습니다.` };
 }
 
@@ -561,6 +566,50 @@ export function commandCap(s, genIds) {
   const caps = gens.map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
   return Math.round(((caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) * df) / 100) * 100;
 }
+// 수비도 지휘 한도만큼만 싸움 (토탈워식 성 수비군): 그 땅 장수의 지휘 한도, 장수가 없으면 수비대 2만. 성벽이 있으면 1.5배
+// 나머지는 예비대 — 앞선 수비군이 깨져도 예비대가 한도의 절반보다 많으면 땅을 지킴 (다음 공격 때 다시 나섬)
+export const GARRISON = 20000;
+export function defenseCap(s, rid) {
+  const r = s.regions[rid];
+  if (r.owner === null || r.sea || s.nations[r.owner]?.horde) return Infinity;
+  const gens = gensIn(s, rid, r.owner).filter((g) => g.status === 'active');
+  const base = gens.length ? commandCap(s, gens.map((g) => g.id)) : GARRISON * (s.df || 1);
+  return Math.round(base / 100) * 100;
+}
+// 성 수용 인원: 성 1단계 10만, 2단계 20만, 3단계 30만. 넘는 병력은 성 밖에서 성벽 이득 없이 싸움 (성벽이 무너지면 0)
+export const WALL_CAP = 100000;
+export const WALL_LV_MAX = 3;
+export const castleCap = (s, rid) => {
+  const r = s.regions[rid];
+  return !r.sea && (r.buildings?.walls || 0) > 0 ? (r.wallLv || 1) * WALL_CAP * (s.df || 1) : 0;
+};
+// 수비 전투력: 성 안(수용 인원까지)은 성벽 보정, 성 밖·요격 부대는 성벽 없이
+function defPower(s, rid, eng, sup, f) {
+  const base = f.defMult / (f.walls || 1);
+  const inC = Math.min(eng, castleCap(s, rid));
+  return { power: base * (inC * (f.walls || 1) + (eng - inC) + sup), inC, outC: eng - inC };
+}
+export const wallUpCost = (s, rid) => (s.regions[rid].wallLv || 1) * 200000;
+export function wallUpCheck(s, nid, rid) {
+  const r = s.regions[rid];
+  if (r.owner !== nid || r.sea) return '내 지역이 아닙니다.';
+  if (!r.buildings.walls) return '성벽이 있어야 증축할 수 있습니다.';
+  if ((r.wallLv || 1) >= WALL_LV_MAX) return '이미 가장 큰 성입니다.';
+  if (s.nations[nid].gold < wallUpCost(s, rid)) return '금이 부족합니다.';
+  return canAct(s, nid, 2);
+}
+export function doWallUp(s, nid, rid) {
+  const err = wallUpCheck(s, nid, rid);
+  if (err) return fail(err);
+  const r = s.regions[rid];
+  const cost = wallUpCost(s, rid);
+  s.nations[nid].gold -= cost;
+  s.nations[nid].ap -= 2;
+  r.wallLv = (r.wallLv || 1) + 1;
+  r.buildings.walls = WALL_MAX;
+  return { ok: true, msg: `🏯 ${r.name}의 성을 증축했습니다. (${r.wallLv}단계, 성 안 ${fmtTroops(castleCap(s, rid))}까지)` };
+}
+export const engagedOf = (s, rid) => Math.min(s.regions[rid].troops, defenseCap(s, rid));
 // 공격(남의 땅·중립지·적 함대)인지
 export const isAttack = (s, nid, to) => {
   const tr = s.regions[to];
@@ -625,6 +674,8 @@ function transferRegion(s, world, rid, newOwner) {
   const r = s.regions[rid];
   const old = r.owner;
   r.owner = newOwner;
+  delete r.bandit;
+  delete r.banditCap;
   if (old !== null) {
     s.nations[old].lost = (s.nations[old].lost || 0) + 1;
     const gens = gensIn(s, rid, old);
@@ -1267,7 +1318,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   const hasWalls = !tr.sea && (tr.buildings.walls || 0) > 0;
   const mode = hasWalls ? opts.mode || 'siege' : 'field';
   const f = battleFactors(s, world, nid, from, to, gens.map((g) => g.id), { mode, engines, count });
-  const defName = defender === null ? '중립 세력' : s.nations[defender].name;
+  const defName = defender === null ? tr.bandit || '중립 세력' : s.nations[defender].name;
   const et = edgeBetween(world, from, to)?.type;
   const kind = tr.sea ? 'naval' : fr.sea ? (et === 'cliff' ? 'cliff' : 'landing') : et === 'strait' ? 'strait' : et === 'river' ? 'river' : mode !== 'field' ? 'siege' : 'field';
   const battle = { from, to, attacker: nid, defender, count, defTroops: tr.troops, turn: s.turn, naval: !!tr.sea, mode, kind };
@@ -1321,7 +1372,13 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   // 요격 부대 손실: 수비 병력 비율만큼 나눠 짐
   const hitSupport = (frac) => { for (const x of support) s.regions[x.rid].troops = Math.max(100, s.regions[x.rid].troops - Math.round((x.amt * frac) / 100) * 100); };
   const A = tot * f.attMult * duelMult * pincer * rng.range(0.85, 1.15);
-  const D = (tr.troops + sup) * f.defMult * rng.range(0.85, 1.15);
+  // 수비는 지휘 한도만큼만 출전, 나머지는 예비대
+  const eng = engagedOf(s, to);
+  const reserve = tr.troops - eng;
+  if (reserve > 0) lines.push(`수비군 ${fmtTroops(eng)} 출전, 예비대 ${fmtTroops(reserve)}`);
+  const dp = defPower(s, to, eng, sup, f);
+  if (dp.outC > 0 && dp.inC > 0) lines.push(`성 안 ${fmtTroops(dp.inC)}, 성 밖 ${fmtTroops(dp.outC)}`);
+  const D = dp.power * rng.range(0.85, 1.15);
   take();
   (s.battles = s.battles || []).push(battle);
   const report = { from, to, attacker: nid, defender, count, defTroops: tr.troops, A, D, captured: [], killed: [], fled: [] };
@@ -1357,7 +1414,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     tr.siegedTurn = s.turn;
     battle.siege = { before, after: tr.buildings.walls };
     if (tr.buildings.walls > 0) {
-      report.defLoss = Math.min(Math.max(0, tr.troops - 100), Math.round(tr.troops * Math.min(0.5, (0.3 * A) / Math.max(1, D))));
+      report.defLoss = Math.min(Math.max(0, tr.troops - 100), Math.round(eng * Math.min(0.5, (0.3 * A) / Math.max(1, D))));
       report.attLoss = Math.min(count, own(Math.round(tot * Math.min(0.6, (0.45 * D) / A + 0.1))));
       tr.troops -= report.defLoss;
       if (sup) hitSupport(0.15);
@@ -1373,6 +1430,19 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     const ratio = D / A;
     const loss = Math.min(tot - 1, Math.round(tot * ratio * 0.7 * assaultLoss));
     const survivors = Math.max(1, own(tot - loss));
+    // 수비군은 깼지만 예비대가 아직 많으면(한도의 절반 초과) 땅은 지킴 — 공격군은 돌아가고 예비대가 남음
+    if (reserve > defenseCap(s, to) * 0.5) {
+      report.win = false;
+      report.attLoss = count - survivors;
+      report.defLoss = eng + Math.round(sup * 0.5);
+      if (sup) hitSupport(0.5);
+      tr.troops = reserve;
+      const home = fr.owner === nid && !fr.sea;
+      if (home) { fr.troops += survivors; arrive(fr, survivors); }
+      for (const g of atkGens) { gainExp(s, g, 15); if (!home) g.region = s.nations[nid].capital ?? g.region; }
+      for (const g of defGens) gainExp(s, g, 10);
+      return finish('break', `⚔️ ${n.name}이(가) ${tr.name}(${defName})의 수비군 ${fmtTroops(eng)}을(를) 격파! 하지만 예비대 ${fmtTroops(reserve)}이(가) 성을 지켰습니다. 아군 손실 ${fmtTroops(report.attLoss)}.`);
+    }
     report.win = true;
     report.attLoss = count - survivors;
     report.defLoss = tr.troops + Math.round(sup * 0.5);
@@ -1392,6 +1462,15 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
         }
       } else report.fled.push(g.name);
     }
+    // 남은 예비대(한도의 절반 이하)는 무너져 절반이 옆 내 땅으로 달아남
+    if (reserve > 0 && defender !== null && !tr.sea) {
+      const flee = world.regions[to].neighbors.map((x) => x.id).find((x) => s.regions[x].owner === defender && !s.regions[x].sea);
+      if (flee !== undefined) s.regions[flee].troops += Math.floor(reserve / 200) * 100;
+      report.defLoss = eng + Math.round(sup * 0.5) + Math.ceil(reserve / 200) * 100;
+    }
+    // 도적 소굴 소탕: 쌓아둔 약탈품을 거둠
+    const loot = defender === null && tr.bandit ? Math.round((10 * G + tr.pop * 1000) / 1000) * 1000 : 0;
+    if (loot) { n.gold += loot; lines.push(`${tr.bandit} 소굴 소탕, 전리품 ${fmtGold(loot)}`); }
     tr.troops = 0;
     if (defender !== null && plunder) {
       s.nations[defender].gold -= plunder;
@@ -1425,7 +1504,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
   report.win = false;
   report.attLoss = count - back;
   const archery = 1 + 2 * tv(defGens, '궁술');
-  const pool = tr.troops + sup;
+  const pool = eng + sup;
   const lossAll = Math.max(0, Math.min(pool - 1, Math.round((pool * ratio * 0.6) / archery / (1 + tv(defGens, '철벽')))));
   report.defLoss = lossAll;
   const supFrac = pool > 0 ? sup / pool : 0;
@@ -1599,12 +1678,12 @@ export function doPlot(s, world, nid, gid, kind, target) {
   return { ok: true, msg: `🗣️ 유언비어 성공! ${names.join(', ') || '장수'} 충성 -15` };
 }
 
-// 장수 모집 (토탈워식): 금으로 새 장수를 들임. 장수가 많을수록 비싸고, 땅 4곳마다 1명 + 3명까지
+// 장수 모집 (토탈워식): 금으로 새 장수를 들임. 장수가 많을수록 비싸고, 기본 4명 + 땅 3곳마다 1명까지
 export const hireCost = (s, nid) => Math.round(((50 + nationGenerals(s, nid).length * 12) * G) / 1000) * 1000;
-export const hireMax = (s, nid) => 3 + Math.floor(nationRegions(s, nid).filter((r) => !s.regions[r].sea).length / 4);
+export const hireMax = (s, nid) => 4 + Math.floor(nationRegions(s, nid).filter((r) => !s.regions[r].sea).length / 3);
 export function hireCheck(s, nid) {
   const n = s.nations[nid];
-  if (nationGenerals(s, nid).length >= hireMax(s, nid)) return `장수는 ${hireMax(s, nid)}명까지 (땅 4곳마다 1명 더)`;
+  if (nationGenerals(s, nid).length >= hireMax(s, nid)) return `장수는 ${hireMax(s, nid)}명까지 (땅 3곳마다 1명 더)`;
   if (n.hired === s.turn) return '이번 턴에 이미 모집했습니다.';
   if (n.gold < hireCost(s, nid)) return '금이 부족합니다.';
   return canAct(s, nid, 1);

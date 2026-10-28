@@ -1,3 +1,4 @@
+import { BANDITS, outlawName } from './outlaws.js';
 import { makeRng, hashString } from './rng.js';
 import { T, G, DIFFICULTY } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
@@ -284,6 +285,13 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     s.opinion.push([]);
     for (let b = 0; b < N; b++) s.opinion[a].push(a === b ? 0 : rng.int(-10, 10));
   }
+  // 가운데일수록 인재가 모임: 수도가 나라들 한가운데에 가까우면 장수 +2, 중간이면 +1, 변방은 그대로 (진출 속도 차이)
+  for (const n of plan) {
+    const c = world.regions[n.region];
+    const d = Math.hypot(c.cx - mid[0], c.cy - mid[1]) / spread;
+    const extra = d < 0.3 ? 2 : d < 0.55 ? 1 : 0;
+    for (let q = 0; q < extra; q++) spawnGeneral(s, n.id, rng, true);
+  }
   for (const n of s.nations) {
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
@@ -345,6 +353,29 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     }
     for (let q = 0; q < 3; q++) spawnGeneral(s, n.id, rng, true);
     s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +3, 병력 +60%, 금 2.5배, 시작 땅이 대평야(세금 +20%·인구 +50%)입니다.`, nations: [n.id], kind: 'info' });
+  }
+  // 도적단: 빈 땅 열 곳 중 세 곳쯤에 그 시대의 도적이 소굴을 틀고 있음 (변방일수록 많이). 수비만 하고 천천히 불어남
+  const year = scn.startYear ?? 1;
+  const civAt = (i) => {
+    let best = null, bd = Infinity;
+    for (const n of s.nations) {
+      if (n.capital === null) continue;
+      const c = world.regions[n.capital];
+      const d = Math.hypot(c.cx - world.regions[i].cx, c.cy - world.regions[i].cy);
+      if (d < bd) { bd = d; best = n.civ; }
+    }
+    return best;
+  };
+  const wild = s.regions.map((r, i) => i).filter((i) => !s.regions[i].sea && s.regions[i].owner === null);
+  const want = Math.round(wild.length * 0.3);
+  const pool = wild.map((i) => ({ i, w: 0.2 + Math.min(1, Math.hypot(world.regions[i].cx - mid[0], world.regions[i].cy - mid[1]) / spread) ** 2 }));
+  for (let k = 0; k < want && pool.length; k++) {
+    const x = rng.weighted(pool, (o) => o.w);
+    pool.splice(pool.indexOf(x), 1);
+    const r = s.regions[x.i];
+    r.bandit = outlawName(BANDITS, civAt(x.i), year, rng);
+    r.troops = Math.round((r.troops * 1.8) / 100) * 100;
+    r.banditCap = Math.round((r.troops * 1.5) / 100) * 100;
   }
   s.log.unshift({ turn: 1, text: `🎌 ${scn.name} — ${s.nations[playerId].name}(으)로 천하통일을 시작합니다.${scn.procedural ? ` (시드: ${seed})` : ''}`, nations: [playerId], kind: 'info' });
   return s;

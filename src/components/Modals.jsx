@@ -873,6 +873,7 @@ export function HelpModal({ onClose }) {
           <li><b>요격·협공</b>: 공격받는 땅과 맞닿은 같은 나라 땅에 장수가 있으면 그 부대가 달려와 함께 싸웁니다(병력 절반). 한 턴에 두 곳 이상에서 같은 땅을 치면 협공 +15%. 적 부대도 지도에 부대 말로 보입니다.</li>
           <li><b>장수 수련</b>: 장수 창 📚 — 금(레벨×2.5만)·행동력 1로 경험치 +레벨×50, 장수마다 3턴에 한 번.</li>
           <li><b>전선 관리</b>: 이미 싸우는 중에 새 나라를 치면 평판 -5. 평판이 바닥이면 주변 나라 모두의 표적이 되고 자원병도 줄어듭니다.</li>
+          <li><b>수비 지휘 한도</b>: 수비도 그 땅 장수의 지휘 한도만큼만 출전합니다(장수 없으면 2만). 성은 1단계 10만, 증축하면 20만·30만까지 성벽 보정을 받고, 넘는 병력은 성 밖에서 싸웁니다. 나머지는 예비대라, 수비군을 깨도 예비대가 많으면 땅을 지킵니다 — 큰 성은 여러 번 쳐야 합니다.</li>
           <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(8천+통솔×800, 함께 가는 장수는 절반씩 더함). 빈 땅·도적을 칠 때도 장수가 있어야 합니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
           <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
@@ -1080,7 +1081,7 @@ export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 120
   }, [index, onNext, delay]);
   const att = game.nations[b.attacker];
   const def = b.defender === null ? null : game.nations[b.defender];
-  const res = b.result === 'win' ? '점령' : b.result === 'siege' ? '포위 공격' : '격퇴됨';
+  const res = b.result === 'win' ? '점령' : b.result === 'siege' ? '포위 공격' : b.result === 'break' ? '수비군 격파' : '격퇴됨';
   return (
     <div className="replay">
       <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -1147,7 +1148,7 @@ function BattleField({ b, att, def }) {
         </g>
         <text className="bf-clash" x="150" y="50" textAnchor="middle" fontSize="26">💥</text>
         <text x="150" y="16" textAnchor="middle" fontSize="11" fontWeight="800" fill={win ? '#e8a33a' : '#e2655a'}>
-          {win ? '점령!' : b.result === 'siege' ? '포위 공격' : '격퇴'}
+          {win ? '점령!' : b.result === 'siege' ? '포위 공격' : b.result === 'break' ? '수비군 격파' : '격퇴'}
         </text>
         {(b.attLoss || b.defLoss) && (
           <text x="150" y="30" textAnchor="middle" fontSize="9" fill="currentColor" opacity="0.8">

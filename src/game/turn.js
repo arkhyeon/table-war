@@ -6,7 +6,7 @@ import { income, computeMaxAp, spawnGeneral, log, getRel, setRel, isVassalOf, na
 import { tv } from './traits.js';
 import { rollWeather, weatherOf } from './weather.js';
 import { runEvents } from './events.js';
-import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests, generalDrama, allyRequests } from './rise.js';
+import { riseNations, fortune, syncFiefs, fiefLoyalty, spawnHorde, spawnPirates, pirateTurn, FIEF_TRIBUTE, endgame, promoteHordes, hordeDemands, fiefRequests, generalDrama, allyRequests } from './rise.js';
 import { getScenario } from './scenarios.js';
 import { yearOf, fmtYear } from './weather.js';
 
@@ -164,7 +164,9 @@ function upkeep(s, world) {
     if (r.buildings.walls > 0 && r.buildings.walls < WALL_MAX && r.siegedTurn !== s.turn) r.buildings.walls = Math.min(WALL_MAX, r.buildings.walls + 1 + (tv(gens, '축성') ? 1 : 0));
     r.pop = Math.round(r.pop * 10) / 10;
     if (r.owner === null) {
-      if (s.turn % 3 === 0 && r.troops < 12000 / (s.df || 1)) r.troops += Math.max(100, Math.round(1000 / (s.df || 1) / 100) * 100);
+      // 도적 소굴은 3턴마다 500명씩 천천히 불어남 (처음의 1.5배까지)
+      if (r.bandit) { if (s.turn % 3 === 0 && r.troops < r.banditCap) r.troops = Math.min(r.banditCap, r.troops + Math.max(100, Math.round(500 / (s.df || 1) / 100) * 100)); }
+      else if (s.turn % 3 === 0 && r.troops < 12000 / (s.df || 1)) r.troops += Math.max(100, Math.round(1000 / (s.df || 1) / 100) * 100);
       continue;
     }
     // 보급이 끊긴 지역: 병력 1~10% 감소
@@ -200,7 +202,7 @@ function upkeep(s, world) {
   for (const [nid, v] of Object.entries(volunteers)) {
     if (+nid === s.playerId && !s.spectator) log(s, `🙋 ${s.nations[nid].name}${danger[nid] ? '이(가) 위기에 처하자 백성들이 앞다퉈' : '에'} 자원 입대했습니다. (총 +${fmtTroops(v)})`, [+nid], 'info');
   }
-  for (const n of s.nations) if (n.alive) spawnGeneral(s, n.id, rng);
+  for (const n of s.nations) if (n.alive && !n.pirate) spawnGeneral(s, n.id, rng);
   balanceOfPower(s, world);
   for (const [k, rel] of Object.entries(s.relations)) {
     if (rel.type === 'nap' && rel.until <= s.turn) {
@@ -320,6 +322,8 @@ export function endTurnFinish(s, world) {
   riseNations(s, world, stateRng(s));
   fortune(s, world, stateRng(s));
   spawnHorde(s, world, stateRng(s));
+  spawnPirates(s, world, stateRng(s));
+  pirateTurn(s, world, stateRng(s));
   fiefLoyalty(s, world, stateRng(s));
   endgame(s, world, stateRng(s));
   promoteHordes(s, world, stateRng(s));

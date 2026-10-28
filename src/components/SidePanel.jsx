@@ -9,7 +9,7 @@ import { WEATHER } from '../game/weather.js';
 import { viewOf, troopsShown } from '../game/fog.js';
 import {
   doBuild, regionTax, buildCost, draftCheck, DRAFT_AP, commandCap, armiesIn, garrisonOf, freeGens, disbandArmy, refillArmy, forceArmy, gensIn, nationRegions, nationGenerals, appearChance, getRel,
-  poachChance, doPoach, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
+  poachChance, doPoach, castleCap, wallUpCheck, wallUpCost, doWallUp, WALL_LV_MAX, income, isVassalOf, supplied, WALL_MAX, landCount, doBuildEngine, engineCost, ENGINE_MAX, governorOf, governorBonus, movable, capitalMoveCheck, capitalMoveCost, doMoveCapital, CAPITAL_COOLDOWN, bribeAgents, bribeCost,
 } from '../game/engine.js';
 import { revokeFief, pacifyCost, pacifyChance, doPacify, setFiefOrder, fiefFoes } from '../game/rise.js';
 
@@ -268,6 +268,8 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   <span className="chip" style={{ background: owner.color }} />
                   {owner.name} {relTag(game, pid, owner.id)}
                 </>
+              ) : r.bandit ? (
+                <span title="도적 소굴: 수비만 하고 3턴마다 조금씩 불어남. 소탕하면 전리품">🏴 {r.bandit} 소굴</span>
               ) : (
                 '중립 세력'
               )}
@@ -287,7 +289,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               <span>
                 {Object.entries(r.buildings)
                   .filter(([, v]) => v)
-                  .map(([k, v]) => `${BUILDINGS[k].icon}${k === 'walls' ? v : ''}`)
+                  .map(([k, v]) => `${BUILDINGS[k].icon}${k === 'walls' ? `${v}${(r.wallLv || 1) > 1 ? ` Lv${r.wallLv}` : ''}` : ''}`)
                   .join(' ')}
               </span>
             )}
@@ -373,6 +375,11 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                     </button>
                   );
                 })}
+                {r.buildings.walls > 0 && (r.wallLv || 1) < WALL_LV_MAX && (
+                  <button title={wallUpCheck(game, pid, selected) || `성 안 수용 ${fmtTroops(castleCap(game, selected))} → ${fmtTroops(castleCap(game, selected) / (r.wallLv || 1) * ((r.wallLv || 1) + 1))}. 넘는 병력은 성 밖에서 성벽 보정 없이 싸움`} disabled={!!wallUpCheck(game, pid, selected)} onClick={() => act((s) => doWallUp(s, pid, selected))}>
+                    🏯 성 증축 {(r.wallLv || 1) + 1}단계 {fmtGold(wallUpCost(game, selected))}금·2AP
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -418,7 +425,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
               <span>
                 {Object.entries(r.buildings)
                   .filter(([, v]) => v)
-                  .map(([k, v]) => `${BUILDINGS[k].icon}${BUILDINGS[k].name}${k === 'walls' ? ` ${v}/${WALL_MAX}` : ''}`)
+                  .map(([k, v]) => `${BUILDINGS[k].icon}${BUILDINGS[k].name}${k === 'walls' ? ` ${v}/${WALL_MAX} · ${r.wallLv || 1}단계(성 안 ${fmtTroops(castleCap(game, selected))})` : ''}`)
                   .join(' ') || '없음'}
                 {r.engines ? ` · 🛠️공성병기 ${r.engines}` : ''}
               </span>

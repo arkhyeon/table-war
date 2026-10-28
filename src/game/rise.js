@@ -1,7 +1,7 @@
 import { G } from './rules.js';
 import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
-import { addGeneral, computeMaxAp, log, nationRegions, gensIn, getRel, setRel, checkElimination, canAct, buildCost, DRAFT_GOLD, WALL_MAX, succession, nationGenerals, nationTrait } from './engine.js';
+import { addGeneral, computeMaxAp, log, regionTax, nationRegions, gensIn, getRel, setRel, checkElimination, canAct, buildCost, DRAFT_GOLD, WALL_MAX, succession, nationGenerals, nationTrait } from './engine.js';
 import { rating } from './generals.js';
 import { tv } from './traits.js';
 import { fmtTroops } from './format.js';
@@ -9,6 +9,8 @@ import { fmtGold } from './format.js';
 import { emptyDeal, describeDeal, applyDeal } from './diplomacy.js';
 import { colorFor } from './setup.js';
 import { stateRng } from './rng.js';
+import { PIRATES, FRONTIER, outlawName } from './outlaws.js';
+import { getScenario } from './scenarios.js';
 
 // 신흥국 출현: 몰락한 왕의 부흥, 빈 땅의 봉기 (영웅 봉기·계승 분쟁은 아래 장수 드라마)
 const MAX_IDS = 62;
@@ -418,21 +420,20 @@ export function hordeName(s, civ, rng) {
   return rng.shuffle(list.slice()).find((x) => !used.has(x)) || `${rng.pick(list)} ${s.turn}`;
 }
 // 변방 침입: 지도 가장자리(나라들 한가운데에서 먼 곳)의 빈 땅이나 남의 변경 땅에 이민족·해적이 쳐들어옴
-const RAIDERS = {
-  sea: { japan: ['왜구'], korea: ['왜구'], china: ['왜구', '해적단'], tk: ['해적단'], nordic: ['바이킹'], english: ['바이킹'], frank: ['바이킹', '노르만 해적'], north_african: ['바르바리 해적'], arab: ['해적단'], southeast_asian: ['해적단'], iberian: ['바르바리 해적'], italian: ['사라센 해적'] },
-  land: { china: ['흉노 기병', '선비 기병', '돌궐 기병'], tk: ['흉노 기병', '오환 기병', '강족'], korea: ['여진 기병', '거란 기병'], steppe: ['유목 기병대', '몽골 기병'], persia: ['투르크멘 기병'], arab: ['베두인 약탈자'], turk: ['투르크멘 기병'], rome: ['게르만 약탈대', '훈족 기병'], byzantine: ['페체네그 기병', '쿠만 기병'], german: ['마자르 기병'], slavic: ['타타르 기병', '쿠만 기병'], frank: ['마자르 기병'], india: ['아프간 기병'], west_african: ['투아레그 기병'], east_african: ['오로모 전사단'], americas: ['치치멕 전사단'] },
-};
-function raiderName(s, civ, sea, rng) {
+function frontierName(s, civ, rng) {
   const used = new Set(s.nations.filter((n) => n.alive).map((n) => n.name));
-  const list = (sea ? RAIDERS.sea[civ] || ['해적단'] : RAIDERS.land[civ] || HORDE[civ] || ['이민족 약탈대']).slice();
-  return rng.shuffle(list).find((x) => !used.has(x)) || `${rng.pick(list)} ${s.turn}`;
+  for (let k = 0; k < 6; k++) { const nm = outlawName(FRONTIER, civ, yearNow(s), rng); if (!used.has(nm)) return nm; }
+  return `${outlawName(FRONTIER, civ, yearNow(s), rng)} ${s.turn}`;
 }
 export function spawnHorde(s, world, rng) {
   if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
-  if (s.nations.filter((n) => n.alive && n.horde).length >= 3 || rng() >= 0.02) return;
+  if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 3 || rng() >= 0.03) return;
   const ew = edgeWeight(s, world);
   const df = s.df || 1;
   const opts = [];
+  // 변방 침입은 변방의 큰 나라일수록 잘 당함 (변방국도 후방을 신경 쓰게)
+  const size = {};
+  for (const r of s.regions) if (!r.sea && r.owner !== null) size[r.owner] = (size[r.owner] || 0) + 1;
   for (let rid = 0; rid < s.regions.length; rid++) {
     const r = s.regions[rid];
     if (r.sea) continue;
@@ -441,16 +442,16 @@ export function spawnHorde(s, world, rng) {
       const nb = w.neighbors.filter((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null).map((x) => x.id);
       if (nb.length) opts.push({ rids: [rid, ...nb.slice(0, 2)], w: 1.5, mult: 1.6, sea: false });
     } else if (!s.nations[r.owner].horde && s.nations[r.owner].capital !== rid && nationRegions(s, r.owner).length >= 4) {
-      // 남의 변경: 빈 땅에 닿은 내륙 국경이면 기마 이민족, 해안이면 해적
+      // 남의 변경: 빈 땅에 닿았거나 지도 바깥쪽 국경이면 그 시대의 변방 이민족 (해안 약탈은 해적단이 따로)
       const wild = w.neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null);
-      if (wild || w.coastal) opts.push({ rids: [rid], w: wild ? 1.2 : 0.8, mult: 1, sea: !wild, from: r.owner });
+      if (wild || ew(rid) > 3) opts.push({ rids: [rid], w: 1.2 * (1 + (size[r.owner] || 0) / 15), mult: 1, sea: false, from: r.owner });
     }
   }
   if (!opts.length) return;
   const o = rng.weighted(opts, (x) => x.w * ew(x.rids[0]));
   const civ = civNear(s, world, o.rids[0]);
   const lead = leaderFor(s, civ, rng);
-  const n = newNation(s, civ, o.from !== undefined ? raiderName(s, civ, o.sea, rng) : hordeName(s, civ, rng));
+  const n = newNation(s, civ, o.from !== undefined ? frontierName(s, civ, rng) : hordeName(s, civ, rng));
   Object.assign(n, { horde: true, aggression: 1, color: 'hsl(25, 12%, 30%)', gold: 0 });
   seize(s, world, n, o.rids, o.mult);
   // 침입군은 지키던 병력보다 강하게 들이닥침
@@ -462,6 +463,92 @@ export function spawnHorde(s, world, rng) {
   (s.turnEvents = s.turnEvents || []).push({ icon: o.from === undefined ? '🏴' : o.sea ? '🏴‍☠️' : '🐎', title: o.from === undefined ? `${n.name} 봉기` : `변방 침입 — ${n.name}`, story: story + ' 이들과는 협상할 수 없습니다.', effect: `${o.rids.length}개 지역 장악`, nations: o.from !== undefined ? [n.id, o.from] : [n.id], global: true, rids: o.rids });
   log(s, `${o.from === undefined ? '🏴' : '🐎'} ${n.name}이(가) ${where}에 나타났습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
   if (o.from !== undefined) checkElimination(s, world, o.from);
+}
+
+// ───────── 해적단: 바다에 머물며 해안 땅을 약탈하고 함대를 덮침. 땅은 빼앗지 않고 피해만 줌. 격퇴(해전)할 때까지 머묾 ─────────
+const yearNow = (s) => (getScenario(s.scenarioId)?.startYear ?? 1) + Math.floor((s.turn - 1) / 4);
+const coastsOf = (s, world, z) => world.regions[z].neighbors.filter((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== null && !s.nations[s.regions[x.id].owner].horde).map((x) => x.id);
+export function spawnPirates(s, world, rng) {
+  if (s.turn < 10 || s.opts?.noRise || s.nations.length >= MAX_IDS) return;
+  if (s.nations.filter((n) => n.alive && n.pirate).length >= 2 || rng() >= 0.015) return;
+  const zones = s.regions.map((r, i) => i).filter((i) => s.regions[i].sea && (s.regions[i].owner === null || s.regions[i].troops <= 0) && coastsOf(s, world, i).length);
+  if (!zones.length) return;
+  const z = rng.weighted(zones, (i) => coastsOf(s, world, i).length + coastsOf(s, world, i).filter((c) => s.regions[c].buildings.port).length * 2);
+  const civ = civNear(s, world, z);
+  const n = newNation(s, civ, outlawName(PIRATES, civ, yearNow(s), rng));
+  const df = s.df || 1;
+  Object.assign(n, { horde: true, pirate: true, aggression: 1, color: 'hsl(0, 0%, 12%)', gold: 0, capital: z, pirateBase: 0 });
+  const r = s.regions[z];
+  r.owner = n.id;
+  r.troops = Math.round((rng.int(8000, 15000) * df) / 100) * 100;
+  n.pirateMax = r.troops * 2;
+  const lead = leaderFor(s, civ, rng);
+  const king = lead.old || addGeneral(s, lead.data, n.id, z, rng, true);
+  finish(s, n, king);
+  const hit = [...new Set(coastsOf(s, world, z).map((c) => s.regions[c].owner))];
+  (s.turnEvents = s.turnEvents || []).push({ icon: '🏴‍☠️', title: `해적 출몰 — ${n.name}`, story: `${r.name}에 ${n.name}의 배 떼가 나타났습니다. 격퇴하지 않으면 바다에 머물며 해안을 약탈하고 배를 덮칩니다. 장수가 이끄는 함대로 해전을 벌여 몰아내세요.`, effect: `${fmtTroops(r.troops)} · 해안 ${coastsOf(s, world, z).length}곳 위협`, nations: [n.id, ...hit], global: true, rids: [z] });
+  log(s, `🏴‍☠️ ${n.name}이(가) ${r.name}에 출몰했습니다!`, [n.id, ...hit], 'warn');
+}
+
+export function pirateTurn(s, world, rng) {
+  const df = s.df || 1;
+  for (const n of s.nations) {
+    if (!n.alive || !n.pirate) continue;
+    const z = s.regions.findIndex((r) => r.sea && r.owner === n.id);
+    if (z < 0) { n.alive = false; continue; }
+    const me = s.regions[z];
+    n.capital = z;
+    const P = me.troops;
+    // 1) 옆 바다의 함대를 덮침
+    const fleet = world.regions[z].neighbors.map((x) => x.id).find((i) => s.regions[i].sea && s.regions[i].owner !== null && s.regions[i].owner !== n.id && s.regions[i].troops > 0 && s.regions[i].troops < P * 0.9);
+    if (fleet !== undefined && rng() < 0.6) {
+      const f = s.regions[fleet];
+      const victim = f.owner;
+      const lost = Math.min(f.troops, Math.round((P * rng.range(0.2, 0.4)) / 100) * 100);
+      f.troops -= lost;
+      me.troops = Math.max(1000, me.troops - Math.round((lost * 0.3) / 100) * 100);
+      if (f.troops <= 0) { f.troops = 0; f.owner = null; }
+      log(s, `🏴‍☠️ ${n.name}이(가) ${f.name}의 ${s.nations[victim].name} 함대를 덮쳐 ${fmtTroops(lost)}을(를) 수장시켰습니다!`, [n.id, victim], 'warn');
+      continue;
+    }
+    // 2) 해안 약탈: 땅은 뺏지 않고 병사·백성·금·항구에 피해
+    const coasts = coastsOf(s, world, z);
+    if (!coasts.length || rng() < 0.25) {
+      // 노릴 곳이 없으면 다른 바다로 옮겨 감
+      n.idle = (n.idle || 0) + 1;
+      if (n.idle >= 3) {
+        const next = world.regions[z].neighbors.map((x) => x.id).filter((i) => s.regions[i].sea && (s.regions[i].owner === null || s.regions[i].troops <= 0) && coastsOf(s, world, i).length);
+        if (next.length) {
+          const to = rng.pick(next);
+          s.regions[to].owner = n.id; s.regions[to].troops = me.troops;
+          for (const g of Object.values(s.generals)) if (g.nation === n.id && g.region === z) g.region = to;
+          me.owner = null; me.troops = 0; n.capital = to; n.idle = 0;
+        }
+      }
+      continue;
+    }
+    n.idle = 0;
+    const t = rng.pick(coasts);
+    const r = s.regions[t];
+    const owner = s.nations[r.owner];
+    const D = r.troops * (r.buildings.walls ? 1.5 : 1) * (r.buildings.port ? 1.2 : 1);
+    if (P * rng.range(0.6, 1.1) > D * 0.6) {
+      const killed = Math.min(r.troops - 100, Math.round((P * 0.15) / 100) * 100);
+      const gold = Math.min(owner.gold, Math.round((regionTax(s, t) * 3) / 1000) * 1000);
+      r.troops -= Math.max(0, killed);
+      r.pop = Math.max(1, Math.round(r.pop * 0.92 * 10) / 10);
+      owner.gold -= gold;
+      n.gold += gold;
+      const burn = r.buildings.port && rng() < 0.3;
+      if (burn) r.buildings.port = 0;
+      me.troops = Math.min(n.pirateMax || me.troops, me.troops + Math.round((500 * df) / 100) * 100);
+      log(s, `🏴‍☠️ ${n.name}이(가) ${r.name}(${owner.name}) 해안을 약탈했습니다! 병사 -${fmtTroops(Math.max(0, killed))}, 백성 -8%, 금 -${fmtGold(gold)}${burn ? ', 항구 불탐' : ''}.`, [n.id, r.owner], 'warn');
+    } else {
+      const lost = Math.round((P * rng.range(0.1, 0.2)) / 100) * 100;
+      me.troops = Math.max(1000, me.troops - lost);
+      log(s, `🛡️ ${r.name}(${owner.name})이(가) ${n.name}의 약탈을 막아냈습니다. (해적 -${fmtTroops(lost)})`, [n.id, r.owner], 'info');
+    }
+  }
 }
 
 // 도적 무리가 6곳 이상을 차지하면 나라로 자리 잡음

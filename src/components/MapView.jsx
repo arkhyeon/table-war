@@ -183,7 +183,7 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
         const x = a.cx + (b.cx - a.cx) * e, y = a.cy + (b.cy - a.cy) * e;
         const hop = Math.abs(Math.sin(p * Math.PI * 9)) * u * 0.4; // 발맞춰 걷는 들썩임
         const sway = Math.sin(p * Math.PI * 9) * 4; // 좌우 흔들림(도)
-        const fight = m.k === 'win' || m.k === 'lose' || m.k === 'siege';
+        const fight = m.k === 'win' || m.k === 'lose' || m.k === 'siege' || m.k === 'break';
         const after = t - TRAVEL;
         return (
           <g key={m.id}>
@@ -601,9 +601,16 @@ export default function MapView({ world, regions, nations, selected, targets, on
               const gi = visible ? genCount?.[r.id] : null;
               const gc = gi ? (typeof gi === 'number' ? gi : gi.n) : 0;
               const b = reg.buildings;
-              const icons = [b.walls && `🏰${b.walls < 3 ? b.walls : ''}`, b.market && '💰', b.port && '⚓', b.barracks && '⚔️'].filter(Boolean);
+              const icons = [reg.bandit && '🏴', b.walls && `🏰${b.walls < 3 ? b.walls : ''}`, b.market && '💰', b.port && '⚓', b.barracks && '⚔️'].filter(Boolean);
               // 멀리서 볼 때 병력 모르는 지역은 이름표 대신 작은 점 (큰 지도에서 지도가 이름표로 덮이지 않게)
-              if (!known && !zoomed) return <circle key={r.id} cx={r.cx} cy={r.cy} r={s * 0.28} fill={own === null ? '#9b9584' : col} stroke="#fffdf6" strokeWidth={s * 0.08} opacity={0.85} />;
+              if (!known && !zoomed)
+                return reg.bandit ? (
+                  <text key={r.id} x={r.cx} y={r.cy} dy={s * 0.3} fontSize={s * 0.9} textAnchor="middle">
+                    🏴
+                  </text>
+                ) : (
+                  <circle key={r.id} cx={r.cx} cy={r.cy} r={s * 0.28} fill={own === null ? '#9b9584' : col} stroke="#fffdf6" strokeWidth={s * 0.08} opacity={0.85} />
+                );
               const army = showArmy && own !== null && known && reg.troops > 0;
               const ib = s * 0.95; // 아이콘 배지 크기
               return (

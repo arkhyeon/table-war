@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, enemiesOf, UPKEEP, trainCheck, doTrain, trainCost } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, enemiesOf, UPKEEP, trainCheck, doTrain, trainCost, castleCap, wallUpCheck, wallUpCost, doWallUp } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -232,6 +232,7 @@ function massInfo(world) {
 
 export function aiActions(s, world, nid) {
   const n = s.nations[nid];
+  if (n.pirate) return; // 해적은 따로 움직임 (pirateTurn)
   updateGoal(s, world, nid);
   updatePosture(s, world, nid);
   const building = n.posture === 'build';
@@ -458,6 +459,9 @@ export function aiActions(s, world, nid) {
         return !e.sea && e.owner !== null && e.owner !== nid && !foes.has(e.owner) && !s.nations[e.owner].horde && getRel(s, nid, e.owner).type !== 'alliance' && e.troops > s.regions[r].troops * 0.8;
       });
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 5).map((r) => ({ r, sd: side(r) })).sort((a, b) => b.sd - a.sd || threat[b.r] - threat[a.r])[0];
+      // 성에 병력이 넘치는 위협받는 땅은 증축
+      const up = mine.find((r) => s.regions[r].buildings.walls && threat[r] > 10 && s.regions[r].troops > castleCap(s, r) * 0.9 && !wallUpCheck(s, nid, r));
+      if (up !== undefined && n.gold - wallUpCost(s, up) > 60 * G) opts.push({ score: 18 + Math.min(threat[up], 40) * 0.3, run: () => doWallUp(s, nid, up) });
       if (wall && n.gold >= buildCost(s, wall.r, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall.r], 40) * 0.4 + (wall.sd ? 10 : 0) + (n.heartland && s.turn <= 30 ? 15 : 0), run: () => doBuild(s, world, nid, wall.r, 'walls') });
       const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
       if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2 + (building ? 6 : 0), run: () => doBuild(s, world, nid, mk, 'market') });
