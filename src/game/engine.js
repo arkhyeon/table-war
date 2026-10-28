@@ -1837,7 +1837,8 @@ export function spawnGeneral(s, nid, rng, forced = false) {
   });
   if (!cands.length) {
     for (const [pool, list] of Object.entries(POOLS)) {
-      if (pool.startsWith('tk') && !n.pools[0].startsWith('tk')) continue;
+      // 삼국지는 삼국지 인물만, 다른 시대는 삼국지 인물 없이 (시대가 다른 인물이 섞이지 않게)
+      if (n.pools[0].startsWith('tk') ? !pool.startsWith('tk') : pool.startsWith('tk')) continue;
       for (const g of list) if (!s.usedGen[g.id]) cands.push({ g, w: 0.2 * generalWeight(s, g, strength) });
     }
   }

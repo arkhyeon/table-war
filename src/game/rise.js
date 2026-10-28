@@ -9,7 +9,7 @@ import { fmtGold } from './format.js';
 import { emptyDeal, describeDeal, applyDeal } from './diplomacy.js';
 import { colorFor } from './setup.js';
 import { stateRng } from './rng.js';
-import { PIRATES, FRONTIER, outlawName } from './outlaws.js';
+import { PIRATES, FRONTIER, RAID_LEADERS, outlawName } from './outlaws.js';
 import { getScenario } from './scenarios.js';
 
 // 신흥국 출현: 몰락한 왕의 부흥, 빈 땅의 봉기 (영웅 봉기·계승 분쟁은 아래 장수 드라마)
@@ -49,10 +49,20 @@ function freshName(s, civ, rng) {
 }
 
 // 장수 하나 고르기: 떠돌던 장수(멸망국 출신) → 역사 장수 풀 → 이름 없는 호족
+// 이민족·해적 수령: 그 무리의 역사 속 수령이 있으면 그 이름으로, 없으면 지어낸 이름
+function raidLeader(s, name, civ, rng) {
+  const base = name.replace(/ \d+$/, '');
+  const used = new Set(Object.values(s.generals).map((g) => g.name));
+  const cand = (RAID_LEADERS[base] || []).filter((x) => !used.has(x));
+  if (cand.length) return { data: parseGeneral(`${rng.pick(cand)}|70|70|60|50|통솔`, `raid_${s.turn}_${s.nations.length}`) };
+  // 역사 속 수령이 없으면 지어낸 이름 (다른 시대 인물이 끼지 않게)
+  const nm = makeNamer(rng)(civ);
+  return { data: parseGeneral(`${nm} ${/해적|왜구|수적|바이킹|코르세어/.test(base) ? '두목' : '수령'}|70|70|60|50|통솔`, `raid_${s.turn}_${s.nations.length}`) };
+}
 function leaderFor(s, civ, rng) {
   const wand = Object.values(s.generals).filter((g) => g.status === 'gone' && (g.pool === civ || CIVS[g.pool]?.name === CIVS[civ]?.name));
   if (wand.length) return { old: rng.pick(wand) };
-  const pool = (POOLS[civ] || []).filter((g) => !s.usedGen[g.id]);
+  const pool = (POOLS[civ] || (civ === 'tk' ? POOLS.tk_free || [] : [])).filter((g) => !s.usedGen[g.id]);
   if (pool.length) return { data: rng.pick(pool) };
   const nm = makeNamer(rng)(civ);
   return { data: parseGeneral(`${nm} 호족|${rng.int(55, 75)}|${rng.int(55, 75)}|${rng.int(45, 70)}|${rng.int(45, 70)}|통솔`, `rise_${s.turn}_${nm}`) };
@@ -480,8 +490,8 @@ export function spawnHorde(s, world, rng) {
   if (!opts.length) return;
   const o = rng.weighted(opts, (x) => x.w * ew(x.rids[0]));
   const civ = civNear(s, world, o.rids[0]);
-  const lead = leaderFor(s, civ, rng);
   const n = newNation(s, civ, o.from !== undefined ? frontierName(s, civ, rng) : hordeName(s, civ, rng));
+  const lead = o.from !== undefined ? raidLeader(s, n.name, civ, rng) : leaderFor(s, civ, rng);
   Object.assign(n, { horde: true, aggression: 1, color: 'hsl(25, 12%, 30%)', gold: 0 });
   seize(s, world, n, o.rids, o.mult);
   // 변방 이민족: 상위 장수 10명의 병력 중간값 × 등급, 대장도 그 중간값 능력치
@@ -522,7 +532,7 @@ export function spawnPirates(s, world, rng) {
   n.tier = tier[0];
   r.troops = Math.round((base.troops * tier[1]) / 100) * 100;
   n.pirateMax = r.troops * 2;
-  const lead = leaderFor(s, civ, rng);
+  const lead = raidLeader(s, n.name, civ, rng);
   const king = lead.old || addGeneral(s, lead.data, n.id, z, rng, true);
   hardenLeader(king, base, tier);
   finish(s, n, king);
