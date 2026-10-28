@@ -321,7 +321,7 @@ export function aiActions(s, world, nid) {
         let keep = reg.sea ? 0 : threat[r] > 0 ? Math.min(Math.floor(reg.troops * ((n.fronts || 0) >= 3 ? 0.6 : 0.33)), Math.ceil(threat[r] * ((n.fronts || 0) >= 3 ? 700 : 300))) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
         // 군단 규칙: 나라는 장수가 이끄는 군단만 칠 수 있고, 병력은 지휘 한도까지
-        if (!gens.length && t.owner !== null && !t.sea && !s.nations[t.owner].horde) continue;
+        if (!gens.length && !n.horde) continue;
         const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep, commandCap(s, gens));
         if (count < 2000 && !reg.sea) continue;
         if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;

@@ -551,8 +551,8 @@ export function canSail(s, nid, from, genIds) {
 export const movable = (s, rid) => Math.max(0, s.regions[rid].troops - (s.regions[rid].moved || 0));
 const arrive = (r, n) => (r.moved = Math.min(r.troops, (r.moved || 0) + n));
 
-// ───────── 군단(토탈워식): 다른 나라를 치려면 장수가 이끄는 군단이 필요, 병력은 지휘 한도까지 ─────────
-// 지휘 한도: 가장 통솔 높은 장수 4천+통솔×300, 함께 가는 장수는 절반씩 더함. 장수 없는 소부대는 5천(빈 땅 토벌만)
+// ───────── 군단(토탈워식): 공격은 빈 땅이든 나라든 장수가 이끄는 군단만, 병력은 지휘 한도까지 ─────────
+// 지휘 한도: 가장 통솔 높은 장수 8천+통솔×800, 함께 가는 장수는 절반씩 더함. 장수 없는 무리(도적)는 5천
 export const SQUAD = 5000;
 export function commandCap(s, genIds) {
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active');
@@ -583,7 +583,7 @@ export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}
   if (count < 1 || count > maxCount) return fr.sea ? '이동 병력이 올바르지 않습니다.' : '이동 병력이 올바르지 않습니다 (최소 1명은 남겨야 함).';
   // 군단 규칙: 나라를 치려면 장수가 필요하고, 병력은 지휘 한도까지
   if (isAttack(s, nid, to)) {
-    if (!genIds.length && tr.owner !== null && !s.nations[tr.owner].horde) return '나라를 치려면 장수가 이끄는 군단이 필요합니다. (장수 없는 소부대는 빈 땅·도적만)';
+    if (!genIds.length && !s.nations[nid].horde) return '공격하려면 장수가 이끄는 군단이 필요합니다. (빈 땅·도적도 마찬가지)';
     const cap = commandCap(s, genIds);
     if (count > cap) return `지휘 한도 초과: ${genIds.length ? '이 장수들은' : '장수 없는 소부대는'} ${cap.toLocaleString('ko-KR')}명까지 이끌 수 있습니다.`;
   }
