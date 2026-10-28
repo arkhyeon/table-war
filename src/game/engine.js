@@ -633,7 +633,8 @@ export function moveCheck(s, world, nid, from, to, count, genIds = [], opts = {}
   // 군단 규칙: 나라를 치려면 장수가 필요하고, 병력은 지휘 한도까지
   if (isAttack(s, nid, to)) {
     if (!genIds.length && !s.nations[nid].horde) return '공격하려면 장수가 이끄는 군단이 필요합니다. (빈 땅·도적도 마찬가지)';
-    const cap = commandCap(s, genIds);
+    // 이민족 무리는 장수가 없어도 무리 전체로 움직임
+    const cap = s.nations[nid].horde && !genIds.length ? Infinity : commandCap(s, genIds);
     if (count > cap) return `지휘 한도 초과: ${genIds.length ? '이 장수들은' : '장수 없는 소부대는'} ${cap.toLocaleString('ko-KR')}명까지 이끌 수 있습니다.`;
   }
   if (tr.owner !== null && tr.owner !== nid) {

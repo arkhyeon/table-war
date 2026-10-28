@@ -321,9 +321,11 @@ export function aiActions(s, world, nid) {
         // 사방이 적이면 비운 땅을 노린 기회 공격을 막도록 수비를 더 남김
         let keep = reg.sea ? 0 : threat[r] > 0 ? Math.min(Math.floor(reg.troops * ((n.fronts || 0) >= 3 ? 0.6 : 0.33)), Math.ceil(threat[r] * ((n.fronts || 0) >= 3 ? 700 : 300))) : 0;
         if (n.capital === r) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
+        // 이민족: 뺏은 땅마다 35%를 남겨 지킴 (휩쓸고 지나가 금방 다시 뺏기지 않게)
+        if (n.horde && !reg.sea) keep = Math.max(keep, Math.floor(reg.troops * 0.35));
         // 군단 규칙: 나라는 장수가 이끄는 군단만 칠 수 있고, 병력은 지휘 한도까지
         if (!gens.length && !n.horde) continue;
-        const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep, commandCap(s, gens));
+        const count = Math.min(movable(s, r), reg.sea ? reg.troops : reg.troops - 1000 - keep, n.horde && !gens.length ? Infinity : commandCap(s, gens));
         if (count < 2000 && !reg.sea) continue;
         if (moveCheck(s, world, nid, r, nb.id, count, gens)) continue;
         let need = t.owner === null ? 1.25 : s.coalition?.target === t.owner && inCoalition(s, nid) ? 1.05 : 1.15 + (1 - n.aggression) * 0.45;

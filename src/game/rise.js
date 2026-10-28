@@ -469,7 +469,7 @@ function hardenLeader(king, base, tier) {
 
 export function spawnHorde(s, world, rng) {
   if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
-  // 변방 침입·도적 봉기: 턴당 6% (해적 4%와 합쳐 10턴에 한 번꼴)
+  // 변방 침입: 턴당 6% (해적 4%와 합쳐 10턴에 한 번꼴)
   if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 4 || rng() >= 0.06) return;
   const ew = edgeWeight(s, world);
   const df = s.df || 1;
@@ -481,10 +481,8 @@ export function spawnHorde(s, world, rng) {
     const r = s.regions[rid];
     if (r.sea) continue;
     const w = world.regions[rid];
-    if (r.owner === null) {
-      const nb = w.neighbors.filter((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null).map((x) => x.id);
-      if (nb.length) opts.push({ rids: [rid, ...nb.slice(0, 2)], w: 1.5, mult: 1.6, sea: false });
-    } else if (!s.nations[r.owner].horde && s.nations[r.owner].capital !== rid && nationRegions(s, r.owner).length >= 4) {
+    // 도적은 처음부터 빈 땅의 소굴로만 (봉기 없음) — 게임 중엔 변방 이민족만 쳐들어옴
+    if (r.owner !== null && !s.nations[r.owner].horde && s.nations[r.owner].capital !== rid && nationRegions(s, r.owner).length >= 4) {
       // 남의 변경: 빈 땅에 닿았거나 지도 바깥쪽 국경이면 그 시대의 변방 이민족 (해안 약탈은 해적단이 따로)
       const wild = w.neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null);
       if (wild || ew(rid) > 3) opts.push({ rids: [rid], w: 1.2 * (1 + (size[r.owner] || 0) / 15), mult: 1, sea: false, from: r.owner });
@@ -594,9 +592,9 @@ export function pirateTurn(s, world, rng) {
       continue;
     }
     // 해적이 더 많음: 수비대를 쓸어버리고 살아남은 해적 수만큼 털어감
-    //  금 = 살아남은 해적 1명당 3금(그 땅 세금 3턴치까지), 백성 = 해적 2명이 1명씩 끌고 감(그 땅 인구의 30%까지), 항구 불탐, 끌려간 백성의 20%가 해적이 됨
+    //  금 = 살아남은 해적 1명당 3금(그 땅 세금 10턴치까지), 백성 = 해적 2명이 1명씩 끌고 감(그 땅 인구의 30%까지), 항구 불탐, 끌려간 백성의 20%가 해적이 됨
     const left = me.troops;
-    const gold = Math.min(owner.gold, regionTax(s, t) * 3, Math.round((left * 3) / 1000) * 1000);
+    const gold = Math.min(owner.gold, regionTax(s, t) * 10, Math.round((left * 3) / 1000) * 1000);
     const taken = Math.min(r.pop * 0.3, left / 2000);
     owner.gold -= gold;
     n.gold += gold;
