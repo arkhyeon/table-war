@@ -469,8 +469,8 @@ function hardenLeader(king, base, tier) {
 
 export function spawnHorde(s, world, rng) {
   if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
-  // 변방 침입: 턴당 6% (해적 4%와 합쳐 10턴에 한 번꼴)
-  if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 4 || rng() >= 0.06) return;
+  // 변방 침입: 턴당 8% (해적 4%와 합쳐 8턴에 한 번꼴)
+  if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 4 || rng() >= 0.08) return;
   const ew = edgeWeight(s, world);
   const df = s.df || 1;
   const opts = [];
@@ -485,7 +485,11 @@ export function spawnHorde(s, world, rng) {
     if (r.owner !== null && !s.nations[r.owner].horde && s.nations[r.owner].capital !== rid && nationRegions(s, r.owner).length >= 4) {
       // 남의 변경: 빈 땅에 닿았거나 지도 바깥쪽 국경이면 그 시대의 변방 이민족 (해안 약탈은 해적단이 따로)
       const wild = w.neighbors.some((x) => !s.regions[x.id].sea && s.regions[x.id].owner === null);
-      if (wild || ew(rid) > 3) opts.push({ rids: [rid], w: 1.2 * (1 + (size[r.owner] || 0) / 15), mult: 1, sea: false, from: r.owner });
+      if (wild || ew(rid) > 3) {
+        // 처음 들이닥칠 때 국경 땅과 맞닿은 같은 나라 땅까지 2~3곳을 휩쓺 (수도 제외)
+        const more = w.neighbors.map((x) => x.id).filter((x) => !s.regions[x].sea && s.regions[x].owner === r.owner && s.nations[r.owner].capital !== x).slice(0, 2);
+        opts.push({ rids: [rid, ...more], w: 1.2 * (1 + (size[r.owner] || 0) / 15), mult: 1, sea: false, from: r.owner });
+      }
     }
   }
   if (!opts.length) return;
@@ -500,14 +504,16 @@ export function spawnHorde(s, world, rng) {
   const tier = o.from !== undefined ? rollTier(rng) : null;
   if (tier) {
     n.tier = tier[0];
-    s.regions[o.rids[0]].troops = Math.round((base.troops * tier[1]) / 100) * 100;
+    // 본대는 처음 땅에, 휩쓴 땅마다 20%씩 남김
+    const total = Math.round((base.troops * tier[1]) / 100) * 100;
+    o.rids.forEach((rid, k) => { s.regions[rid].troops = Math.round((k === 0 ? total * (1 - 0.2 * (o.rids.length - 1)) : total * 0.2) / 100) * 100; });
   }
   const king = lead.old || addGeneral(s, lead.data, n.id, n.capital, rng, true);
   if (tier) hardenLeader(king, base, tier);
   finish(s, n, king);
   const where = s.regions[o.rids[0]].name;
   const story = o.from === undefined ? `${where} 일대에서 ${king.name}이(가) 이끄는 ${n.name}이(가) 일어나 약탈을 시작했습니다.` : o.sea ? `${n.name}의 배들이 ${where} 해안에 들이닥쳐 ${s.nations[o.from].name}의 땅을 빼앗았습니다.` : `변방 너머에서 ${king.name}이(가) 이끄는 ${n.name}이(가) 쳐들어와 ${s.nations[o.from].name}의 ${where}을(를) 휩쓸었습니다.`;
-  (s.turnEvents = s.turnEvents || []).push({ icon: o.from === undefined ? '🏴' : o.sea ? '🏴‍☠️' : '🐎', title: o.from === undefined ? `${n.name} 봉기` : `변방 침입 — ${n.tier} ${n.name}`, story: story + ' 이들과는 협상할 수 없습니다.', effect: tier ? `${tier[0]} 무리 ${fmtTroops(s.regions[o.rids[0]].troops)} · 대장 ${king.name}(무${king.war}/통${king.lead})` : `${o.rids.length}개 지역 장악`, nations: o.from !== undefined ? [n.id, o.from] : [n.id], global: true, rids: o.rids });
+  (s.turnEvents = s.turnEvents || []).push({ icon: o.from === undefined ? '🏴' : o.sea ? '🏴‍☠️' : '🐎', title: o.from === undefined ? `${n.name} 봉기` : `변방 침입 — ${n.tier} ${n.name}`, story: story + ' 이들과는 협상할 수 없습니다.', effect: tier ? `${tier[0]} 무리 ${fmtTroops(o.rids.reduce((a, x) => a + s.regions[x].troops, 0))} · ${o.rids.length}곳 장악 · 대장 ${king.name}(무${king.war}/통${king.lead})` : `${o.rids.length}개 지역 장악`, nations: o.from !== undefined ? [n.id, o.from] : [n.id], global: true, rids: o.rids });
   log(s, `${o.from === undefined ? '🏴' : '🐎'} ${n.name}이(가) ${where}에 나타났습니다!`, o.from !== undefined ? [n.id, o.from] : [n.id], 'warn');
   if (o.from !== undefined) checkElimination(s, world, o.from);
 }
@@ -594,15 +600,22 @@ export function pirateTurn(s, world, rng) {
     // 해적이 더 많음: 수비대를 쓸어버리고 살아남은 해적 수만큼 털어감
     //  금 = 살아남은 해적 1명당 3금(그 땅 세금 10턴치까지), 백성 = 해적 2명이 1명씩 끌고 감(그 땅 인구의 30%까지), 항구 불탐, 끌려간 백성의 20%가 해적이 됨
     const left = me.troops;
-    const gold = Math.min(owner.gold, regionTax(s, t) * 10, Math.round((left * 3) / 1000) * 1000);
-    const taken = Math.min(r.pop * 0.3, left / 2000);
+    // 털어갈 몫: 살아남은 해적 1명당 10금 (그 땅 세금 10턴치까지)
+    const want = Math.min(regionTax(s, t) * 10, Math.round((left * 10) / 1000) * 1000);
+    const gold = Math.min(owner.gold, want);
+    // 금이 모자라면 그만큼 백성을 더 끌고 감 (모자란 20금당 1명, 합쳐 인구의 절반까지)
+    const short = want - gold;
+    const taken = Math.min(r.pop * 0.5, left / 2000 + short / 20 / 1000);
     owner.gold -= gold;
     n.gold += gold;
     r.pop = Math.max(1, Math.round((r.pop - taken) * 10) / 10);
     const burn = !!r.buildings.port;
     if (burn) r.buildings.port = 0;
+    // 금이 절반도 안 나오면 분풀이로 시장까지 불태움
+    const burnMk = short > want / 2 && !!r.buildings.market;
+    if (burnMk) r.buildings.market = 0;
     me.troops = Math.min(n.pirateMax || left * 2, left + Math.round((taken * 1000 * 0.2) / 100) * 100);
-    log(s, `🏴‍☠️ ${n.name}(${fmtTroops(P)})이(가) ${r.name}(${owner.name})을(를) 덮쳤습니다! 수비대 ${fmtTroops(D)} 전멸(해적 -${fmtTroops(dead)}), 금 -${fmtGold(gold)}, 백성 ${Math.round(taken * 10) / 10}천 납치${burn ? ', 항구 불탐' : ''}.`, [n.id, r.owner], 'warn');
+    log(s, `🏴‍☠️ ${n.name}(${fmtTroops(P)})이(가) ${r.name}(${owner.name})을(를) 덮쳤습니다! 수비대 ${fmtTroops(D)} 전멸(해적 -${fmtTroops(dead)}), 금 -${fmtGold(gold)}, 백성 ${Math.round(taken * 10) / 10}천 납치${short > 0 ? '(금이 모자라 더 끌고 감)' : ''}${burn ? ', 항구 불탐' : ''}${burnMk ? ', 시장 불탐' : ''}.`, [n.id, r.owner], 'warn');
   }
 }
 
