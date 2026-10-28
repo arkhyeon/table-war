@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MapView, { Army, armyTier } from './MapView.jsx';
 import { MOVES, newDuel, duelRound, aiMove, duelist, duelHp, readChance, bestResponse } from '../game/duel.js';
 import { decodeOwners } from '../game/fog.js';
@@ -28,9 +28,23 @@ import Slider from './Slider.jsx';
 import { G } from '../game/rules.js';
 
 export function Modal({ title, onClose, wide, children }) {
+  // Enter = 기본(노란) 버튼, Esc = 닫기
+  const ref = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!ref.current || ref.current.closest('.modal-bg') !== document.querySelectorAll('.modal-bg')[document.querySelectorAll('.modal-bg').length - 1]) return;
+      if (e.key === 'Escape' && onClose) { e.stopPropagation(); onClose(); }
+      if (e.key === 'Enter' && !e.isComposing && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON') {
+        const btn = [...ref.current.querySelectorAll('button.primary')].filter((b) => !b.disabled).pop();
+        if (btn) { e.preventDefault(); btn.click(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
   return (
     <div className="modal-bg" onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}>
-      <div className={'modal' + (wide ? ' wide' : '')}>
+      <div className={'modal' + (wide ? ' wide' : '')} ref={ref}>
         <div className="modal-head">
           <h3 style={{ margin: 0 }}>{title}</h3>
           {onClose && (
@@ -612,7 +626,7 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
 }
 
 // ───────── AI 제안 ─────────
-export function ProposalModal({ world, game, act }) {
+export function ProposalModal({ world, game, act, onClose }) {
   const p = game.proposals[0];
   const from = game.nations[p.from];
   // 군단의 지원 요청 · 도적의 협박
@@ -626,7 +640,7 @@ export function ProposalModal({ world, game, act }) {
         return res;
       });
     return (
-      <Modal title={p.kind === 'fief' ? `🏯 ${from.name}의 요청` : p.kind === 'ally' ? `🆘 동맹국 ${from.name}의 원군 요청` : `🏴 ${from.name}의 협박`}>
+      <Modal onClose={onClose} title={`${p.kind === 'fief' ? `🏯 ${from.name}의 요청` : p.kind === 'ally' ? `🆘 동맹국 ${from.name}의 원군 요청` : `🏴 ${from.name}의 협박`}${game.proposals.length > 1 ? ` (1/${game.proposals.length})` : ''}`}>
         <p>{fixJosa(p.text)}</p>
         <WhereMap world={world} game={game} ids={[p.from]} />
         <p className="muted" style={{ fontSize: 13 }}>보유 금 {fmtGold(game.nations[game.playerId].gold)}</p>
@@ -641,7 +655,7 @@ export function ProposalModal({ world, game, act }) {
   }
   const err = from.alive ? validateDeal(game, world, p.from, game.playerId, p.deal) : '제안국이 멸망했습니다.';
   return (
-    <Modal title={`📨 ${from.name}의 제안`}>
+    <Modal onClose={onClose} title={`📨 ${from.name}의 제안${game.proposals.length > 1 ? ` (1/${game.proposals.length})` : ''}`}>
       <p>{fixJosa(p.text)}</p>
       <WhereMap world={world} game={game} ids={[p.from, ...game.nations.filter((n) => n.alive && n.id !== p.from && n.id !== game.playerId && p.text.includes(n.name)).map((n) => n.id)]} />
       <p className="muted" style={{ fontSize: 13 }}>
@@ -855,7 +869,8 @@ export function HelpModal({ onClose }) {
           <li><b>지역 숫자</b> = 주둔 병사 수. ♛ 수도, ★ 장수, 🏰💰⚓⚔️ 건물, ✂ 보급 끊김, 빨간 점 반란 위험.</li>
           <li><b>시간</b>: 2턴이 한 계절, 8턴이 1년. 날씨는 매 턴 바뀝니다.</li>
           <li><b>행동력(AP)</b>: 매 턴 3 + 영토 6곳당 1(최대 +7, 큰 지도는 더 많음) + 신속 특성. 속국 -1, 배신 시 다음 턴 -2.</li>
-          <li><b>이동·공격은 계획</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭 → 병력·함께 갈 장수를 고르고 계획. 바로 실행되지 않고 화살표로 표시되며(오른쪽 아래 목록에서 취소 가능), 턴 종료 때 모든 나라의 계획이 함께 처리됩니다. 같은 곳에 여러 나라 군대가 몰리면 큰 군대부터 차례로 맞붙고, 아군 증원은 전투 전에 합류합니다. 출발한 병력은 그 턴에 다시 계획할 수 없습니다. 일기토를 신청했다면 그 전투 차례에 일기토 창이 뜹니다.</li>
+          <li><b>빠른 조작</b>: PC는 고른 내 땅을 <b>끌어서</b> 옆 땅에 놓으면, 폰은 내 땅을 <b>꾹 누른 뒤 끌어서</b> 놓으면 이동·공격 창이 바로 뜹니다. 창에서 Enter = 확인, Esc = 닫기. 외교 제안은 📨, 지난 턴 소식은 📰(왼쪽 위)에 모이고 3턴 지나면 무산됩니다. 전투 다시보기는 내가 싸운 전투만.</li>
+          <li><b>이동·공격은 계획</b>: 내 지역 선택 → [이동·공격] 또는 M → 인접 지역 클릭(또는 끌어 놓기) → 병력·함께 갈 장수를 고르고 계획. 바로 실행되지 않고 화살표로 표시되며(오른쪽 아래 목록에서 취소 가능), 턴 종료 때 모든 나라의 계획이 함께 처리됩니다. 같은 곳에 여러 나라 군대가 몰리면 큰 군대부터 차례로 맞붙고, 아군 증원은 전투 전에 합류합니다. 출발한 병력은 그 턴에 다시 계획할 수 없습니다. 일기토를 신청했다면 그 전투 차례에 일기토 창이 뜹니다.</li>
           <li><b>바다</b>: 바다는 구역(점선)으로 나뉩니다. 항구(또는 수군 장수)가 있는 해안에서 승선 → 바다 구역을 한 칸씩 항해 → 해안에 상륙(-25%). 험한 해안은 절벽 상륙(-55%, 행동력 +1). 바다 날씨: 풍랑·순풍·용오름·해무·폭풍. 적 함대가 있는 구역은 해전으로 뚫어야 하고, 함대로 바닷길을 막을 수 있습니다. 바다의 함대는 매 턴 2%(폭풍 10%) 줄어듭니다. 내 함대가 있는 바다는 보급로가 됩니다.</li>
           <li><b>지형</b>: 숲 방어 +15%, 구릉 +25%, 산지 +10%. <b>험산 경계</b>(경계선 위 작은 봉우리)로 넘으면 공격 -35%·AP+1, 다른 경계로 돌아가면 없음. 고산(진한 회색)은 통행 불가. 강 건너 공격 -20%, 좁은 해협(도버·보스포루스 등) 건너기 -30%·AP+1.</li>
           <li><b>내선 작전</b>: 내 땅 안 이동은 행동력이 들지 않고, 내 땅으로만 이어지면 한 번에 <b>3칸</b>까지 이동합니다.</li>

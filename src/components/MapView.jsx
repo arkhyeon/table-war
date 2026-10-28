@@ -219,11 +219,15 @@ function MoveLayer({ world, nations, moves, visible, outline, s }) {
   );
 }
 
-export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally, threats, landmarks, armies, selArmy, onArmy }) {
+export default function MapView({ world, regions, nations, selected, targets, onClick, onContext, canDrag, onDragMove, genCount, compact, battles, fmt = (n) => n, view, showTroops, weather, cutSet, focus, flash, moves, showArmy = true, home, orders, rally, threats, landmarks, armies, selArmy, onArmy }) {
   const clipId = 'land' + useId().replace(/:/g, '');
   const svgRef = useRef(null);
   const [vb, setVb] = useState([0, 0, world.W, world.H]);
   const drag = useRef(null);
+  // 끌어서 이동: PC는 고른 내 땅에서 끌기, 폰은 내 땅을 꾹 누른 뒤 끌기 → 놓은 땅으로 이동·공격 창
+  const dragMove = useRef(null);
+  const [dm, setDm] = useState(null);
+  const holdTimer = useRef(null);
 
   // 처음 화면: 세로로 긴 화면(폰)이면 높이에 맞춰 꽉 채우고 내 수도 쪽을 보여줌
   const fitView = () => {
@@ -316,6 +320,17 @@ export default function MapView({ world, regions, nations, selected, targets, on
       return;
     }
     drag.current = { x: e.clientX, y: e.clientY, vb, moved: false };
+    const el = e.target.closest?.('[data-rid]');
+    const rid = el ? +el.dataset.rid : null;
+    clearTimeout(holdTimer.current);
+    if (rid === null || !canDrag?.(rid)) return;
+    const start = () => {
+      dragMove.current = { from: rid, to: rid };
+      setDm({ from: rid, to: rid });
+      if (drag.current) drag.current.moved = true; // 지도 끌기·클릭과 겹치지 않게
+    };
+    if (e.pointerType === 'mouse') { if (rid === selected) start(); }
+    else holdTimer.current = setTimeout(() => { if (drag.current && !drag.current.panned) { start(); navigator.vibrate?.(15); } }, 380);
   };
   const onPointerMove = (e) => {
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
@@ -329,17 +344,32 @@ export default function MapView({ world, regions, nations, selected, targets, on
       setVb([mx - (mx - x) * (nw / w), my - (my - y) * (nh / h), nw, nh]);
       return;
     }
+    if (dragMove.current) {
+      const el = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('[data-rid]');
+      const to = el ? +el.dataset.rid : dragMove.current.to;
+      if (to !== dragMove.current.to) { dragMove.current.to = to; setDm({ ...dragMove.current }); }
+      return;
+    }
     const d = drag.current;
     if (!d) return;
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < 5) return;
     d.moved = true;
+    d.panned = true;
+    clearTimeout(holdTimer.current);
     const rect = svgRef.current.getBoundingClientRect();
     const [x, y, w, h] = d.vb;
     const scale = Math.min(rect.width / w, rect.height / h);
     setVb([x - dx / scale, y - dy / scale, w, h]);
   };
   const onPointerUp = (e) => {
+    clearTimeout(holdTimer.current);
+    const m = dragMove.current;
+    if (m) {
+      dragMove.current = null;
+      setDm(null);
+      if (m.to !== null && m.to !== m.from) onDragMove?.(m.from, m.to);
+    }
     pointers.current.delete(e?.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     setTimeout(() => (drag.current = null), 0);
@@ -551,6 +581,12 @@ export default function MapView({ world, regions, nations, selected, targets, on
             ))}
           {selected !== null && selected !== undefined && world.regions[selected].sea && <path d={statics.outline[selected]} fill="#ffffff22" fillRule="evenodd" stroke="#fff" strokeWidth={3} />}
           {seaLines}
+          {dm && dm.to !== dm.from && (
+            <g pointerEvents="none">
+              <line x1={world.regions[dm.from].cx} y1={world.regions[dm.from].cy} x2={world.regions[dm.to].cx} y2={world.regions[dm.to].cy} stroke="#15171b" strokeWidth={s * 0.6} strokeLinecap="round" opacity={0.6} />
+              <line x1={world.regions[dm.from].cx} y1={world.regions[dm.from].cy} x2={world.regions[dm.to].cx} y2={world.regions[dm.to].cy} stroke="#ffe066" strokeWidth={s * 0.32} strokeLinecap="round" markerEnd={`url(#${clipId}-ah)`} />
+            </g>
+          )}
           {(world.straitLines || []).map(([ax, ay, bx, by], k) => (
             <g key={'st' + k}>
               <line x1={ax} y1={ay} x2={bx} y2={by} stroke="#15171b" strokeWidth={s * 0.42} strokeLinecap="round" opacity={0.6} />

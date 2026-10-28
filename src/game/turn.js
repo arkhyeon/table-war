@@ -318,6 +318,15 @@ export function endTurnFinish(s, world) {
   upkeep(s, world);
   // 새 턴: 모든 부대가 다시 움직일 수 있음
   for (const r of s.regions) delete r.moved;
+  // 답하지 않은 제안·요청은 3턴 지나면 무산 (알림에 쌓이지 않게)
+  if (s.proposals?.length) {
+    for (const p of s.proposals) p.t = p.t ?? s.turn;
+    const old = s.proposals.filter((p) => s.turn - p.t >= 3);
+    if (old.length) {
+      s.proposals = s.proposals.filter((p) => s.turn - p.t < 3);
+      log(s, `📨 답하지 않은 제안·요청 ${old.length}건이 무산되었습니다.`, [s.playerId], 'diplo');
+    }
+  }
   generalDrama(s, world, stateRng(s));
   riseNations(s, world, stateRng(s));
   fortune(s, world, stateRng(s));

@@ -122,7 +122,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     // 빠른 진행 멈춤: 내 땅이 바뀌었거나, 내가 싸웠거나, 고를 일이 생기면 (계속 가는 중엔 다시보기·소식 창을 띄우지 않음)
     if (fast) {
       const mine = (s.battles || []).some((b) => b.attacker === pid || b.defender === pid);
-      const ask = (s.proposals || []).length || (s.choices || []).length || (s.levelChoices || []).length || (s.turnEvents || []).some((e) => e.nations?.includes(pid) && e.global);
+      const ask = (s.choices || []).length || (s.levelChoices || []).length || (s.turnEvents || []).some((e) => e.nations?.includes(pid) && e.global);
       const changed = s.prevStat && playerStat(s).regions !== s.prevStat.regions;
       const stop = mine || ask || changed || fast <= 1;
       setFast(stop ? 0 : fast - 1);
@@ -132,16 +132,21 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       const a = ACHIEVEMENTS.find((x) => x.id === id);
       if (a) toast(`🏅 업적 달성: ${a.icon} ${a.name}`);
     }
-    const after = visibleSet(s, world, pid);
-    const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid || before.has(b.to) || after.has(b.to) || before.has(b.from));
+    // 다시보기는 내가 싸운 전투만, 소식 창은 내게 큰일(땅을 잃음·나를 겨냥한 사건)이 있을 때만 — 나머지는 📰 알림으로
+    const seen = (s.battles || []).filter((b) => b.attacker === pid || b.defender === pid);
     if (s.opts?.showBattles !== false && seen.length && !s.gameOver) setReplay({ list: seen, i: 0 });
-    else if ((s.turnNews?.length || s.turnEvents?.length) && !s.gameOver) setModal({ type: 'news' });
+    else if (bigNews(s) && !s.gameOver) setModal({ type: 'news' });
+    else if (s.turnNews?.length || s.turnEvents?.length) toast(`📰 소식 ${(s.turnNews?.length || 0) + (s.turnEvents?.length || 0)}건 — 왼쪽 위 📰에서 볼 수 있어요`);
     if (!s.nations[s.playerId].alive) setSelected(null);
   };
 
+  // 제안 창: 다 답하면 닫힘
+  useEffect(() => {
+    if (modal?.type === 'proposal' && !(game.proposals || []).length) setModal(null);
+  }, [modal, game.proposals]);
   // 빠른 진행: 창이 없을 때 다음 턴으로
   useEffect(() => {
-    if (!fast || spect || modal || replay || busy || game.gameOver || (game.proposals || []).length || (game.choices || []).length || (game.levelChoices || []).length) return;
+    if (!fast || spect || modal || replay || busy || game.gameOver || (game.choices || []).length || (game.levelChoices || []).length) return;
     const t = setTimeout(doEndTurn, 250);
     return () => clearTimeout(t);
   });
@@ -290,10 +295,13 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     if (selected !== null && game.regions[selected].owner === game.playerId && (edgeBetween(world, selected, rid) || marchVia(world, game, selected, rid) !== null)) openMove(selected, rid);
   };
 
+  // 내게 큰일: 땅을 잃었거나, 나를 겨냥한 사건(변방 침입·해적·반란 등)
+  const bigNews = (s) => (s.prevStat && playerStat(s).regions < s.prevStat.regions) || (s.turnEvents || []).some((e) => e.nations?.includes(s.playerId) && e.nations.length <= 3);
+  const newsCount = (game.turnNews?.length || 0) + (game.turnEvents?.length || 0);
   const inc = income(game, game.playerId);
   const finishReplay = useCallback(() => {
     setReplay(null);
-    if (game.turnNews?.length || game.turnEvents?.length) setModal({ type: 'news' });
+    if (bigNews(game)) setModal({ type: 'news' });
   }, [game.turnNews, game.turnEvents]);
   const toggleReplaySpeed = () => setReplayDelay((d) => (d < 1000 ? 1200 : 550));
   const nextReplay = useCallback(() => {
@@ -353,7 +361,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const proposal = game.proposals[0];
   const showLevel = (game.levelChoices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
   const showChoice = !showLevel && (game.choices || []).length > 0 && !modal && !replay && !game.gameOver && !spect;
-  const showProposal = proposal && !showChoice && !showLevel && !modal && !replay && !game.gameOver;
+  // 외교 제안·요청은 저절로 띄우지 않고 알림(📨)으로 — 누르면 엶
+  const showProposal = proposal && modal?.type === 'proposal' && !game.gameOver;
 
   return (
     <div className="game">
@@ -467,6 +476,12 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
             showArmy={game.opts?.showArmy !== false}
             onClick={onRegionClick}
             onContext={onRegionContext}
+            canDrag={(rid) => !spect && !pick && !selArmy && me.alive && game.regions[rid].owner === pid && game.regions[rid].troops > 1}
+            onDragMove={(from, to) => {
+              setSelected(from);
+              if (!edgeBetween(world, from, to) && marchVia(world, game, from, to) === null) return toast('맞닿은 땅(또는 내 땅으로 3칸 안)으로만 보낼 수 있습니다.', true);
+              openMove(from, to);
+            }}
           />
           {replay && <BattleReplay game={game} battles={replay.list} index={replay.i} onNext={nextReplay} onSkip={finishReplay} delay={replayDelay} onSpeed={toggleReplaySpeed} />}
           {myOrders.length > 0 && (
@@ -498,6 +513,8 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
               {threats.length > 0 && <button className="sm" onClick={() => { setSelected(threats[0].to); setPanTo(threats[0].to); setTimeout(() => setPanTo(null), 1500); }}>⚠️ 위협받는 땅 {threats.length}</button>}
               {riskGens.length > 0 && <button className="sm" onClick={() => setModal({ type: 'gens' })}>😠 충성 위험 장수 {riskGens.length}</button>}
               {idleArmies.length > 0 && <button className="sm" onClick={() => { setSelArmy(idleArmies[0].id); setSelected(idleArmies[0].rid); }}>⚔️ 쉬는 부대 {idleArmies.length}</button>}
+              {(game.proposals || []).length > 0 && <button className="sm primary" onClick={() => setModal({ type: 'proposal' })}>📨 제안 {game.proposals.length}</button>}
+              {newsCount > 0 && <button className="sm" onClick={() => setModal({ type: 'news' })}>📰 소식 {newsCount}</button>}
               {canDraft && <button className="sm" onClick={() => setModal({ type: 'draft' })}>💂 징병 가능</button>}
               {me.ap > 0 && <span className="muted">행동력 {me.ap} 남음</span>}
             </div>
@@ -633,7 +650,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
       {modal?.type === 'news' && <NewsModal game={game} news={game.turnNews || []} events={myEvents} turn={game.turn} onClose={() => setModal(null)} />}
       {showLevel && <LevelChoiceModal game={game} act={act} />}
       {showChoice && <ChoiceModal world={world} game={game} act={act} />}
-      {showProposal && <ProposalModal world={world} game={game} act={act} />}
+      {showProposal && <ProposalModal world={world} game={game} act={act} onClose={() => setModal(null)} />}
       {ask && (
         <ConfirmModal
           text={ask.text}
