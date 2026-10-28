@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, enemiesOf, UPKEEP, trainCheck, doTrain, trainCost, castleCap, wallUpCheck, wallUpCost, doWallUp } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, enemiesOf, UPKEEP, DRAFT_GOLD, trainCheck, doTrain, trainCost, castleCap, wallUpCheck, wallUpCost, doWallUp } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -426,7 +426,12 @@ export function aiActions(s, world, nid) {
       if (!pir || s.regions[r].troops >= pir.troops * 1.2) continue;
       const need = Math.round((pir.troops * 1.3 - s.regions[r].troops) / 100) * 100;
       const src = world.regions[r].neighbors.map((x) => x.id).filter((x) => s.regions[x].owner === nid && !s.regions[x].sea && movable(s, x) > 3000 && !(threat[x] > 10)).sort((a, b) => s.regions[b].troops - s.regions[a].troops)[0];
-      if (src === undefined) continue;
+      if (src === undefined) {
+        // 보낼 병력이 없으면 그 땅에서 바로 징병
+        const amt = Math.min(need, Math.floor((n.gold - 30 * G) / DRAFT_GOLD / 100) * 100);
+        if (amt >= 1000 && !draftCheck(s, nid)) { opts.push({ score: 34, run: () => doDraft(s, nid, world, null, [{ rid: r, amt }]) }); break; }
+        continue;
+      }
       const cnt = Math.min(need, Math.floor((movable(s, src) - 2000) / 100) * 100);
       if (cnt >= 1000 && !moveCheck(s, world, nid, src, r, cnt, [])) { opts.push({ score: 34, run: () => planMove(s, world, nid, src, r, cnt, [], {}) }); break; }
     }
