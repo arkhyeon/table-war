@@ -41,7 +41,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
   const me = game.nations[game.playerId];
   const pid = game.playerId;
   const [replay, setReplay] = useState(null); // { list, i }
-  const [replayDelay, setReplayDelay] = useState(1200);
+  const [replayDelay, setReplayDelay] = useState(3000);
   const spect = !!game.spectator;
   const [auto, setAuto] = useState(false);
   const [autoSpeed, setAutoSpeed] = useState(900);
@@ -303,7 +303,7 @@ export default function Game({ world, scn, game, setGame, onExit, onLoad }) {
     setReplay(null);
     if (bigNews(game)) setModal({ type: 'news' });
   }, [game.turnNews, game.turnEvents]);
-  const toggleReplaySpeed = () => setReplayDelay((d) => (d < 1000 ? 1200 : 550));
+  const toggleReplaySpeed = () => setReplayDelay((d) => (d < 2000 ? 3000 : 1500));
   const nextReplay = useCallback(() => {
     if (!replay) return;
     if (replay.i + 1 < replay.list.length) setReplay({ ...replay, i: replay.i + 1 });

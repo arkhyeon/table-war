@@ -1088,31 +1088,38 @@ export function DuelModal({ game, attId, defId, onFinish }) {
 }
 
 // ───────── 전투 다시보기 ─────────
-export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 1200, onSpeed }) {
+export function BattleReplay({ game, battles, index, onNext, onSkip, delay = 3000, onSpeed }) {
   const b = battles[index];
+  // 마지막 전투는 저절로 닫히지 않음 · 마우스를 올리거나 누르고 있으면 멈춤
+  const [hold, setHold] = useState(false);
+  const last = index === battles.length - 1;
   useEffect(() => {
+    if (hold || last) return;
     const t = setTimeout(onNext, delay);
     return () => clearTimeout(t);
-  }, [index, onNext, delay]);
+  }, [index, onNext, delay, hold, last]);
   const att = game.nations[b.attacker];
   const def = b.defender === null ? null : game.nations[b.defender];
   const res = b.result === 'win' ? '점령' : b.result === 'siege' ? '포위 공격' : b.result === 'break' ? '수비군 격파' : '격퇴됨';
   return (
-    <div className="replay">
+    <div className="replay" onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)} onTouchStart={() => setHold(true)}>
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <b>
           ⚔️ 전투 {index + 1}/{battles.length}
         </b>
         <span className="row" style={{ gap: 4 }}>
           <button className="sm" onClick={onSpeed} title="다시보기 속도">
-            {delay < 1000 ? '⏩ 2배속' : '▶ 1배속'}
+            {delay < 2000 ? '⏩ 2배속' : '▶ 1배속'}
           </button>
-          <button className="sm" onClick={onNext}>
-            다음 ⏭
+          {hold && !last && <small className="muted">⏸ 멈춤</small>}
+          <button className={'sm' + (last ? ' primary' : '')} onClick={onNext}>
+            {last ? '닫기' : '다음 ⏭'}
           </button>
-          <button className="sm" onClick={onSkip}>
-            모두 건너뛰기
-          </button>
+          {!last && (
+            <button className="sm" onClick={onSkip}>
+              모두 건너뛰기
+            </button>
+          )}
         </span>
       </div>
       <div style={{ marginTop: 6 }}>
