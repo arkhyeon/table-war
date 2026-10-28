@@ -127,6 +127,8 @@ function tryRestore(s, world, rng) {
   const rids = [base, ...world.regions[base].neighbors.map((x) => x.id).filter((x) => !s.regions[x].sea && s.regions[x].owner === host && s.nations[host].capital !== x)].slice(0, 3);
   if (nationRegions(s, host).length - rids.length < 2) return false;
   const old = s.nations.find((n) => !n.alive && n.name === king.exKing && n.id !== s.playerId);
+  // 한 나라는 한 번만 부흥 (망했다 살았다를 되풀이하지 않게)
+  if (old?.restored) return false;
   let n;
   if (old) {
     n = old;
@@ -135,6 +137,7 @@ function tryRestore(s, world, rng) {
     if (s.nations.length >= MAX_IDS) return false;
     n = newNation(s, king.pool && CIVS[king.pool] ? king.pool : civNear(s, world, base), king.exKing);
   }
+  n.restored = true;
   seize(s, world, n, rids, 1);
   finish(s, n, king);
   announceRise(s, n, rids, '🔥', `${n.name} 부흥`, `옛 군주 ${king.name}이(가) ${s.nations[host].name}의 지배에 반기를 들고 옛 나라를 되살렸습니다.`, [host]);
@@ -295,7 +298,7 @@ export function endgame(s, world, rng) {
 
 export function riseNations(s, world, rng) {
   if (s.turn < 10 || s.opts?.noRise || topShare(s).share >= ENDGAME) return;
-  if (rng() < 0.04 && tryRestore(s, world, rng)) return;
+  if (rng() < 0.015 && tryRestore(s, world, rng)) return;
   if (rng() < 0.015) tryRise(s, world, rng);
 }
 
