@@ -450,8 +450,15 @@ export function aiActions(s, world, nid) {
       if (g && n.gold - trainCost(g) > 150 * G) opts.push({ score: 18 + Math.min(10, n.gold / (200 * G)), run: () => doTrain(s, nid, g.id) });
     }
     if (n.ap >= 2 && n.gold >= 110 * G) {
-      const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
-      if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4 + (n.heartland && s.turn <= 30 ? 15 : 0), run: () => doBuild(s, world, nid, wall, 'walls') });
+      // 싸우는 상대 쪽은 병력으로, 그 밖에 '문제되는 곳'(싸우지 않는 이웃이 대군을 붙여 둔 국경)은 성벽으로 막음
+      const foes = new Set(enemiesOf(s, nid));
+      if (n.goal !== null && n.goal !== undefined) foes.add(n.goal);
+      const side = (r) => world.regions[r].neighbors.some((x) => {
+        const e = s.regions[x.id];
+        return !e.sea && e.owner !== null && e.owner !== nid && !foes.has(e.owner) && !s.nations[e.owner].horde && getRel(s, nid, e.owner).type !== 'alliance' && e.troops > s.regions[r].troops * 0.8;
+      });
+      const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 5).map((r) => ({ r, sd: side(r) })).sort((a, b) => b.sd - a.sd || threat[b.r] - threat[a.r])[0];
+      if (wall && n.gold >= buildCost(s, wall.r, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall.r], 40) * 0.4 + (wall.sd ? 10 : 0) + (n.heartland && s.turn <= 30 ? 15 : 0), run: () => doBuild(s, world, nid, wall.r, 'walls') });
       const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
       if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2 + (building ? 6 : 0), run: () => doBuild(s, world, nid, mk, 'market') });
       const br = mine.filter((r) => !s.regions[r].buildings.barracks && dist[r] <= 1).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
