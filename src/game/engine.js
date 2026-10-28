@@ -137,6 +137,8 @@ export function makeBond(s, a, b) {
 // 명소: 이름난 고을. 가진 곳마다 나라 전체 세수 +5%
 export const landmarkBonus = (s, nid) => 1 + 0.05 * (s.landmarks || []).filter((r) => s.regions[r]?.owner === nid).length;
 
+// 병사 1명당 유지비 (금/턴)
+export const UPKEEP = 1;
 export function income(s, nid) {
   // 도적 무리: 세금도 유지비도 없음 (대신 매 턴 흩어짐)
   if (s.nations[nid]?.horde) return { gross: 0, upkeep: 0, army: 0, salary: 0, admin: 0, net: 0, troops: s.regions.reduce((a, r) => a + (r.owner === nid ? r.troops : 0), 0) };
@@ -149,7 +151,7 @@ export function income(s, nid) {
   // 중원국: 교통·물산의 중심이라 세수 +15%
   inc = Math.round(inc * (1 + nationTrait(s, nid, '상업')) * landmarkBonus(s, nid) * (s.nations[nid]?.heartland ? 1.15 : 1));
   // 병사 1명당 1금, 장수 녹봉 1인당 2,500금, 영토 15곳 초과분 1곳당 통치비 1,250금
-  const army = Math.round(troops * (1 - nationTrait(s, nid, '병참')));
+  const army = Math.round(troops * UPKEEP * (1 - nationTrait(s, nid, '병참')));
   const salary = nationGenerals(s, nid).length * G;
   // 세분화한 지도에서는 지역당 통치비를 나눔 (s.df = 세분화 배율)
   const df = s.df || 1;
@@ -431,7 +433,7 @@ export function doDraft(s, nid, world, dest = null, picks = null) {
   for (const x of list) {
     if (n.gold - spent < x.gold) continue;
     const r = s.regions[x.rid];
-    r.pop = Math.max(3, r.pop - (x.amt / 1000) * 0.5);
+    r.pop = Math.max(1, r.pop - x.amt / 1000); // 뽑은 만큼 백성이 줄어듦 (1천 명 = 인구 1천)
     if (dist && x.rid !== dest && dist.has(x.rid)) {
       const path = [x.rid];
       while (path[path.length - 1] !== dest) path.push(parent.get(path[path.length - 1]));
@@ -1069,7 +1071,7 @@ export function doDisband(s, nid, rid, count) {
   const amt = Math.min(Math.floor(count / 100) * 100, r.troops - 100);
   if (amt < 100) return fail('해산할 병력이 없습니다.');
   r.troops -= amt;
-  r.pop += (amt / 1000) * 0.3;
+  r.pop += amt / 1000; // 해산한 병사는 백성으로 돌아감
   return { ok: true, msg: `${r.name}에서 병사 ${fmtTroops(amt)}을 해산했습니다. (유지비 -${fmtGold(amt)}금/턴)` };
 }
 

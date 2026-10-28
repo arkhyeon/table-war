@@ -564,7 +564,7 @@ function fiefDo(s, f, pl) {
   if (r.owner !== f.id) return '그 땅을 이미 잃었습니다';
   if (pl.act === 'walls') r.buildings.walls = WALL_MAX;
   else if (pl.act === 'market') r.buildings.market = 1;
-  else if (pl.act === 'draft') { r.troops += pl.amt; r.pop = Math.max(3, r.pop - (pl.amt / 1000) * 0.5); }
+  else if (pl.act === 'draft') { r.troops += pl.amt; r.pop = Math.max(1, r.pop - pl.amt / 1000); }
   return null;
 }
 export function answerRequest(s, prop, yes) {

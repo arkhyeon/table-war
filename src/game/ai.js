@@ -424,8 +424,14 @@ export function aiActions(s, world, nid) {
       const cost = plan.reduce((a, x) => a + x.gold, 0);
       const men = plan.reduce((a, x) => a + x.amt, 0);
       const maxThreat = Math.max(0, ...mine.map((r) => threat[r] || 0));
+      // 필요한 만큼만: 국경 너머 적병의 0.7배 + 땅마다 4천 (병력 상한이 없으니 돈이 남는다고 무작정 뽑지 않음 — 1배 넘게 맞추면 이웃끼리 군비 경쟁이 끝없음)
+      const have = income(s, nid).troops;
+      const foe = mine.reduce((a, r) => a + (threat[r] || 0), 0) * 1000;
+      const need = foe * 0.7 + (mine.length * 4000) / (s.df || 1);
+      // 한 곳이라도 수비대보다 1.5배 넘는 적이 붙어 있으면 위급
+      const urgent = mine.some((r) => (threat[r] || 0) * 1000 > s.regions[r].troops * 1.5 && threat[r] > 5);
       // 늘어날 유지비(1명당 1금/턴)를 수입이 감당할 수 있거나, 금이 넉넉하면
-      if (cost < n.gold - 30 * G && (net > men * 0.6 || n.gold > 250 * G || maxThreat > 20)) opts.push({ score: 26 + Math.min(maxThreat, 40) * 0.5 + Math.min(20, n.gold / (150 * G)) + (building ? 8 : 0) + drive * 10, run: () => doDraft(s, nid, world, null) });
+      if (cost < n.gold - 30 * G && (have < need || urgent) && (net > men * 0.6 || n.gold > 250 * G || urgent)) opts.push({ score: 26 + Math.min(maxThreat, 40) * 0.5 + Math.min(20, n.gold / (150 * G)) + (building ? 8 : 0) + drive * 10, run: () => doDraft(s, nid, world, null) });
     }
     if (n.ap >= 2 && n.gold >= 110 * G) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];

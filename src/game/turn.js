@@ -170,21 +170,32 @@ function upkeep(s, world) {
     // 보급이 끊긴 지역: 병력 1~10% 감소
     const cut = !supply[r.owner]?.has(i);
     if (cut) r.troops = Math.max(100, Math.round((r.troops * (1 - rng.int(1, 10) / 100 * (1 - tv(gens, '보급')))) / 100) * 100);
-    // 자원병: 보급이 이어진 땅마다 매 턴 100명, 나라가 위태로우면 3배 (병영 2배, 인덕·모병 장수). 인구와 무관
-    if (!cut && !s.nations[r.owner].horde && (fed[r.owner] || danger[r.owner])) {
-      const mult = (danger[r.owner] ? 3 : 1) * (1 + tv(gens, '모병') + tv(gens, '인덕') * 0.2) * (r.buildings.barracks ? 2 : 1);
-      const v = Math.round((100 * mult) / (s.df || 1) / 100) * 100;
-      if (v > 0) {
-        r.troops += v;
-        volunteers[r.owner] = (volunteers[r.owner] || 0) + v;
-      }
-    }
     // 문관은 다스리며 성장, 무관은 병영에서 훈련
     for (const g of gens) {
       const govern = Math.max(0, (g.pol - 40) / 6) * (g.role === 'civ' ? 1.5 : 1);
       const drill = r.buildings.barracks && g.role !== 'civ' ? 3 : 0;
       if (govern + drill >= 1) gainExp(s, g, govern + drill);
     }
+  }
+  // 자원병: 인구와 무관하게 군주의 명성(평판)을 보고 모여듦 — 매 턴 평판×40명(평판 50이면 2천), 위태로우면 3배
+  // 수도와 병영 있는 땅에 나눠 들어옴(병영 2몫, 모병·인덕 장수가 있으면 더). 순수입 흑자일 때만(위기 때는 적자여도)
+  for (const n of s.nations) {
+    if (!n.alive || n.horde || n.capital === null || !(fed[n.id] || danger[n.id])) continue;
+    const total = Math.round(((n.reputation ?? 50) * 40 * (danger[n.id] ? 3 : 1)) / (s.df || 1) / 100) * 100;
+    if (total < 100) continue;
+    const spots = nationRegions(s, n.id).filter((i) => !s.regions[i].sea && supply[n.id]?.has(i) && (i === n.capital || s.regions[i].buildings.barracks));
+    if (!spots.length) continue;
+    const w = spots.map((i) => {
+      const gens = gensIn(s, i, n.id);
+      return ((s.regions[i].buildings.barracks ? 2 : 0) + (i === n.capital ? 1 : 0)) * (1 + tv(gens, '모병') + tv(gens, '인덕') * 0.2);
+    });
+    const sum = w.reduce((a, x) => a + x, 0);
+    spots.forEach((i, k) => {
+      const v = Math.round((total * w[k]) / sum / 100) * 100;
+      if (v <= 0) return;
+      s.regions[i].troops += v;
+      volunteers[n.id] = (volunteers[n.id] || 0) + v;
+    });
   }
   for (const [nid, v] of Object.entries(volunteers)) {
     if (+nid === s.playerId && !s.spectator) log(s, `🙋 ${s.nations[nid].name}${danger[nid] ? '이(가) 위기에 처하자 백성들이 앞다퉈' : '에'} 자원 입대했습니다. (총 +${fmtTroops(v)})`, [+nid], 'info');
