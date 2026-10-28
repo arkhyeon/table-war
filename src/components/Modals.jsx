@@ -10,7 +10,7 @@ import {
   estimateBattle, moveCheck, moveCost, doMove, planMove, gensIn, getRel, nationRegions, nationPower, nationGenerals, doRelocate,
   doRecruit, doExecute, doRelease, recruitChance, isRuler, edgeBetween, WALL_MAX, movable,
   ownDistances, reinforceTurns, frontierOf,
-  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, draftBase, draftAfford, DRAFT_GOLD, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
+  mercCap, mercPrice, bribeAgents, bribeChance, bribeCost, bribeCheck, doBribe, draftPlan, draftBase, draftAfford, DRAFT_GOLD, doDraft, draftCheck, DRAFT_AP, callTroops, doReward, rewardCheck, rewardCost, trainCheck, doTrain, trainCost, TRAIN_AP, TRAIN_COOLDOWN, pickTrait, commandCap, hireCost, hireCheck, hireMax, doHire, formArmy, garrisonOf, freeGens, PLOTS, plotChance, plotCheck, doPlot, doDisband,
 } from '../game/engine.js';
 import { fiefRegions, grantFiefCheck, grantFief, FIEF_TRIBUTE, answerRequest, pacifyCost, pacifyChance, doPacify, PERSONA } from '../game/rise.js';
 import { emptyDeal, proposeDeal, breakTreaty, validateDeal, applyDeal, TREATY_LABEL, annexCheck, doAnnex, sowCost, sowChance, sowCheck, doSow } from '../game/diplomacy.js';
@@ -438,7 +438,7 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
               <th>지</th>
               <th>정</th>
               <th>특성</th>
-              <th>충성</th>
+              <th>충성·포상·수련</th>
               <th>위치 / 재배치 ({COST.relocate}AP)</th>
             </tr>
           </thead>
@@ -478,6 +478,11 @@ export function GeneralsModal({ world, game, act, confirmIt, onClose, onFocus })
                       </div>
                     </>
                   )}
+                  <div>
+                    <button className="sm" disabled={!!trainCheck(game, pid, g.id)} title={trainCheck(game, pid, g.id) || `수련: 경험치 +${(g.level || 1) * 50} (다음 레벨의 절반) · 행동력 ${TRAIN_AP} · ${TRAIN_COOLDOWN}턴마다`} onClick={() => act((s) => doTrain(s, pid, g.id))}>
+                      📚 {fmtGold(trainCost(g))}
+                    </button>
+                  </div>
                 </td>
                 <td>
                   <select value={g.region} onChange={(e) => act((s) => doRelocate(s, pid, g.id, +e.target.value))} disabled={me.ap < COST.relocate}>
@@ -866,7 +871,9 @@ export function HelpModal({ onClose }) {
           <li><b>징병</b>: 지도에서 내 땅 여러 곳을 골라 슬라이더로 인원을 정하면 처음 고른 곳으로 모입니다. 인구 상한 없이 금(1명당 5금)이 닿는 만큼, 대신 뽑은 만큼 그 땅 인구가 1:1로 줄어 세수가 떨어지고 병사마다 유지비 1금/턴(해산하면 인구로 돌아옴). <b>자원병</b>: 평판×40명이 매 턴 수도·병영에 모임(흑자일 때, 위기면 3배).</li>
           <li><b>⏩ 빠른 진행·체크리스트</b>: 내게 일이 생길 때까지 자동으로 턴을 넘기고, 지도 왼쪽 위에 이번 턴 챙길 것을 보여 줍니다.</li>
           <li><b>요격·협공</b>: 공격받는 땅과 맞닿은 같은 나라 땅에 장수가 있으면 그 부대가 달려와 함께 싸웁니다(병력 절반). 한 턴에 두 곳 이상에서 같은 땅을 치면 협공 +15%. 적 부대도 지도에 부대 말로 보입니다.</li>
-          <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(4천+통솔×300, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
+          <li><b>장수 수련</b>: 장수 창 📚 — 금(레벨×2.5만)·행동력 1로 경험치 +레벨×50, 장수마다 3턴에 한 번.</li>
+          <li><b>전선 관리</b>: 이미 싸우는 중에 새 나라를 치면 평판 -5. 평판이 바닥이면 주변 나라 모두의 표적이 되고 자원병도 줄어듭니다.</li>
+          <li><b>군단 (토탈워식)</b>: 나라를 치려면 장수가 이끄는 군단이 필요합니다. 장수 한 명이 군단 하나이고, 이끌 수 있는 병력은 통솔로 정해집니다(8천+통솔×800, 함께 가는 장수는 절반씩 더함). 장수 없는 소부대는 5천까지 빈 땅·도적만 칠 수 있습니다. 지역의 장수 줄에서 🎯목표 지정 → 매 턴 내 땅으로 3칸씩 진군하다 닿으면 공격합니다. 장수가 모자라면 장수 창에서 📜장수 모집.</li>
           <li><b>징병</b>: 상단 💂징병(또는 지역의 💂여기로 징병) 한 번으로 모든 내 땅에서 인구의 4%(병영 8%)씩 뽑아, 제자리·집결지·지도에서 고른 곳으로 행군시킵니다. 1명당 5금, 행동력 2, 한 턴에 한 번. 병사 1명당 유지비 1금/턴이라 많이 뽑으면 파산합니다.</li>
           <li><b>자원병</b>: 보급이 이어진 내 땅에서는 매 턴 백성이 스스로 입대합니다(병영 2배). 영토를 잃거나 수도가 위협받으면 4배.</li>
           <li><b>장수 충성·성격</b>: 🔥야심가는 충성이 쉽게 떨어지고 🛡️충신은 점점 오릅니다. 충성 40 미만 장수는 지키던 땅을 들고 <b>영웅 봉기</b>로 독립할 수 있으니 장수 창에서 🎁포상하세요(금, 장수마다 6턴에 한 번). 평판·인덕 군주가 충성을 받쳐 줍니다.</li>

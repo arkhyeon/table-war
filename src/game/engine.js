@@ -361,6 +361,26 @@ export function estimateBattle(s, world, nid, from, to, count, genIds, opts = {}
   return { ...f, A, D, ratio: D > 0 ? A / D : 99, winChance: D <= 0 ? 1 : wins / trials };
 }
 
+// 전쟁 상대: 최근 8턴 안에 서로 싸운 나라 (도적 제외)
+export const WAR_TURNS = 8;
+export function enemiesOf(s, nid) {
+  const w = s.nations[nid]?.war || {};
+  return Object.keys(w).map(Number).filter((o) => s.turn - w[o] <= WAR_TURNS && s.nations[o]?.alive && !s.nations[o].horde);
+}
+// 이미 싸우는 중인데 새 나라를 치면 '여기저기 쑤시는' 꼴 — 평판 -5
+export const NEW_FRONT_REP = 5;
+function markWar(s, a, b) {
+  const na = s.nations[a], nb = s.nations[b];
+  if (!na || !nb || na.horde || nb.horde) return;
+  const fresh = !(s.turn - ((na.war || {})[b] ?? -99) <= WAR_TURNS);
+  if (fresh && enemiesOf(s, a).length >= 1) {
+    na.reputation = Math.max(0, (na.reputation ?? 50) - NEW_FRONT_REP);
+    log(s, `📉 ${na.name}이(가) 전쟁 중에 ${nb.name}과(와) 또 전선을 열었습니다. (평판 -${NEW_FRONT_REP}, 적 ${enemiesOf(s, a).length + 1}나라)`, [a, b], 'warn');
+  }
+  (na.war = na.war || {})[b] = s.turn;
+  (nb.war = nb.war || {})[a] = s.turn;
+}
+
 // ───────── 행동 ─────────
 const fail = (msg) => ({ ok: false, msg });
 
@@ -538,7 +558,7 @@ export function commandCap(s, genIds) {
   const gens = genIds.map((id) => s.generals[id]).filter((g) => g && g.status === 'active');
   const df = s.df || 1;
   if (!gens.length) return SQUAD * df;
-  const caps = gens.map((g) => 4000 + g.lead * 300).sort((a, b) => b - a);
+  const caps = gens.map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
   return Math.round(((caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) * df) / 100) * 100;
 }
 // 공격(남의 땅·중립지·적 함대)인지
@@ -1222,6 +1242,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
     }
   };
   n.ap -= cost;
+  if (tr.owner !== null && tr.owner !== nid && !tr.sea) markWar(s, nid, tr.owner);
   // 아군 지역 또는 빈 바다로 이동
   if (tr.owner === nid || (tr.sea && (tr.owner === null || tr.troops <= 0))) {
     if (!transit) fr.troops -= count;
@@ -1602,6 +1623,31 @@ export function doHire(s, nid) {
 
 // 포상: 금을 내려 충성을 올림 (행동력 없음, 장수마다 6턴에 한 번)
 export const REWARD_COOLDOWN = 6;
+// 장수 수련: 금으로 경험치 (한 번에 다음 레벨의 절반). 비용 = 레벨×2.5만 → 한 레벨에 레벨×5만(징병 1만 명분×레벨)
+export const TRAIN_COOLDOWN = 3;
+export const TRAIN_AP = 1;
+export const trainCost = (g) => (g.level || 1) * 10 * G;
+export function trainCheck(s, nid, gid) {
+  const g = s.generals[gid];
+  if (!g || g.nation !== nid || g.status !== 'active') return '내 장수가 아닙니다.';
+  if ((g.level || 1) >= 10) return '이미 최고 레벨입니다.';
+  if (g.trainTurn !== undefined && s.turn - g.trainTurn < TRAIN_COOLDOWN) return `${TRAIN_COOLDOWN - (s.turn - g.trainTurn)}턴 뒤에 다시 수련할 수 있습니다.`;
+  if (s.nations[nid].gold < trainCost(g)) return '금이 부족합니다.';
+  return canAct(s, nid, TRAIN_AP);
+}
+export function doTrain(s, nid, gid) {
+  const err = trainCheck(s, nid, gid);
+  if (err) return fail(err);
+  const g = s.generals[gid];
+  const cost = trainCost(g);
+  s.nations[nid].gold -= cost;
+  s.nations[nid].ap -= TRAIN_AP;
+  g.trainTurn = s.turn;
+  const lv = g.level || 1;
+  gainExp(s, g, Math.ceil((lv * 50) / (1 + nationTrait(s, nid, '학문'))));
+  const up = (g.level || 1) > lv ? ` 레벨 ${g.level}!` : '';
+  return { ok: true, msg: `📚 ${g.name}이(가) 수련했습니다.${up} (금 -${fmtGold(cost)}, 행동력 -${TRAIN_AP})` };
+}
 export const rewardCost = (g) => Math.round(((15 + (g.base || 60) * 0.2) * G) / 1000) * 1000;
 export function rewardCheck(s, nid, gid) {
   const g = s.generals[gid];

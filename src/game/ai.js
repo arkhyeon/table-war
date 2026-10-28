@@ -3,7 +3,7 @@ import { COST, G } from './rules.js';
 import {
   getRel, nationRegions, nationFleets, gensIn, nationPower, moveCost, estimateBattle, planMove, doBuild,
   buildCost, recruitChance, moveCheck, doRecruit, doExecute, doRelease, log, canSail, mercCap, mercPrice, bribeChance, bribeCost, doBribe, nationGenerals, income, isVassalOf, movable, governorOf, doRelocate, capitalMoveCheck, doMoveCapital,
-  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot } from './engine.js';
+  marchVia, genIndexOn, genIndexOff, draftPlan, doDraft, draftCheck, commandCap, hireCost, hireCheck, doHire, formArmy, refillArmy, garrisonOf, plotCheck, doPlot, enemiesOf, UPKEEP, trainCheck, doTrain, trainCost } from './engine.js';
 import { evaluateDeal, applyDeal, validateDeal, emptyDeal, describeDeal, annexCheck, doAnnex, breakTreaty, sowCheck, doSow } from './diplomacy.js';
 
 const inCoalition = (s, id) => s.coalition && s.coalition.members?.includes(id);
@@ -98,10 +98,14 @@ function updateGoal(s, world, nid) {
   let best = null, bv = -Infinity;
   for (const [o, base] of cand) {
     if (!hostile(s, nid, o) || getRel(s, nid, o).type !== 'none') continue;
+    if (!newFrontOk(s, nid, o)) continue;
+    // 지금 싸우는 상대에 집중, 평판이 바닥인 나라(여기저기 쑤신 나라)는 모두의 표적
+    const focus = enemiesOf(s, nid).includes(o) ? 30 : 0;
+    const infamy = Math.max(0, 30 - (s.nations[o].reputation ?? 50));
     const theirP = Math.max(1, nationPower(s, o));
     // 중원 나라: 약한 이웃과는 화친하고, 비슷하거나 센 맞수(국력 0.7배↑)를 목표로
     const rival = n.heartland && s.turn <= 60 ? (theirP >= myP * 0.7 ? 40 : -25) : 0;
-    const v = base + (myP / theirP) * 30 + rival - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
+    const v = base + (myP / theirP) * 30 + rival + focus + infamy - s.opinion[nid][o] * 0.3 + (s.coalition?.target === o ? 25 : 0) + (lordFoes.has(o) ? 60 : 0);
     if (v > bv) { bv = v; best = o; }
   }
   n.goal = best;
@@ -154,6 +158,14 @@ function frontierInfo(s, world, nid) {
     }
   }
   return { mine, threat, dist };
+}
+
+// 새 전선을 열어도 되나: 지금 적이 없거나, 이미 적이거나, 대동맹 표적이거나, (지금 적들+새 적) 국력의 1.5배 이상일 때
+function newFrontOk(s, nid, o) {
+  const foes = enemiesOf(s, nid);
+  if (!foes.length || foes.includes(o) || s.coalition?.target === o) return true;
+  const sum = [...foes, o].reduce((a, x) => a + nationPower(s, x), 0);
+  return nationPower(s, nid) >= sum * 1.5;
 }
 
 function targetBonus(s, nid, owner) {
@@ -299,6 +311,8 @@ export function aiActions(s, world, nid) {
         if (t.owner === nid || (!hostile(s, nid, t.owner) && !napBreak)) continue;
         if (t.sea && !isEnemyFleet(s, nid, nb.id)) continue;
         if (t.owner !== null && s.turn <= 3) continue; // 초반 3턴은 국가 간 전쟁 유예
+        // 이미 싸우는 중이면 새 적을 만들지 않음 (나 혼자 사면초가를 만드는 꼴) — 적들을 다 합친 것보다 1.5배 강할 때만
+        if (t.owner !== null && !t.sea && !s.nations[t.owner].horde && !newFrontOk(s, nid, t.owner)) continue;
         // 군단 명령: 수비면 나라는 치지 않음, 공략이면 그 나라(와 도적)만
         if (n.fief && n.order && t.owner !== null && !s.nations[t.owner].horde && (n.order.kind === 'defend' || t.owner !== n.order.target)) continue;
         const cost = moveCost(world, r, nb.id, s);
@@ -424,18 +438,20 @@ export function aiActions(s, world, nid) {
       const cost = plan.reduce((a, x) => a + x.gold, 0);
       const men = plan.reduce((a, x) => a + x.amt, 0);
       const maxThreat = Math.max(0, ...mine.map((r) => threat[r] || 0));
-      // 필요한 만큼만: 국경 너머 적병의 0.7배 + 땅마다 4천 (병력 상한이 없으니 돈이 남는다고 무작정 뽑지 않음 — 1배 넘게 맞추면 이웃끼리 군비 경쟁이 끝없음)
-      const have = income(s, nid).troops;
-      const foe = mine.reduce((a, r) => a + (threat[r] || 0), 0) * 1000;
-      const need = foe * 0.7 + (mine.length * 4000) / (s.df || 1);
       // 한 곳이라도 수비대보다 1.5배 넘는 적이 붙어 있으면 위급
       const urgent = mine.some((r) => (threat[r] || 0) * 1000 > s.regions[r].troops * 1.5 && threat[r] > 5);
-      // 늘어날 유지비(1명당 1금/턴)를 수입이 감당할 수 있거나, 금이 넉넉하면
-      if (cost < n.gold - 30 * G && (have < need || urgent) && (net > men * 0.6 || n.gold > 250 * G || urgent)) opts.push({ score: 26 + Math.min(maxThreat, 40) * 0.5 + Math.min(20, n.gold / (150 * G)) + (building ? 8 : 0) + drive * 10, run: () => doDraft(s, nid, world, null) });
+      // 돈이 남으면 뽑되 유지비를 감당할 만큼: 늘어난 유지비(1명당 1금/턴)를 수입이 감당하거나, 모아둔 금으로 40턴은 버틸 때
+      const after = net - men * UPKEEP;
+      if (cost < n.gold - 30 * G && (after > 0 || (n.gold - cost > 100 * G && after > -(n.gold - cost) / 40) || urgent)) opts.push({ score: 26 + Math.min(maxThreat, 40) * 0.5 + Math.min(20, n.gold / (150 * G)) + (building ? 8 : 0) + drive * 10, run: () => doDraft(s, nid, world, null) });
+    }
+    // 장수 수련: 유지비 걱정 없을 만큼 금이 남으면 가장 잘 싸우는 장수부터
+    if (n.gold > 200 * G) {
+      const g = Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && !trainCheck(s, nid, x.id)).sort((a, b) => b.lead + b.war - (a.lead + a.war))[0];
+      if (g && n.gold - trainCost(g) > 150 * G) opts.push({ score: 18 + Math.min(10, n.gold / (200 * G)), run: () => doTrain(s, nid, g.id) });
     }
     if (n.ap >= 2 && n.gold >= 110 * G) {
       const wall = mine.filter((r) => !s.regions[r].buildings.walls && threat[r] > 8).sort((a, b) => threat[b] - threat[a])[0];
-      if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4, run: () => doBuild(s, world, nid, wall, 'walls') });
+      if (wall !== undefined && n.gold >= buildCost(s, wall, nid, 'walls') + 30 * G) opts.push({ score: 20 + Math.min(threat[wall], 40) * 0.4 + (n.heartland && s.turn <= 30 ? 15 : 0), run: () => doBuild(s, world, nid, wall, 'walls') });
       const mk = mine.filter((r) => !s.regions[r].buildings.market).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
       if (mk !== undefined && n.gold >= buildCost(s, mk, nid, 'market') + 30 * G) opts.push({ score: 19 + s.regions[mk].pop * 0.2 + (building ? 6 : 0), run: () => doBuild(s, world, nid, mk, 'market') });
       const br = mine.filter((r) => !s.regions[r].buildings.barracks && dist[r] <= 1).sort((a, b) => s.regions[b].pop - s.regions[a].pop)[0];
