@@ -8,6 +8,8 @@ import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
 import Slider from './Slider.jsx';
 import { fixJosa } from '../game/josa.js';
+import { portraitCanvas, portraitURL } from '../game/portrait.js';
+import { citySprite } from '../game/citysprite.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
@@ -315,45 +317,29 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.beginPath(); ctx.arc(ex, ey, sz * 0.35, 0, 7); ctx.fill();
     }
     // 도시·관문
-    const fs = Math.max(sz * 0.9, 11 * px);
+    const fs = Math.min(Math.max(sz * 0.9, 11 * px), 15 * px);
     for (const c of s.castles) {
       const [cx, cy] = grid.center(c.tile);
       if (!vis(cx, cy)) continue;
       const col = ownerColor(s, c.owner);
       const on = sl?.type === 'castle' && sl.id === c.id;
-      if (c.kind === 'pass') {
-        // 관문: 성문 모양
-        const w = sz * 1.5, h = sz * 1.1;
-        ctx.fillStyle = '#2a2420';
-        ctx.fillRect(cx - w / 2 - sz * 0.12, cy - h / 2 - sz * 0.12, w + sz * 0.24, h + sz * 0.24);
-        ctx.fillStyle = col;
-        ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
-        ctx.fillStyle = '#2a2420';
-        ctx.beginPath(); ctx.arc(cx, cy + h / 2, sz * 0.38, Math.PI, 0); ctx.fill();
-      } else {
-        // 도시: 성벽(톱니) + 안쪽 색
-        const r = sz * (c.capital ? 1.6 : 1.25);
-        ctx.fillStyle = '#2a2420';
-        ctx.fillRect(cx - r - sz * 0.15, cy - r - sz * 0.15, (r + sz * 0.15) * 2, (r + sz * 0.15) * 2);
-        const n = 4, step = (r * 2) / (n * 2 - 1);
-        for (let q = 0; q < n; q++) ctx.fillRect(cx - r + q * step * 2, cy - r - sz * 0.5, step, sz * 0.4);
-        ctx.fillStyle = col;
-        ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        ctx.fillRect(cx - r * 0.55, cy - r * 0.55, r * 1.1, r * 1.1);
-        // 성벽 내구 막대
-        ctx.fillStyle = '#300';
-        ctx.fillRect(cx - r, cy + r + sz * 0.2, r * 2, sz * 0.25);
+      // 도시·관문 그림 (나라 색 깃발), 바닥이 칸 아래쪽에 오게
+      const S = sz * (c.kind === 'pass' ? 4.2 : c.capital ? 5.6 : 4.6);
+      const baseY = cy + sz * 0.7;
+      if (on) { ctx.fillStyle = 'rgba(255,224,102,0.45)'; ctx.beginPath(); ctx.ellipse(cx, baseY - sz * 0.2, S * 0.55, S * 0.2, 0, 0, 7); ctx.fill(); }
+      ctx.drawImage(citySprite(c.kind, c.capital, col), cx - S / 2, baseY - S * 0.8, S, S);
+      if (c.kind !== 'pass' || c.dur < c.maxDur) {
+        ctx.fillStyle = 'rgba(40,0,0,0.85)';
+        ctx.fillRect(cx - S * 0.32, baseY + sz * 0.1, S * 0.64, sz * 0.28);
         ctx.fillStyle = '#e8c35a';
-        ctx.fillRect(cx - r, cy + r + sz * 0.2, r * 2 * Math.max(0, c.dur / c.maxDur), sz * 0.25);
+        ctx.fillRect(cx - S * 0.32, baseY + sz * 0.1, S * 0.64 * Math.max(0, c.dur / c.maxDur), sz * 0.28);
       }
-      if (on) { ctx.strokeStyle = '#ffe066'; ctx.lineWidth = Math.max(sz * 0.3, 2 * px); ctx.strokeRect(cx - sz * 2, cy - sz * 2, sz * 4, sz * 4); }
       // 이름판
       if (k * sz > 2.2 || c.capital) {
         const label = `${c.capital ? '♛' : ''}${c.name}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
-        const ly = cy + sz * 2.5;
+        const ly = cy + sz * 2.6;
         ctx.fillStyle = 'rgba(20,16,12,0.82)';
         ctx.fillRect(cx - tw / 2, ly - fs * 0.85, tw, fs * 1.2);
         ctx.fillStyle = col;
@@ -385,6 +371,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 부대 깃발 (이름표는 겹치면 하나만)
     const labels = [];
+    const surname = new Map(Object.values(s.generals).filter((x) => x.ruler && x.status === 'active').map((x) => [x.nation, x.name[0]]));
     const sorted = s.units.slice().sort((a, b) => (sl?.type === 'unit' && sl.id === a.id ? -1 : sl?.type === 'unit' && sl.id === b.id ? 1 : b.troops - a.troops));
     for (const u of sorted) {
       const [cx, cy] = posOf(u);
@@ -392,34 +379,39 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const n = s.nations[u.nation];
       const on = sl?.type === 'unit' && sl.id === u.id;
       const g = gensOf(s, u.gens)[0];
-      const fw = sz * 1.9, fh = sz * 1.5, top = cy - sz * 2.2;
+      const fw = sz * 1.7, fh = sz * 1.35, top = cy - sz * 3.1;
       // 그림자 받침
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
-      ctx.beginPath(); ctx.ellipse(cx, cy + sz * 0.5, sz * 0.9, sz * 0.4, 0, 0, 7); ctx.fill();
-      // 깃대
+      ctx.beginPath(); ctx.ellipse(cx, cy + sz * 0.5, sz * 0.95, sz * 0.4, 0, 0, 7); ctx.fill();
+      // 깃대와 나라 깃발 (군주 성씨 한 글자, 펄럭임)
+      const fx0 = cx - sz * 0.25;
       ctx.fillStyle = '#3a2a1a';
-      ctx.fillRect(cx - fw / 2 - sz * 0.12, top, sz * 0.16, sz * 2.7);
-      // 깃발 (펄럭임)
+      ctx.fillRect(fx0 - sz * 0.08, top, sz * 0.14, sz * 3.2);
       const wave = Math.sin(now / 260 + u.id) * sz * 0.12;
       ctx.beginPath();
-      ctx.moveTo(cx - fw / 2, top);
-      ctx.lineTo(cx + fw / 2, top + wave);
-      ctx.lineTo(cx + fw / 2, top + fh + wave);
-      ctx.lineTo(cx - fw / 2, top + fh);
+      ctx.moveTo(fx0, top);
+      ctx.lineTo(fx0 + fw, top + wave);
+      ctx.lineTo(fx0 + fw, top + fh + wave);
+      ctx.lineTo(fx0, top + fh);
       ctx.closePath();
       ctx.fillStyle = n.color;
       ctx.fill();
-      ctx.lineWidth = Math.max(sz * (on ? 0.3 : 0.14), (on ? 2.5 : 1) * px);
-      ctx.strokeStyle = on ? '#ffe066' : u.cut ? '#ff7a3c' : '#fff';
+      ctx.lineWidth = Math.max(sz * 0.1, px);
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
       ctx.stroke();
-      ctx.font = `bold ${sz * 1.15}px serif`;
+      ctx.font = `bold ${sz * 1.0}px serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
-      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-      ctx.lineWidth = sz * 0.2;
-      const ch1 = g?.name?.[0] || '?';
-      ctx.strokeText(ch1, cx, top + fh * 0.78 + wave / 2);
-      ctx.fillText(ch1, cx, top + fh * 0.78 + wave / 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = sz * 0.16;
+      const mark = surname.get(u.nation) || n.name[0];
+      ctx.strokeText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
+      ctx.fillText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
+      // 대장 초상 (장수마다 다른 얼굴)
+      const pr = sz * 1.05;
+      if (g) ctx.drawImage(portraitCanvas(g, n.color), cx - pr, cy - sz * 0.55 - pr, pr * 2, pr * 2);
+      if (on || u.cut) { ctx.beginPath(); ctx.arc(cx, cy - sz * 0.55, pr + sz * 0.12, 0, 7); ctx.lineWidth = Math.max(sz * 0.22, 2 * px); ctx.strokeStyle = on ? '#ffe066' : '#ff7a3c'; ctx.stroke(); }
+      if (u.gens.length > 1) { ctx.font = `bold ${sz * 0.6}px sans-serif`; ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#111'; ctx.lineWidth = sz * 0.12; const t = `+${u.gens.length - 1}`; ctx.strokeText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); ctx.fillText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); }
       // 병력·사기 막대
       const bw = sz * 2;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
@@ -660,6 +652,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
   const myPrisoners = Object.values(game.generals).filter((g) => g.status === 'prisoner' && g.captor === pid);
   const freeIn = (c) => Object.values(game.generals).filter((g) => g.status === 'free' && g.castle === c.id);
+  const Face = ({ g, size = 26, col = '#fff' }) => <img src={portraitURL(g, col)} alt="" width={size} height={size} style={{ verticalAlign: 'middle', marginRight: 4, borderRadius: '50%' }} />;
   const tacticName = (g) => {
     const [k, v] = [['war', g.war], ['lead', g.lead], ['intel', g.intel]].sort((a, b) => b[1] - a[1])[0];
     return v < 70 ? null : { war: '돌격', lead: '일제사격', intel: '화계' }[k];
@@ -679,7 +672,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
             {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))}</span></>}
             {selCastle.kind === 'pass' && <><span>관문</span><span>수입은 없지만 성벽이 두꺼워 길목을 막음</span></>}
-            <span>장수</span><span>{castleGens.map((g) => g.name).join(', ') || '없음'}</span>
+            <span>장수</span><span>{castleGens.length ? castleGens.map((g) => <span key={g.id} style={{ display: 'inline-block', marginRight: 6 }}><Face g={g} size={22} col={ownerColor(game, selCastle.owner)} />{g.name}</span>) : '없음'}</span>
           </div>
           {selCastle.kind !== 'pass' && selCastle.owner !== null && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
@@ -712,7 +705,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <b>🧑‍🎓 재야 인재</b>
               {freeIn(selCastle).map((g) => (
                 <div key={g.id} className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
-                  <span>{g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel} 정{g.pol}</small></span>
+                  <span><Face g={g} /> {g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel} 정{g.pol}</small></span>
                   <button className="sm" disabled={playing || g.tried === game.turn || !castleGens.length} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid, selCastle.id) * 100)}%</button>
                 </div>
               ))}
@@ -738,7 +731,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         const nx = e.target.checked ? [...pickG, g.id].slice(-3) : pickG.filter((x) => x !== g.id);
                         setPickG(nx);
                         setAmt(Math.max(0, Math.min(commandCap(game, nx), selCastle.troops - 500)));
-                      }} /> {g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel}{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
+                      }} /> <Face g={g} col={me.color} /> {g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel}{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
                     </label>
                   ))}
                   <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(amt)} / 지휘 한도 {fmtTroops(cap)}</div>
@@ -770,6 +763,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
         return (
           <div className="card">
             <h3 style={{ margin: '0 0 6px' }}>⚑ {gs.map((g) => g.name).join('·')} 부대 <small className="muted">{game.nations[selUnit.nation].name}</small></h3>
+            <div className="row" style={{ gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
+              {gs.map((g) => <div key={g.id} style={{ textAlign: 'center', fontSize: 11 }}><Face g={g} size={52} col={game.nations[selUnit.nation].color} /><div>{g.name}</div><div className="muted">무{g.war} 통{g.lead} 지{g.intel}</div></div>)}
+            </div>
             <div className="kv">
               <span>병력</span><span>{fmtTroops(selUnit.troops)} / {fmtTroops(selUnit.max)}</span>
               <span>사기</span><span>{Math.round(selUnit.morale)}</span>
@@ -856,7 +852,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               {!myPrisoners.length && <div className="muted">없음</div>}
               {myPrisoners.map((g) => (
                 <div key={g.id} style={{ padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
-                  <div>{g.name} <small className="muted">({game.nations[g.nation]?.name || '재야'}) 무{g.war} 통{g.lead} 지{g.intel} 정{g.pol}</small></div>
+                  <div><Face g={g} /> {g.name} <small className="muted">({game.nations[g.nation]?.name || '재야'}) 무{g.war} 통{g.lead} 지{g.intel} 정{g.pol}</small></div>
                   <div className="row" style={{ gap: 4 }}>
                     {isRuler(g) ? <small className="muted">군주라 등용 불가</small> : <button className="sm" disabled={playing || g.tried === game.turn} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid) * 100)}%</button>}
                     <button className="sm" disabled={playing} onClick={() => act((s) => release(s, g.id))}>석방 (우호+)</button>
