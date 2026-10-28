@@ -10,6 +10,7 @@ import Slider from './Slider.jsx';
 import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
+import { weatherText, uniqueOf } from '../game/hex14extra.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
@@ -217,6 +218,37 @@ function paintOwners(grid, s, sc) {
   return cv;
 }
 
+// 일기토 장면: 두 장수 초상이 부딪치며 합마다 체력이 깎이고 승자가 남음
+function DuelView({ d, game }) {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setStep((v) => Math.min(v + 1, d.rounds.length + 1)), 520);
+    return () => clearInterval(t);
+  }, [d]);
+  const g = (name) => Object.values(game.generals).find((x) => x.name === name) || { name, war: 80, lead: 70, intel: 50, pol: 50 };
+  const [ha, hb] = step === 0 ? [100, 100] : d.rounds[Math.min(step, d.rounds.length) - 1];
+  const done = step > d.rounds.length;
+  const side = (name, nat, hp, left) => (
+    <div className={'duel-side' + (step > 0 && !done && step % 2 === (left ? 1 : 0) ? ' hit' : '') + (done && d.winner !== name ? ' lose' : '')}>
+      <img src={portraitURL(g(name), game.nations[nat]?.color || '#fff')} alt="" width={96} height={96} />
+      <b>{name}</b>
+      <small>무력 {g(name).war}</small>
+      <div className="duel-hp"><div style={{ width: `${hp}%`, background: hp > 40 ? '#6fd37f' : '#e2655a' }} /></div>
+    </div>
+  );
+  return (
+    <div className="duel">
+      <div className="duel-title">⚔️ 일기토!</div>
+      <div className="duel-row">
+        {side(d.a, d.an, ha, true)}
+        <div className="duel-vs">{done ? '🏆' : step % 2 ? '⚡' : '✦'}</div>
+        {side(d.b, d.bn, hb, false)}
+      </div>
+      <div className="duel-msg">{done ? `${d.winner}의 승리!${d.fate || ''}` : `${Math.min(step + 1, d.rounds.length)}합째…`}</div>
+    </div>
+  );
+}
+
 export default function Hex14({ world, game, setGame, onExit }) {
   const grid = useMemo(() => buildGrid(world), [world]);
   const pid = game.playerId;
@@ -233,6 +265,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sheet, setSheet] = useState(false);
   const [tab, setTab] = useState('home');
   const [report, setReport] = useState(null);
+  const [duel, setDuel] = useState(null);
+  const [cutin, setCutin] = useState(null);
+  const [corpsForm, setCorpsForm] = useState(null); // {cities: [], leader}
   const canvas = useRef(null);
   const wrap = useRef(null);
   const view = useRef(null); // {x, y, k}
@@ -284,6 +319,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+    // 눈 덮인 북쪽
+    if (s.weather?.kind === 'snow') {
+      if (!land.current.snow) {
+        const [scv, sctx] = (() => { const c2 = document.createElement('canvas'); c2.width = B.cv.width; c2.height = B.cv.height; const x = c2.getContext('2d'); x.scale(B.sc, B.sc); return [c2, x]; })();
+        sctx.fillStyle = '#ffffff';
+        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const [hx, hy] = grid.center(i); if (hy > grid.H * 0.55) continue; sctx.globalAlpha = Math.min(1, (grid.H * 0.55 - hy) / (grid.H * 0.12)); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
+        land.current.snow = scv;
+      }
+      ctx.globalAlpha = 0.42;
+      ctx.drawImage(land.current.snow, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+      ctx.globalAlpha = 1;
+    }
     const sz = grid.size;
     const px = 1 / k; // 화면 1픽셀
     const x0 = vx - sz * 4, x1 = vx + cw / k + sz * 4, y0 = vy - sz * 4, y1 = vy + ch / k + sz * 4;
@@ -336,7 +383,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       }
       // 이름판
       if (k * sz > 2.2 || c.capital) {
-        const label = `${c.capital ? '♛' : ''}${c.name}`;
+        const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
         const ly = cy + sz * 2.6;
@@ -371,7 +418,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 부대 깃발 (이름표는 겹치면 하나만)
     const labels = [];
-    const surname = new Map(Object.values(s.generals).filter((x) => x.ruler && x.status === 'active').map((x) => [x.nation, x.name[0]]));
     const sorted = s.units.slice().sort((a, b) => (sl?.type === 'unit' && sl.id === a.id ? -1 : sl?.type === 'unit' && sl.id === b.id ? 1 : b.troops - a.troops));
     for (const u of sorted) {
       const [cx, cy] = posOf(u);
@@ -404,9 +450,16 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.lineWidth = sz * 0.16;
-      const mark = surname.get(u.nation) || n.name[0];
+      const mark = n.name[0];
       ctx.strokeText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
       ctx.fillText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
+      // 물 위면 배
+      if (grid.water[u.tile]) {
+        ctx.fillStyle = '#6b4423';
+        ctx.beginPath(); ctx.moveTo(cx - sz * 1.4, cy - sz * 0.1); ctx.lineTo(cx + sz * 1.4, cy - sz * 0.1); ctx.lineTo(cx + sz * 1.0, cy + sz * 0.55); ctx.lineTo(cx - sz * 1.0, cy + sz * 0.55); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#3a2412'; ctx.lineWidth = sz * 0.1; ctx.stroke();
+        ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = sz * 0.08; ctx.beginPath(); ctx.moveTo(cx - sz * 1.6, cy + sz * 0.6); ctx.quadraticCurveTo(cx, cy + sz * 0.9, cx + sz * 1.6, cy + sz * 0.6); ctx.stroke();
+      }
       // 대장 초상 (장수마다 다른 얼굴)
       const pr = sz * 1.05;
       if (g) ctx.drawImage(portraitCanvas(g, n.color), cx - pr, cy - sz * 0.55 - pr, pr * 2, pr * 2);
@@ -450,7 +503,20 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillText(e.text, e.x, y);
       ctx.globalAlpha = 1;
     }
-    const busy = f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash') || s.units.length;
+    // 날씨 효과 (화면 기준): 비 줄기·눈송이·바람
+    const wk = s.weather?.kind;
+    if (wk === 'rain' || wk === 'snow' || wk === 'wind') {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const n = wk === 'rain' ? 90 : wk === 'snow' ? 70 : 24;
+      for (let q = 0; q < n; q++) {
+        const sp = wk === 'rain' ? 0.9 : wk === 'snow' ? 0.06 : 0.5;
+        const x0 = (q * 97.13) % cw, y0 = (q * 57.7) % ch;
+        if (wk === 'rain') { const y = (y0 + now * sp) % ch, x = (x0 - (now * sp) * 0.25) % cw; ctx.strokeStyle = 'rgba(190,210,255,0.45)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo((x + cw) % cw, y); ctx.lineTo(((x + cw) % cw) - 4, y + 12); ctx.stroke(); }
+        else if (wk === 'snow') { const y = (y0 + now * sp) % ch, x = (x0 + Math.sin(now / 900 + q) * 12 + cw) % cw; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.beginPath(); ctx.arc(x, y, 1.6 + (q % 3) * 0.6, 0, 7); ctx.fill(); }
+        else { const x = (x0 + now * sp) % cw; ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + 20, y0 - 5, x + 40, y0); ctx.stroke(); }
+      }
+    }
+    const busy = wk === 'rain' || wk === 'snow' || wk === 'wind' || f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash') || s.units.length;
     cancelAnimationFrame(raf.current);
     if (busy) raf.current = requestAnimationFrame(draw);
   };
@@ -478,7 +544,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const [x, y] = grid.center(e.tile);
       const jit = (Math.random() - 0.5) * grid.size;
       if (e.type === 'hit' && e.amt >= 30) fx.current.push({ x: x + jit, y: y - grid.size * 2.6, text: `-${e.amt.toLocaleString()}`, color: e.wall ? '#ffd27a' : '#ff6b5a', size: 0.85, min: 11, t0: now, life: 1100, rise: 2 });
-      if (e.type === 'tactic') fx.current.push({ x, y: y - grid.size * 4, text: e.text, color: e.text === '협공!' ? '#ff9f43' : '#ffe066', size: 1.3, min: 15, t0: now, life: 1600, rise: 1.5, pop: true });
+      if (e.type === 'tactic') fx.current.push({ x, y: y - grid.size * 4, text: e.text, color: e.text === '협공!' ? '#ff9f43' : e.unique ? '#ff7ad9' : '#ffe066', size: e.unique ? 1.6 : 1.3, min: e.unique ? 18 : 15, t0: now, life: e.unique ? 2000 : 1600, rise: 1.5, pop: true });
       if (e.type === 'capture') fx.current.push({ x, y: y - grid.size * 3, text: `🏯 ${e.text}!`, color: '#fff', size: 1.8, min: 18, t0: now, life: 2200, rise: 1, pop: true });
     }
   };
@@ -583,6 +649,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const startN = s.logN || 0;
     for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
     if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
+    else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), corps: c.id });
     setPlaying(true);
     setSheet(false);
     setReport(null);
@@ -592,6 +659,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
       stepDay(s, grid);
       d += 1;
       spawnFx(s);
+      // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
+      const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
+      const ui = (s.fx || []).find((e) => e.type === 'tactic' && e.unique && (e.nation === pid || s.units.some((u) => u.nation === pid && u.tile === e.to)));
+      if (ui) { setCutin(ui); setTimeout(() => setCutin(null), 1500); }
+      if (dl) setDuel(dl);
+      const wait = dl ? 3600 : 0;
       const snap = clone(s);
       if (d >= DAYS || s.over) {
         setTimeout(() => {
@@ -612,7 +685,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         return;
       }
       setGame(snap);
-      setTimeout(tick, speed);
+      setTimeout(() => { setDuel(null); tick(); }, speed + wait);
     };
     setTimeout(tick, 60);
   };
@@ -654,6 +727,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const freeIn = (c) => Object.values(game.generals).filter((g) => g.status === 'free' && g.castle === c.id);
   const Face = ({ g, size = 26, col = '#fff' }) => <img src={portraitURL(g, col)} alt="" width={size} height={size} style={{ verticalAlign: 'middle', marginRight: 4, borderRadius: '50%' }} />;
   const tacticName = (g) => {
+    const un = uniqueOf(g);
+    if (un) return `${un[0]}★`;
     const [k, v] = [['war', g.war], ['lead', g.lead], ['intel', g.intel]].sort((a, b) => b[1] - a[1])[0];
     return v < 70 ? null : { war: '돌격', lead: '일제사격', intel: '화계' }[k];
   };
@@ -674,6 +749,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {selCastle.kind === 'pass' && <><span>관문</span><span>수입은 없지만 성벽이 두꺼워 길목을 막음</span></>}
             <span>장수</span><span>{castleGens.length ? castleGens.map((g) => <span key={g.id} style={{ display: 'inline-block', marginRight: 6 }}><Face g={g} size={22} col={ownerColor(game, selCastle.owner)} />{g.name}</span>) : '없음'}</span>
           </div>
+          {(game.corps || []).filter((co) => co.cities.includes(selCastle.id)).map((co) => <div key={co.id} className="muted" style={{ fontSize: 12, marginTop: 4 }}>🎖️ {game.generals[co.leader]?.name} 군단이 맡은 도시입니다 (직접 출진도 가능)</div>)}
+          {selCastle.port && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>⚓ 항구: 여기서 나간 부대는 배로 바닷길을 갈 수 있습니다.</div>}
           {selCastle.kind !== 'pass' && selCastle.owner !== null && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
               <b>🏛️ 내정</b>
@@ -807,12 +884,41 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <button className="sm" disabled={playing || me.gold < 10000} onClick={() => act((s) => trade(s, pid, 'buy', 10000))}>병량 사기 (금 1만→{fmtTroops(10000 * MARKET.buy)})</button>
                 <button className="sm" disabled={playing || food < 10000} onClick={() => act((s) => trade(s, pid, 'sell', 10000))}>병량 팔기 (1만→금 {fmtGold(10000 * MARKET.sell)})</button>
               </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}><b>🎖️ 군단 (도시를 맡겨 컴퓨터가 운영)</b>{!corpsForm && <button className="sm" disabled={playing} onClick={() => setCorpsForm({ cities: [], leader: '' })}>＋ 만들기</button>}</div>
+                {(game.corps || []).map((co) => (
+                  <div key={co.id} className="row" style={{ justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
+                    <span>{game.generals[co.leader] && <Face g={game.generals[co.leader]} size={20} col={me.color} />}{game.generals[co.leader]?.name || '?'} 군단 · {co.cities.filter((id) => game.castles[id].owner === pid).map((id) => game.castles[id].name).join(', ')} · 부대 {game.units.filter((u) => u.corps === co.id).length}</span>
+                    <button className="sm" disabled={playing} onClick={() => act((s) => { s.corps = s.corps.filter((x) => x.id !== co.id); for (const u of s.units) if (u.corps === co.id) delete u.corps; return { ok: true, msg: '군단을 해산했습니다.' }; })}>해산</button>
+                  </div>
+                ))}
+                {corpsForm && (() => {
+                  const taken = new Set((game.corps || []).flatMap((c) => c.cities));
+                  const avail = game.castles.filter((c) => c.owner === pid && !taken.has(c.id));
+                  const gens = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && corpsForm.cities.includes(g.castle));
+                  return (
+                    <div className="card" style={{ background: 'var(--panel)', marginTop: 6, fontSize: 12 }}>
+                      <div>맡길 도시</div>
+                      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+                        {avail.map((c) => (
+                          <label key={c.id}><input type="checkbox" checked={corpsForm.cities.includes(c.id)} onChange={(e) => setCorpsForm((f) => ({ ...f, cities: e.target.checked ? [...f.cities, c.id] : f.cities.filter((x) => x !== c.id) }))} /> {c.name}</label>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: 4 }}>도독 <select value={corpsForm.leader} onChange={(e) => setCorpsForm((f) => ({ ...f, leader: e.target.value }))}><option value="">(고르세요)</option>{gens.map((g) => <option key={g.id} value={g.id}>{g.name} (통{g.lead})</option>)}</select></div>
+                      <div className="row" style={{ justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+                        <button className="sm" onClick={() => setCorpsForm(null)}>취소</button>
+                        <button className="sm primary" disabled={!corpsForm.cities.length || !corpsForm.leader} onClick={() => { act((s) => { s.corpsN = (s.corpsN || 0) + 1; s.corps = [...(s.corps || []), { id: `k${s.corpsN}`, leader: corpsForm.leader, cities: corpsForm.cities }]; for (const id of corpsForm.cities) s.castles[id].auto = true; return { ok: true, msg: '군단을 만들었습니다. 다음 진행부터 도독이 알아서 싸웁니다.' }; }); setCorpsForm(null); }}>만들기</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
               <table style={{ width: '100%', marginTop: 8, fontSize: 12 }}>
                 <thead><tr><th align="left">도시</th><th>병력</th><th>장수</th><th>농·상</th></tr></thead>
                 <tbody>
                   {game.castles.filter((c) => c.owner === pid).map((c) => (
                     <tr key={c.id} className="clickable" onClick={() => { goTo(c); setSheet(false); }}>
-                      <td>{c.kind === 'pass' ? '⛩️' : c.capital ? '♛' : ''}{c.name}</td>
+                      <td>{c.kind === 'pass' ? '⛩️' : c.capital ? '♛' : ''}{c.port ? '⚓' : ''}{c.name}{(game.corps || []).some((co) => co.cities.includes(c.id)) ? ' 🎖️' : ''}</td>
                       <td align="center">{fmtTroops(c.troops)}</td>
                       <td align="center">{Object.values(game.generals).filter((g) => g.castle === c.id && g.status === 'active').length}</td>
                       <td align="center">{c.kind === 'pass' ? '-' : `${c.farm}·${c.trade}`}</td>
@@ -881,6 +987,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>내 도시·땅과 끊기면 보급이 끊겨 병력·사기가 줄어듭니다(주황 테두리).</li>
                 <li>성벽이 남아 있으면 수비병이 잘 안 죽습니다. 수비병이 0이면 함락, 관할 땅이 통째로 넘어옵니다.</li>
                 <li>⛩️ 관문은 수입이 없지만 성벽이 두꺼운 길목입니다.</li>
+                <li>⚓ 항구에서 나간 부대는 배로 바닷길(뭍에서 3칸 안 바다)을 갑니다. 물 위에선 수군 장수가 없으면 약합니다.</li>
+                <li>이름난 장수는 고유 전법(★)을 씁니다: 관우 「청룡언월」, 장비 「장판교 일갈」(주변 적 발 묶음), 제갈량 「팔진」(받는 피해 절반) …</li>
+                <li>무력 75 이상 대장끼리 붙으면 가끔 <b>일기토</b>. 지면 사기가 크게 꺾이고 사로잡히기도 합니다.</li>
+                <li>날씨: ❄️ 겨울 눈은 북쪽 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
+                <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>
+                <li>삼국지 시나리오는 손책의 죽음, 관도대전, 삼고초려, 적벽대전 같은 역사 사건이 때가 되면 일어납니다.</li>
               </ul>
             </div>
           )}
@@ -909,6 +1021,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       <div className="topbar">
         <b><span className="chip" style={{ background: me.color }} /> {me.name}</b>
         <span>{dateOf(game, startYear)}{playing ? ` · ${game.day}일째` : ''}</span>
+        <span title="눈: 북쪽 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
         <span>💰 {fmtGold(me.gold)} <small className="muted" style={{ color: inc < 0 ? 'var(--danger)' : undefined }}>({inc >= 0 ? '+' : ''}{fmtGold(inc)}/턴)</small></span>
         <span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>🍚 {fmtTroops(food)}</span>
         <span>🏯 {myCities}/{cities.length}도시</span>
@@ -931,6 +1044,34 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {playing ? `⏳ ${game.day}/${DAYS}일` : '진행 ▶ (10일)'}
           </button>
           {toastMsg && <div className="toast">{toastMsg}</div>}
+          {duel && <DuelView d={duel} game={game} />}
+          {cutin && (() => {
+            const [gname, tname] = cutin.text.split(' 「');
+            const gg = Object.values(game.generals).find((x) => x.name === gname);
+            return (
+              <div className="cutin" style={{ borderColor: game.nations[cutin.nation]?.color }}>
+                {gg && <img src={portraitURL(gg, game.nations[cutin.nation]?.color)} alt="" width={64} height={64} />}
+                <div><small>{gname}</small><b>「{tname}</b></div>
+              </div>
+            );
+          })()}
+          {!playing && !game.over && !game.inbox?.length && game.eventsQ?.length > 0 && (() => {
+            const ev = game.eventsQ[0];
+            return (
+              <div className="h14-over" style={{ fontSize: 15, fontWeight: 'normal' }}>
+                <div className="card event-card">
+                  <h3 style={{ margin: '0 0 8px' }}>📜 {ev.title}</h3>
+                  {ev.faces?.length > 0 && (
+                    <div className="row" style={{ justifyContent: 'center', gap: 10, marginBottom: 8 }}>
+                      {ev.faces.map((nm) => { const gg = Object.values(game.generals).find((x) => x.name === nm) || { name: nm, war: 60, lead: 60, intel: 60, pol: 60 }; return <div key={nm} style={{ textAlign: 'center', fontSize: 12 }}><img src={portraitURL(gg, gg.nation !== null && gg.nation !== undefined ? game.nations[gg.nation]?.color : '#fff')} alt="" width={64} height={64} /><div>{nm}</div></div>; })}
+                    </div>
+                  )}
+                  <div style={{ lineHeight: 1.6 }}>{ev.text}</div>
+                  <div style={{ marginTop: 10 }}><button className="primary" onClick={() => act((s) => { s.eventsQ.shift(); })}>확인</button></div>
+                </div>
+              </div>
+            );
+          })()}
           {report && !playing && (
             <div className="h14-report">
               <div className="row" style={{ justifyContent: 'space-between' }}><b>📰 이번 턴 소식</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>

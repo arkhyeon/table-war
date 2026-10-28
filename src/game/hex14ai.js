@@ -9,11 +9,15 @@ function threatNear(s, grid, c) {
   return t;
 }
 
-export function aiTurn14(s, grid, nid) {
+// scope가 있으면 군단: 그 도시들과 그 군단 부대만 움직임 (플레이어가 맡긴 군단)
+export function aiTurn14(s, grid, nid, scope = null) {
   const n = s.nations[nid];
   if (!n.alive) return;
-  const mine = s.castles.filter((c) => c.owner === nid);
-  const myUnits = s.units.filter((u) => u.nation === nid);
+  const inScope = (c) => !scope || scope.cities.has(c.id);
+  const mine = s.castles.filter((c) => c.owner === nid && inScope(c));
+  const myUnits = s.units.filter((u) => u.nation === nid && (scope ? u.corps === scope.corps : !u.corps || n.id !== s.playerId || s.spectator));
+  const mark = (u) => { if (scope) u.corps = scope.corps; return u; };
+  const nUnits = () => s.units.filter((u) => u.nation === nid && (scope ? u.corps === scope.corps : true)).length;
   // 1) 이미 나간 부대: 약해지면 귀환, 목표가 없어지면 새 목표
   for (const u of myUnits) {
     const home = nearestCastle(s, grid, u.tile, nid);
@@ -33,12 +37,12 @@ export function aiTurn14(s, grid, nid) {
     const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
     if (!gs.length || c.troops < foe.troops * 1.3 + 2000) continue;
     const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
-    if (r.ok) order(s, grid, r.unit, 'unit', foe.id);
+    if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
   }
   // 3) 출진: 남는 병력이 있는 성에서 가까운 약한 성을 노림
   const maxUnits = Math.max(2, Math.ceil(mine.length * 1.2));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
-    if (s.units.filter((u) => u.nation === nid).length >= maxUnits) break;
+    if (nUnits() >= maxUnits) break;
     const reserve = Math.max(2500, c.troops * 0.35) + threatNear(s, grid, c) * 0.8;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
@@ -49,11 +53,11 @@ export function aiTurn14(s, grid, nid) {
     const t = pickTarget(s, grid, nid, c.tile, troops);
     if (!t) continue;
     const r = sortie(s, grid, c.id, gids, troops);
-    if (r.ok) order(s, grid, r.unit, 'castle', t.id);
+    if (r.ok) order(s, grid, mark(r.unit), 'castle', t.id);
   }
   // 4) 징병: 금이 남으면 장수 있는 성부터 (유지비 1명당 0.5금/턴을 감당할 만큼)
   // 병량이 1년 넘게 버틸 때만 (더 뽑으면 굶음)
-  if (n.gold > 50000 && n.food > foodUse(s, nid) * 30) {
+  if (n.gold > (scope ? 200000 : 50000) && n.food > foodUse(s, nid) * 30) {
     const hub = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active')).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const per = Math.floor((n.gold - 30000) / 10 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
     for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }

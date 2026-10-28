@@ -8,6 +8,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { initGov, govTurn, pactOf, addRel, goldOf } from './hex14gov.js';
+import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
 // 지형별 이동 비용(이동력 1 = 하루에 평지 1칸)과 수비 보정
@@ -48,9 +49,20 @@ export function buildGrid(world) {
     const d = (x - world.regions[r].cx) ** 2 + (y - world.regions[r].cy) ** 2;
     if (d < best[r]) { best[r] = d; castleTile[r] = i; }
   }
+  // 뱃길: 뭍에서 3칸 안의 바다 (수군이 다닐 수 있음)
+  const water = new Uint8Array(N);
+  {
+    const dist = new Int8Array(N).fill(-1), q = [];
+    for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA) { dist[i] = 0; q.push(i); }
+    for (let k = 0; k < q.length; k++) {
+      const t = q[k];
+      if (dist[t] >= 3) continue;
+      for (const nx of nb[t]) if (dist[nx] < 0 && terrain[nx] === T.SEA) { dist[nx] = dist[t] + 1; water[nx] = 1; q.push(nx); }
+    }
+  }
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, nb, center, passable, castleTile, tilesOf, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
+  return { size, cols, rows, N, terrain, region, river, nb, center, passable, castleTile, tilesOf, water, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -163,6 +175,8 @@ export function createHex14(world, base) {
   const owner = new Array(grid.N).fill(-1);
   for (let i = 0; i < grid.N; i++) if (grid.passable(i) && district[i] >= 0) { const o = castles[district[i]].owner; owner[i] = o === null ? -1 : o; }
   for (const c of castles) owner[c.tile] = c.owner === null ? -1 : c.owner;
+  // 항구: 바닷길이 3칸 안에 닿는 도시
+  for (const c of castles) c.port = c.kind !== 'pass' && grid.water.some((w, t) => w && grid.dist(t, c.tile) <= 3);
   const generals = {};
   for (const g of Object.values(base.generals)) {
     if (g.status !== 'active' || g.nation === null || g.nation === undefined) continue;
@@ -178,6 +192,7 @@ export function createHex14(world, base) {
     startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
   initGov(st, makeRng(`gov0:${base.seed}`));
+  rollWeather(st);
   return st;
 }
 
@@ -212,7 +227,7 @@ export const log = (s, text, kind = 'info', nations = []) => {
   if (s.log.length > 200) s.log.length = 200;
 };
 export const gensOf = (s, ids) => ids.map((id) => s.generals[id]).filter(Boolean);
-const leader = (s, u) => gensOf(s, u.gens).reduce((a, b) => (b.lead + b.war > a.lead + a.war ? b : a));
+const leader = (s, u) => gensOf(s, u.gens).reduce((a, b) => (b.lead + b.war > a.lead + a.war ? b : a), { name: '?', lead: -1, war: -1 });
 const has = (g, t) => (g.traits || []).some(([x]) => x === t);
 export const unitStats = (s, u) => {
   const gs = gensOf(s, u.gens);
@@ -225,7 +240,13 @@ export const commandCap = (s, gids) => {
   return caps.length ? Math.round(caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) : 0;
 };
 export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6); // 하루에 평지 0.6칸 (기마 0.8칸)
-export const moveCost = (grid, from, to) => (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
+export const moveCost = (grid, from, to, s, u) => {
+  if (grid.water?.[to]) return 0.7; // 배는 빠름
+  let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
+  if (u && grid.river[to] && gensOf(s, u.gens).some((g) => has(g, '수군'))) c *= 0.6; // 수군 장수는 강을 따라 빠름
+  return s ? weatherCost(s, grid, to, c) : c;
+};
+const canGo = (grid, t, navy) => grid.passable(t) || (navy && grid.water[t]);
 export const dateOf = (s, startYear = 200) => {
   // 한 턴 = 10일: 상순·중순·하순
   const t = s.turn - 1, m = Math.floor(t / 3) % 12, y = startYear + Math.floor(t / 36);
@@ -262,7 +283,7 @@ function heap() {
 }
 
 // 길찾기 (A*): 지나갈 수 없는 칸·다른 부대가 있는 칸은 피함 (목표 칸은 허용)
-export function findPath(s, grid, from, to, nation) {
+export function findPath(s, grid, from, to, nation, navy = false) {
   if (from === to) return [];
   const occ = unitAt(s);
   const cas = castleAt(s);
@@ -278,7 +299,7 @@ export function findPath(s, grid, from, to, nation) {
     if (seen.has(cur)) continue;
     seen.add(cur);
     for (const nx of grid.nb[cur]) {
-      if (!grid.passable(nx)) continue;
+      if (!canGo(grid, nx, navy)) continue;
       if (nx !== to) {
         const u = occ.get(nx);
         if (u && u.nation !== nation) continue;
@@ -313,7 +334,7 @@ export function sortie(s, grid, castleId, gids, troops) {
   const spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
-  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0 };
+  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port };
   for (const g of gs) { g.castle = null; g.unit = u.id; }
   s.units.push(u);
   return { ok: true, unit: u, msg: `${gs[0].name} 부대 ${fmtTroops(troops)} 출진` };
@@ -323,7 +344,7 @@ export function sortie(s, grid, castleId, gids, troops) {
 export function order(s, grid, u, kind, id) {
   const tgtTile = kind === 'tile' ? id : kind === 'unit' ? s.units.find((x) => x.id === id)?.tile : s.castles[id]?.tile;
   if (tgtTile === undefined || tgtTile === null) return { ok: false, msg: '목표가 없습니다.' };
-  const path = findPath(s, grid, u.tile, tgtTile, u.nation);
+  const path = findPath(s, grid, u.tile, tgtTile, u.nation, u.navy);
   if (!path) return { ok: false, msg: '갈 수 있는 길이 없습니다.' };
   u.order = { kind, id };
   u.path = path;
@@ -335,6 +356,8 @@ export function order(s, grid, u, kind, id) {
 export function stepDay(s, grid) {
   s.day += 1;
   s.fx = [];
+  s.duels = [];
+  dropLeaderless(s, grid);
   const rng = makeRng(`hex:${s.seed}:${s.turn}:${s.day}`);
   const cas = castleAt(s);
   // 1) 이동 (느린 부대부터 섞어서): 하루 이동력만큼, 적 부대 옆 칸에 들어서면 멈춤(통제 구역)
@@ -344,8 +367,9 @@ export function stepDay(s, grid) {
     if (u.order?.kind === 'unit') {
       const t = s.units.find((x) => x.id === u.order.id && !x.dead);
       if (!t) { u.order = null; u.path = []; }
-      else if (!u.path.length || u.path[u.path.length - 1] !== t.tile) { const p = findPath(s, grid, u.tile, t.tile, u.nation); u.path = p || []; }
+      else if (!u.path.length || u.path[u.path.length - 1] !== t.tile) { const p = findPath(s, grid, u.tile, t.tile, u.nation, u.navy); u.path = p || []; }
     }
+    if (u.stun > 0) { u.stun -= 1; continue; } // 일갈에 발이 묶임
     u.mp = Math.min(3, u.mp + speedOf(s, u));
     const occ = unitAt(s);
     while (u.path.length) {
@@ -354,8 +378,8 @@ export function stepDay(s, grid) {
       const enemyU = occ.get(nx);
       const c = cas.get(nx);
       if ((enemyU && enemyU.nation !== u.nation) || (c && c.owner !== u.nation)) break;
-      if (enemyU) { u.wait += 1; if (u.wait > 2) { const p = findPath(s, grid, u.tile, u.path[u.path.length - 1], u.nation); u.path = p || []; u.wait = 0; } break; }
-      const cost = moveCost(grid, u.tile, nx);
+      if (enemyU) { u.wait += 1; if (u.wait > 2) { const p = findPath(s, grid, u.tile, u.path[u.path.length - 1], u.nation, u.navy); u.path = p || []; u.wait = 0; } break; }
+      const cost = moveCost(grid, u.tile, nx, s, u);
       if (u.mp < cost) break;
       u.mp -= cost;
       occ.delete(u.tile);
@@ -363,7 +387,7 @@ export function stepDay(s, grid) {
       occ.set(nx, u);
       u.path.shift();
       // 칠하기: 내 것이 아닌 칸을 지나가면 내 땅이 됨 (성 칸 제외)
-      if (!c && s.owner[nx] !== u.nation) s.owner[nx] = u.nation;
+      if (!c && grid.passable(nx) && s.owner[nx] !== u.nation) s.owner[nx] = u.nation;
       // 내 성에 들어가면 입성 (병력·장수가 성으로)
       if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { enter(s, u, c); break; }
       // 통제 구역: 적 부대 옆에 서면 그날은 더 못 감
@@ -383,16 +407,23 @@ export function stepDay(s, grid) {
     if (!tgt) for (const t of adj) { const o = occ.get(t); if (o && enemy(s, u.nation, o.nation)) { tgt = o; break; } }
     if (!tgt) continue;
     const a = unitStats(s, u), d = unitStats(s, tgt);
-    let dmg = u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1);
-    // 전법: 장수 능력에 따라 돌격·일제사격·화계가 가끔 터짐 (부대마다 3일에 한 번)
+    // 물 위에서는 수군 장수가 없으면 약함
+    const sea = (x) => (grid.water[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : 0.75) : 1);
+    let dmg = u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt);
+    // 일기토
+    maybeDuel(s, u, tgt, rng);
+    // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
     const tac = u.cd > 0 ? null : tacticOf(s, u, rng);
     if (tac) {
-      u.cd = 3;
-      dmg *= tac.mult;
-      tgt.morale -= tac.morale;
-      s.fx.push({ type: 'tactic', tile: u.tile, to: tgt.tile, text: `${tac.g.name} 「${tac.name}」`, nation: u.nation });
-      if (tac.name === '화계') for (const t of grid.nb[tgt.tile]) { const o = occ.get(t); if (o && o !== tgt && enemy(s, u.nation, o.nation)) { const x = dmg * 0.4; o.troops -= x; s.fx.push({ type: 'hit', tile: t, amt: Math.round(x) }); } }
-      if (u.nation === s.playerId || tgt.nation === s.playerId) log(s, `🔥 ${tac.g.name}의 「${tac.name}」! ${leader(s, tgt).name} 부대 ${fmtTroops(Math.round(dmg))} 피해`, 'battle', [u.nation, tgt.nation]);
+      u.cd = tac.unique ? 4 : 3;
+      const fire = tac.kind === 'fire' ? fireMult(s) : 1;
+      if (tac.kind === 'guard') { u.guard = 2; }
+      else dmg *= tac.mult * fire;
+      tgt.morale -= tac.morale * (tac.kind === 'scare' ? 1.5 : 1);
+      s.fx.push({ type: 'tactic', tile: u.tile, to: tgt.tile, text: `${tac.g.name} 「${tac.name}」`, nation: u.nation, unique: !!tac.unique });
+      if (tac.kind === 'fire') for (const t of grid.nb[tgt.tile]) { const o = occ.get(t); if (o && o !== tgt && enemy(s, u.nation, o.nation)) { const x = dmg * 0.4; o.troops -= x; s.fx.push({ type: 'hit', tile: t, amt: Math.round(x) }); } }
+      if (tac.kind === 'shout') for (const o of s.units) if (enemy(s, u.nation, o.nation) && grid.dist(o.tile, u.tile) <= 2) { o.morale -= tac.morale; o.stun = 1; }
+      if (u.nation === s.playerId || tgt.nation === s.playerId) log(s, `🔥 ${tac.g.name}의 「${tac.name}」!${tac.kind === 'guard' ? ' 진을 굳게 쳤습니다' : ` ${leader(s, tgt).name} 부대 ${fmtTroops(Math.round(dmg))} 피해`}`, 'battle', [u.nation, tgt.nation]);
     }
     s.fx.push({ type: 'clash', a: u.tile, b: tgt.tile });
     if (!hits.has(tgt)) hits.set(tgt, []);
@@ -401,7 +432,7 @@ export function stepDay(s, grid) {
   for (const [t, list] of hits) {
     // 협공: 다른 방향에서 함께 치면 한 부대당 +30%
     const pincer = 1 + 0.3 * (new Set(list.map((x) => x.u.tile)).size - 1);
-    const total = list.reduce((a, x) => a + x.dmg, 0) * pincer;
+    const total = list.reduce((a, x) => a + x.dmg, 0) * pincer * (t.guard > 0 ? 0.5 : 1);
     t.troops -= total;
     t.morale -= (total / Math.max(1, t.troops + total)) * 60 + (pincer > 1 ? 5 : 0);
     s.fx.push({ type: 'hit', tile: t.tile, amt: Math.round(total), pincer: pincer > 1 });
@@ -416,7 +447,8 @@ export function stepDay(s, grid) {
     if (pincer > 1) s.fx.push({ type: 'tactic', tile: t.tile, text: '협공!', nation: list[0].u.nation });
     if (pincer > 1 && rng() < 0.3) log(s, `⚔️ ${leader(s, list[0].u).name} 등 ${list.length}부대가 ${leader(s, t).name} 부대를 협공!`, 'battle', [list[0].u.nation, t.nation]);
   }
-  for (const u of s.units) if (u.cd > 0) u.cd -= 1;
+  for (const u of s.units) { if (u.cd > 0) u.cd -= 1; if (u.guard > 0) u.guard -= 1; }
+  dropLeaderless(s, grid);
   // 3) 공성: 성 수비대와 내구를 깎고, 수비대가 반격
   for (const [u, c] of sieges) {
     if (!enemy(s, u.nation, c.owner) || u.dead) continue;
@@ -436,7 +468,7 @@ export function stepDay(s, grid) {
   const supplied = {};
   for (const u of s.units) {
     if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
-    if (!supplied[u.nation].has(u.tile)) { u.troops *= 0.985; u.morale -= 3; u.cut = true; } else { u.cut = false; u.morale = Math.min(100, u.morale + 1); }
+    if (!grid.water[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.985; u.morale -= 3; u.cut = true; } else { u.cut = false; u.morale = Math.min(100, u.morale + 1); }
   }
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {
@@ -457,17 +489,16 @@ export function stepDay(s, grid) {
   for (const c of s.castles) c.troops = Math.max(0, Math.round(c.troops));
 }
 
-// 전법: 가장 높은 능력 하나로 정해짐 (70 이상일 때만, 높을수록 자주)
-const TACTICS = { war: ['돌격', 2.2, 8], lead: ['일제사격', 1.8, 5], intel: ['화계', 1.6, 10] };
-function tacticOf(s, u, rng) {
-  let best = null;
-  for (const g of gensOf(s, u.gens)) for (const k of ['war', 'lead', 'intel']) {
-    const v = g[k];
-    if (v < 70) continue;
-    const ch = Math.min(0.4, (v - 60) / 100);
-    if (rng() < ch && (!best || v > best.v)) best = { g, v, name: TACTICS[k][0], mult: TACTICS[k][1], morale: TACTICS[k][2] };
+// 대장이 없어진 부대(일기토에서 사로잡힘·죽음)는 흩어져 남은 병사가 가까운 성으로
+function dropLeaderless(s, grid) {
+  for (const u of s.units) {
+    u.gens = u.gens.filter((id) => s.generals[id]?.status === 'active' && s.generals[id].unit === u.id);
+    if (u.gens.length) continue;
+    u.dead = true;
+    const home = nearestCastle(s, grid, u.tile, u.nation);
+    if (home) home.troops += Math.round(u.troops * 0.5);
   }
-  return best;
+  s.units = s.units.filter((u) => !u.dead);
 }
 
 function enter(s, u, c) {
@@ -539,8 +570,11 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  s.duelDone = null;
   s.turn += 1;
   s.day = 0;
+  rollWeather(s);
+  eventsTurn(s, grid);
   const alive = s.nations.filter((n) => n.alive && !n.horde);
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   const top = alive.map((n) => [n, cities.filter((c) => c.owner === n.id).length]).sort((a, b) => b[1] - a[1])[0];
