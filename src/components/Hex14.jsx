@@ -1,26 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy } from '../game/hex14.js';
 import { aiTurn14 } from '../game/hex14ai.js';
-import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
 import Slider from './Slider.jsx';
+import { fixJosa } from '../game/josa.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
 const clone = (s) => structuredClone(s);
 const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o].color : NEUTRAL);
 
-// 땅(지형·주인·경계)은 따로 그려 두고, 땅 주인이 바뀔 때만 다시 그림
-function paintLand(grid, s) {
-  const sc = Math.min(3, 4096 / Math.max(grid.W, grid.H));
-  const cv = document.createElement('canvas');
-  cv.width = Math.ceil(grid.W * sc);
-  cv.height = Math.ceil(grid.H * sc);
-  const ctx = cv.getContext('2d');
-  ctx.scale(sc, sc);
+// 칸마다 같은 값이 나오는 작은 난수
+const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
+const mapScale = (grid) => Math.min(3, 4096 / Math.max(grid.W, grid.H));
+const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(grid.W * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
+const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) => Math.max(0, Math.min(255, Math.round(v * f))); return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`; };
+
+// ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
+function paintTerrain(grid, world) {
+  const sc = mapScale(grid);
+  const [cv, ctx] = newLayer(grid, sc);
   const sz = grid.size;
   const hexPath = (i, k = 1) => {
     const [cx, cy] = grid.center(i);
@@ -28,46 +31,188 @@ function paintLand(grid, s) {
     for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * k, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
     ctx.closePath();
   };
+  // 바다: 깊은 곳은 짙게, 뭍 가까운 곳은 옅게
+  ctx.fillStyle = '#3f7598';
+  ctx.fillRect(0, 0, grid.W, grid.H);
+  const isLand = (i) => i !== undefined && grid.terrain[i] !== 0;
+  for (let i = 0; i < grid.N; i++) {
+    if (grid.terrain[i] !== 0) continue;
+    const near = grid.nb[i].some(isLand), near2 = near || grid.nb[i].some((j) => grid.nb[j].some(isLand));
+    if (!near2) continue;
+    hexPath(i, 1.05);
+    ctx.fillStyle = near ? '#79b4c9' : '#5b97b6';
+    ctx.fill();
+  }
+  // 물결
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = sz * 0.07;
+  for (let i = 0; i < grid.N; i++) {
+    if (grid.terrain[i] !== 0 || hash(i, 1) > 0.18) continue;
+    const [cx, cy] = grid.center(i);
+    const x = cx + (hash(i, 2) - 0.5) * sz, y = cy + (hash(i, 3) - 0.5) * sz;
+    ctx.beginPath(); ctx.arc(x - sz * 0.25, y, sz * 0.25, Math.PI * 1.1, Math.PI * 1.9); ctx.arc(x + sz * 0.25, y, sz * 0.25, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+  }
+  // 모래톱: 바다와 맞닿은 땅
+  for (let i = 0; i < grid.N; i++) {
+    if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue;
+    hexPath(i, 1.18);
+    ctx.fillStyle = '#e8d9a8';
+    ctx.fill();
+  }
+  // 땅 바탕: 지형 색에 칸마다 살짝 다른 밝기
   for (let i = 0; i < grid.N; i++) {
     const t = grid.terrain[i];
     if (t === 0) continue;
     hexPath(i, 1.04);
-    ctx.fillStyle = TERRAIN[t]?.color || '#d6dfa6';
+    ctx.fillStyle = shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + hash(i, 4) * 0.1);
     ctx.fill();
-    if (!grid.passable(i)) { ctx.fillStyle = 'rgba(70,55,40,0.55)'; ctx.fill(); continue; }
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = ownerColor(s, s.owner[i]);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = 'rgba(0,0,0,0.12)';
-    ctx.lineWidth = sz * 0.06;
-    hexPath(i, 0.97);
-    ctx.stroke();
-    const [cx, cy] = grid.center(i);
-    if (grid.river[i]) { ctx.fillStyle = 'rgba(40,110,180,0.55)'; ctx.beginPath(); ctx.arc(cx, cy, sz * 0.32, 0, 7); ctx.fill(); }
-    if (t === 6 || t === 3) { ctx.fillStyle = 'rgba(60,40,20,0.32)'; ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + sz * 0.35); ctx.lineTo(cx, cy - sz * 0.45); ctx.lineTo(cx + sz * 0.5, cy + sz * 0.35); ctx.fill(); }
-    if (t === 2) { ctx.fillStyle = 'rgba(20,70,20,0.3)'; ctx.beginPath(); ctx.arc(cx - sz * 0.22, cy, sz * 0.22, 0, 7); ctx.arc(cx + sz * 0.22, cy + sz * 0.1, sz * 0.2, 0, 7); ctx.fill(); }
   }
-  // 관할 경계(얇게)와 나라 경계(굵게)
+  // 풀·모래 무늬
+  for (let i = 0; i < grid.N; i++) {
+    const t = grid.terrain[i];
+    const [cx, cy] = grid.center(i);
+    if (t === 1) {
+      ctx.strokeStyle = 'rgba(95,125,55,0.55)';
+      ctx.lineWidth = sz * 0.06;
+      for (let k = 0; k < 3; k++) {
+        if (hash(i, 10 + k) > 0.6) continue;
+        const x = cx + (hash(i, 20 + k) - 0.5) * sz * 1.3, y = cy + (hash(i, 30 + k) - 0.5) * sz * 1.2;
+        ctx.beginPath(); ctx.moveTo(x - sz * 0.1, y); ctx.lineTo(x - sz * 0.05, y - sz * 0.18); ctx.moveTo(x, y); ctx.lineTo(x + sz * 0.02, y - sz * 0.22); ctx.moveTo(x + sz * 0.1, y); ctx.lineTo(x + sz * 0.08, y - sz * 0.16); ctx.stroke();
+      }
+    } else if (t === 4) {
+      ctx.strokeStyle = 'rgba(170,130,60,0.6)';
+      ctx.lineWidth = sz * 0.08;
+      for (let k = 0; k < 2; k++) { const x = cx + (hash(i, 40 + k) - 0.5) * sz, y = cy + (hash(i, 50 + k) - 0.5) * sz; ctx.beginPath(); ctx.arc(x, y + sz * 0.3, sz * 0.4, Math.PI * 1.2, Math.PI * 1.8); ctx.stroke(); }
+    } else if (t === 5) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(cx + (hash(i, 60 + k) - 0.5) * sz * 1.4, cy + (hash(i, 70 + k) - 0.5) * sz * 1.4, sz * 0.08, 0, 7); ctx.fill(); }
+    }
+  }
+  // 칸 테두리 (아주 옅게)
+  ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+  ctx.lineWidth = sz * 0.05;
+  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) { hexPath(i, 0.98); ctx.stroke(); }
+  // 강: 실제 강줄기를 부드럽게 (짙은 테두리 + 밝은 물빛)
+  const rivers = (world.rivers || []).filter((r) => r.pts?.length > 1);
+  // 강은 영토 색에 덮이지 않게 따로 한 장에 그림
+  const [rcv, rctx] = newLayer(grid, sc);
+  {
+    const ctx = rctx;
+    const curveR = (pts) => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let k = 1; k < pts.length - 1; k++) { const mx = (pts[k][0] + pts[k + 1][0]) / 2, my = (pts[k][1] + pts[k + 1][1]) / 2; ctx.quadraticCurveTo(pts[k][0], pts[k][1], mx, my); } const l = pts[pts.length - 1]; ctx.lineTo(l[0], l[1]); };
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const [w, col] of [[0.62, '#2b5f86'], [0.42, '#4d93c2'], [0.16, 'rgba(200,235,255,0.6)']]) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = sz * w;
+      for (const r of rivers) { curveR(r.pts); ctx.stroke(); }
+    }
+  }
+  // 산·구릉·숲: 위에서부터 차례로 그려야 앞의 것이 뒤를 가림
+  const order = [];
+  for (let i = 0; i < grid.N; i++) if ([2, 3, 6, 7].includes(grid.terrain[i])) order.push(i);
+  order.sort((a, b) => grid.center(a)[1] - grid.center(b)[1]);
+  const peak = (x, y, w, h, snow) => {
+    const apx = x + (hash(Math.round(x * 7), 1) - 0.5) * w * 0.3;
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w * 0.15, y); ctx.closePath();
+    ctx.fillStyle = snow ? '#a89a8a' : '#b49a74'; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + w * 0.15, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w, y); ctx.closePath();
+    ctx.fillStyle = snow ? '#6d6258' : '#7a6248'; ctx.fill();
+    if (snow) { ctx.beginPath(); ctx.moveTo(apx, y - h); ctx.lineTo(apx - w * 0.32, y - h * 0.62); ctx.lineTo(apx - w * 0.05, y - h * 0.7); ctx.lineTo(apx + w * 0.12, y - h * 0.58); ctx.lineTo(apx + w * 0.3, y - h * 0.66); ctx.closePath(); ctx.fillStyle = '#f4f6f8'; ctx.fill(); }
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w, y);
+    ctx.strokeStyle = 'rgba(45,32,20,0.75)'; ctx.lineWidth = sz * 0.07; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(apx, y - h); ctx.lineTo(x + w * 0.15, y); ctx.strokeStyle = 'rgba(45,32,20,0.35)'; ctx.lineWidth = sz * 0.05; ctx.stroke();
+  };
+  const tree = (x, y, h) => {
+    ctx.fillStyle = '#5a4026'; ctx.fillRect(x - h * 0.07, y - h * 0.25, h * 0.14, h * 0.28);
+    for (const [yy, ww] of [[0.25, 0.42], [0.55, 0.32]]) {
+      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.55)); ctx.lineTo(x + h * ww, y - h * yy); ctx.closePath();
+      ctx.fillStyle = '#2f6a35'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.55)); ctx.lineTo(x, y - h * yy); ctx.closePath();
+      ctx.fillStyle = '#4c9149'; ctx.fill();
+    }
+  };
+  const mound = (x, y, w, h) => {
+    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI, 0); ctx.closePath();
+    ctx.fillStyle = '#c4a674'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI * 1.5, 0); ctx.lineTo(x, y); ctx.closePath();
+    ctx.fillStyle = '#a3845a'; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI, 0); ctx.strokeStyle = 'rgba(60,40,20,0.55)'; ctx.lineWidth = sz * 0.06; ctx.stroke();
+  };
+  for (const i of order) {
+    const t = grid.terrain[i];
+    const [cx, cy] = grid.center(i);
+    const j = (k) => (hash(i, k) - 0.5) * sz;
+    if (t === 7) { peak(cx + j(1) * 0.3, cy + sz * 0.55, sz * 1.15, sz * (1.9 + hash(i, 2) * 0.5), true); }
+    else if (t === 6) {
+      peak(cx - sz * 0.35 + j(3) * 0.2, cy + sz * 0.3, sz * 0.75, sz * (1.1 + hash(i, 4) * 0.4), false);
+      peak(cx + sz * 0.35 + j(5) * 0.2, cy + sz * 0.6, sz * 0.8, sz * (1.2 + hash(i, 6) * 0.4), false);
+    } else if (t === 3) {
+      mound(cx - sz * 0.3 + j(7) * 0.2, cy + sz * 0.2, sz * 0.55, sz * 0.45);
+      mound(cx + sz * 0.3 + j(8) * 0.2, cy + sz * 0.5, sz * 0.6, sz * 0.5);
+    } else if (t === 2) {
+      for (let k = 0; k < 4; k++) tree(cx + (hash(i, 11 + k) - 0.5) * sz * 1.3, cy + (hash(i, 21 + k) - 0.3) * sz * 0.9, sz * (0.75 + hash(i, 31 + k) * 0.3));
+    }
+  }
+  return { cv, rcv, sc };
+}
+
+// ── 영토 덧칠 (주인이 바뀔 때만): 나라 색을 옅게 + 관할 경계(점선) + 나라 경계(굵게) ──
+function paintOwners(grid, s, sc) {
+  const [cv, ctx] = newLayer(grid, sc);
+  const sz = grid.size;
+  const byColor = new Map();
+  for (let i = 0; i < grid.N; i++) {
+    if (!grid.passable(i)) continue;
+    const col = ownerColor(s, s.owner[i]);
+    if (!byColor.has(col)) byColor.set(col, []);
+    byColor.get(col).push(i);
+  }
+  ctx.globalAlpha = 0.34;
+  for (const [col, list] of byColor) {
+    ctx.beginPath();
+    for (const i of list) { const [cx, cy] = grid.center(i); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); }
+    ctx.fillStyle = col;
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   const edge = (i, j) => {
     const [cx, cy] = grid.center(i), [jx, jy] = grid.center(j);
     const mx = (cx + jx) / 2, my = (cy + jy) / 2, dx = jy - cy, dy = cx - jx, L = Math.hypot(dx, dy) || 1, h = sz * 0.58;
     ctx.moveTo(mx - (dx / L) * h, my - (dy / L) * h);
     ctx.lineTo(mx + (dx / L) * h, my + (dy / L) * h);
   };
+  ctx.lineCap = 'round';
   ctx.beginPath();
   for (let i = 0; i < grid.N; i++) if (grid.passable(i)) for (const j of grid.nb[i]) if (j > i && grid.passable(j) && s.owner[j] === s.owner[i] && s.district[j] !== s.district[i]) edge(i, j);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = sz * 0.1;
   ctx.setLineDash([sz * 0.3, sz * 0.25]);
   ctx.stroke();
   ctx.setLineDash([]);
+  // 나라 경계: 바깥은 나라 색, 안쪽은 짙은 선
+  const borders = new Map();
+  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) for (const j of grid.nb[i]) if (grid.passable(j) && s.owner[j] !== s.owner[i]) { const c = ownerColor(s, s.owner[i]); if (!borders.has(c)) borders.set(c, []); borders.get(c).push([i, j]); }
   ctx.beginPath();
-  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) for (const j of grid.nb[i]) if (j > i && grid.passable(j) && s.owner[j] !== s.owner[i]) edge(i, j);
-  ctx.strokeStyle = 'rgba(15,12,10,0.8)';
-  ctx.lineWidth = sz * 0.2;
+  for (const list of borders.values()) for (const [i, j] of list) if (j > i) edge(i, j);
+  ctx.strokeStyle = 'rgba(20,14,10,0.85)';
+  ctx.lineWidth = sz * 0.22;
   ctx.stroke();
-  return { cv, sc };
+  // 경계 안쪽에 나라 색 띠
+  for (const [col, list] of borders) {
+    ctx.beginPath();
+    for (const [i, j] of list) {
+      const [cx, cy] = grid.center(i), [jx, jy] = grid.center(j);
+      const mx = cx + (jx - cx) * 0.38, my = cy + (jy - cy) * 0.38, dx = jy - cy, dy = cx - jx, L = Math.hypot(dx, dy) || 1, h = sz * 0.5;
+      ctx.moveTo(mx - (dx / L) * h, my - (dy / L) * h);
+      ctx.lineTo(mx + (dx / L) * h, my + (dy / L) * h);
+    }
+    ctx.strokeStyle = col;
+    ctx.lineWidth = sz * 0.22;
+    ctx.globalAlpha = 0.85;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  return cv;
 }
 
 export default function Hex14({ world, game, setGame, onExit }) {
@@ -85,6 +230,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [toastMsg, setToast] = useState(null);
   const [sheet, setSheet] = useState(false);
   const [tab, setTab] = useState('home');
+  const [report, setReport] = useState(null);
   const canvas = useRef(null);
   const wrap = useRef(null);
   const view = useRef(null); // {x, y, k}
@@ -99,7 +245,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const fx = useRef([]); // 떠오르는 글자 {x, y, text, color, size, t0, life}
   const raf = useRef(0);
 
-  const toast = (m) => { setToast(m); setTimeout(() => setToast(null), 2200); };
+  const toast = (m) => { setToast(fixJosa(m)); setTimeout(() => setToast(null), 2200); };
   const unitById = (id) => game.units.find((u) => u.id === id);
   const selUnit = sel?.type === 'unit' ? unitById(sel.id) : null;
   const selCastle = sel?.type === 'castle' ? game.castles[sel.id] : null;
@@ -119,20 +265,23 @@ export default function Hex14({ world, game, setGame, onExit }) {
       view.current = { k, x: x - cw / k / 2, y: y - ch / k / 2 };
     }
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
+    if (!land.current.base) land.current.base = paintTerrain(grid, world);
     if (land.current.ref !== s.owner) {
       const key = s.owner.join(',');
-      if (land.current.key !== key) land.current = { key, img: paintLand(grid, s) };
+      if (land.current.key !== key) { land.current.key = key; land.current.over = paintOwners(grid, s, land.current.base.sc); }
       land.current.ref = s.owner;
     }
     const { k, x: vx, y: vy } = view.current;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#7fa9bf';
+    ctx.fillStyle = '#3f7598';
     ctx.fillRect(0, 0, cw, ch);
     ctx.setTransform(dpr * k, 0, 0, dpr * k, -vx * k * dpr, -vy * k * dpr);
     ctx.imageSmoothingEnabled = true;
-    const L = land.current.img;
-    ctx.drawImage(L.cv, 0, 0, L.cv.width / L.sc, L.cv.height / L.sc);
+    const B = land.current.base;
+    ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+    ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+    ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     const sz = grid.size;
     const px = 1 / k; // 화면 1픽셀
     const x0 = vx - sz * 4, x1 = vx + cw / k + sz * 4, y0 = vy - sz * 4, y1 = vy + ch / k + sz * 4;
@@ -234,8 +383,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const r = sz * 0.55 * pulse;
       ctx.beginPath(); ctx.moveTo(mx - r, my - r); ctx.lineTo(mx + r, my + r); ctx.moveTo(mx + r, my - r); ctx.lineTo(mx - r, my + r); ctx.stroke();
     }
-    // 부대 깃발
-    for (const u of s.units) {
+    // 부대 깃발 (이름표는 겹치면 하나만)
+    const labels = [];
+    const sorted = s.units.slice().sort((a, b) => (sl?.type === 'unit' && sl.id === a.id ? -1 : sl?.type === 'unit' && sl.id === b.id ? 1 : b.troops - a.troops));
+    for (const u of sorted) {
       const [cx, cy] = posOf(u);
       if (!vis(cx, cy)) continue;
       const n = s.nations[u.nation];
@@ -277,7 +428,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillRect(cx - bw / 2, cy + sz * 0.75, bw * Math.min(1, u.troops / u.max), sz * 0.25);
       ctx.fillStyle = '#5fb0ff';
       ctx.fillRect(cx - bw / 2, cy + sz * 1.0, bw * Math.min(1, u.morale / 100), sz * 0.25);
-      if (k * sz > 4.5) {
+      const lw = fs * 5.5, lh = fs;
+      const free = on || !labels.some(([lx, ly]) => Math.abs(lx - cx) < lw && Math.abs(ly - top) < lh);
+      if (k * sz > 4.5 && free) {
+        labels.push([cx, top]);
         ctx.font = `bold ${fs * 0.78}px sans-serif`;
         const lab = `${g?.name || ''} ${fmtTroops(u.troops)}`;
         ctx.strokeStyle = '#111';
@@ -313,6 +467,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   useEffect(() => {
     window.__h14 = {
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x, y] = grid.center(tile); return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
+      castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops })),
       units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name })),
     };
   });
@@ -392,12 +547,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const pick = (wx, wy) => {
     // 깃발은 칸 위쪽에 그려지므로 칸 중심~깃발 사이를 기준으로, 멀리서 볼 때도 손가락 크기만큼은 잡히게
     const minR = 16 / (view.current?.k || 1);
-    let best = null, bd = Math.max(grid.size * 1.8, minR) ** 2;
-    for (const u of game.units) { const [x, y] = grid.center(u.tile); const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2); if (d < bd) { bd = d; best = { type: 'unit', o: u }; } }
-    if (best) return best;
-    bd = Math.max(grid.size * 2, minR) ** 2;
-    for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { type: 'castle', o: c }; } }
-    return best;
+    let bu = null, du = Math.max(grid.size * 1.8, minR) ** 2;
+    for (const u of game.units) { const [x, y] = grid.center(u.tile); const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2); if (d < du) { du = d; bu = u; } }
+    let bc = null, dc = Math.max(grid.size * 2, minR) ** 2;
+    for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < dc) { dc = d; bc = c; } }
+    // 성 그림이 크므로 성 안쪽을 누르면 근처 부대보다 성을 우선
+    if (bc && (!bu || dc * 0.5 < du)) return { type: 'castle', o: bc };
+    return bu ? { type: 'unit', o: bu } : null;
   };
 
   const tap = (px, py) => {
@@ -413,7 +569,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (kind === 'tile' && (t < 0 || !grid.passable(t))) return toast('갈 수 없는 곳입니다.');
       const id = u ? u.id : c ? c.id : t;
       const other = u ? u.nation : c && c.owner !== pid ? c.owner : null;
-      if (other !== null && other !== undefined && !enemy(game, pid, other)) return toast(`${game.nations[other].name}와(과)는 ${PACT[pactOf(game, pid, other).type]} 중이라 칠 수 없습니다.`);
+      if (other !== null && other !== undefined && !enemy(game, pid, other)) return toast(`${game.nations[other].name}과(와)는 ${PACT[pactOf(game, pid, other).type]} 중이라 칠 수 없습니다.`);
       act((s) => {
         const su = s.units.find((x) => x.id === selUnit.id);
         const r = order(s, grid, su, kind, id);
@@ -432,10 +588,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const runTurn = () => {
     if (playing || game.over) return;
     const s = clone(game);
+    const startN = s.logN || 0;
     for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
     if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
     setPlaying(true);
     setSheet(false);
+    setReport(null);
     let d = 0;
     const tick = () => {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
@@ -447,6 +605,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
         setTimeout(() => {
           snap.fx = [];
           endTurn14(snap, grid);
+          // 이번 턴 소식: 내 나라에 관한 함락·전투·외교·위기 + 내 도시 가까이 온 적군
+          const news = snap.log.filter((l) => (l.n || 0) > startN && l.nations?.includes(pid) && ['capture', 'battle', 'diplo', 'bad'].includes(l.kind) && !l.text.startsWith('🔥')).map((l) => l.text);
+          for (const c of snap.castles.filter((x) => x.owner === pid)) {
+            const foes = snap.units.filter((u) => enemy(snap, pid, u.nation) && ((u.order?.kind === 'castle' && u.order.id === c.id) || grid.dist(u.tile, c.tile) <= 3));
+            if (foes.length) news.push(`⚠️ ${[...new Set(foes.map((u) => snap.nations[u.nation].name))].join('·')}군 ${foes.length}부대(${fmtTroops(foes.reduce((a, u) => a + u.troops, 0))})가 ${c.name}(수비 ${fmtTroops(c.troops)})을 노립니다`);
+          }
+          setReport(news.length ? news.slice(0, 8) : null);
           setGame(snap);
           setPlaying(false);
           setSel((v) => (v?.type === 'unit' && !snap.units.some((u) => u.id === v.id) ? null : v));
@@ -589,7 +754,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               )}
               {selCastle.kind !== 'pass' && (
                 <div style={{ fontSize: 13 }}>
-                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 5금)
+                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 10금)
                   <Slider min={0} max={draftMax14(game, selCastle)} step={100} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={setDraftAmt} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
                 </div>
@@ -641,6 +806,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <span>병력</span><span>{fmtTroops(powerOf(game, pid))}</span>
                 <span>장수</span><span>{Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length}명</span>
               </div>
+              <div className="row" style={{ gap: 4, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <small>🏪 시장</small>
+                <button className="sm" disabled={playing || me.gold < 10000} onClick={() => act((s) => trade(s, pid, 'buy', 10000))}>병량 사기 (금 1만→{fmtTroops(10000 * MARKET.buy)})</button>
+                <button className="sm" disabled={playing || food < 10000} onClick={() => act((s) => trade(s, pid, 'sell', 10000))}>병량 팔기 (1만→금 {fmtGold(10000 * MARKET.sell)})</button>
+              </div>
               <table style={{ width: '100%', marginTop: 8, fontSize: 12 }}>
                 <thead><tr><th align="left">도시</th><th>병력</th><th>장수</th><th>농·상</th></tr></thead>
                 <tbody>
@@ -688,7 +858,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <div key={g.id} style={{ padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
                   <div>{g.name} <small className="muted">({game.nations[g.nation]?.name || '재야'}) 무{g.war} 통{g.lead} 지{g.intel} 정{g.pol}</small></div>
                   <div className="row" style={{ gap: 4 }}>
-                    <button className="sm" disabled={playing || g.tried === game.turn} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid, game.castles.find((c) => c.owner === pid)?.id) * 100)}%</button>
+                    {isRuler(g) ? <small className="muted">군주라 등용 불가</small> : <button className="sm" disabled={playing || g.tried === game.turn} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid) * 100)}%</button>}
                     <button className="sm" disabled={playing} onClick={() => act((s) => release(s, g.id))}>석방 (우호+)</button>
                     <button className="sm danger" disabled={playing} onClick={() => act((s) => execute(s, g.id))}>처단</button>
                   </div>
@@ -765,6 +935,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {playing ? `⏳ ${game.day}/${DAYS}일` : '진행 ▶ (10일)'}
           </button>
           {toastMsg && <div className="toast">{toastMsg}</div>}
+          {report && !playing && (
+            <div className="h14-report">
+              <div className="row" style={{ justifyContent: 'space-between' }}><b>📰 이번 턴 소식</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
+              {report.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
+            </div>
+          )}
           {!playing && !game.over && game.inbox?.length > 0 && (() => {
             const p = game.inbox[0], n = game.nations[p.from];
             return (

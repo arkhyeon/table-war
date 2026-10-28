@@ -55,7 +55,7 @@ export function aiTurn14(s, grid, nid) {
   // 병량이 1년 넘게 버틸 때만 (더 뽑으면 굶음)
   if (n.gold > 50000 && n.food > foodUse(s, nid) * 30) {
     const hub = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active')).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
-    const per = Math.floor((n.gold - 30000) / 5 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
+    const per = Math.floor((n.gold - 30000) / 10 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
     for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
   }
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)

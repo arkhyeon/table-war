@@ -5,6 +5,8 @@ import { SQRT3, cellCenter, pixelToCell, hexDistance, neighborIndex } from './he
 import { T } from './rules.js';
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
+import { fixJosa } from './josa.js';
+import { getScenario } from './scenarios.js';
 import { initGov, govTurn, pactOf, addRel, goldOf } from './hex14gov.js';
 
 export const DAYS = 10;
@@ -168,12 +170,12 @@ export function createHex14(world, base) {
     const mine = castles.filter((x) => x.owner === g.nation);
     if (!mine.length) continue;
     const c = t >= 0 ? mine.reduce((a, b) => (grid.dist(b.tile, t) < grid.dist(a.tile, t) ? b : a)) : mine[0];
-    generals[g.id] = { id: g.id, name: g.name, war: g.war, lead: g.lead, intel: g.intel, pol: g.pol, traits: g.traits || [], nation: g.nation, castle: c.id, unit: null, status: 'active', ruler: base.nations[g.nation]?.ruler === g.id };
+    generals[g.id] = { id: g.id, name: g.name, war: g.war, lead: g.lead, intel: g.intel, pol: g.pol, traits: g.traits || [], nation: g.nation, castle: c.id, unit: null, status: 'active', ruler: base.nations[g.nation]?.ruler === g.id || undefined };
   }
   const nations = base.nations.map((n) => ({ id: n.id, name: n.name, color: n.color, alive: n.alive && castles.some((c) => c.owner === n.id), isPlayer: n.isPlayer, gold: n.gold, horde: !!n.horde, pools: n.pools || [] }));
   const st = {
     mode: 'hex14', version: 14, scenarioId: base.scenarioId, seed: base.seed, opts: base.opts, playerId: base.playerId, spectator: base.spectator,
-    turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
+    startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
   initGov(st, makeRng(`gov0:${base.seed}`));
   return st;
@@ -205,7 +207,8 @@ const castleAt = (s) => {
 // 적인가: 다른 나라이면서 동맹·정전이 아님 (주인 없는 성은 모두의 적)
 export const enemy = (s, a, b) => a !== b && (a === null || b === null || a === -1 || b === -1 || a === undefined || b === undefined || !pactOf(s, a, b));
 export const log = (s, text, kind = 'info', nations = []) => {
-  s.log.unshift({ turn: s.turn, day: s.day, text, kind, nations });
+  s.logN = (s.logN || 0) + 1;
+  s.log.unshift({ n: s.logN, turn: s.turn, day: s.day, text: fixJosa(text), kind, nations });
   if (s.log.length > 200) s.log.length = 200;
 };
 export const gensOf = (s, ids) => ids.map((id) => s.generals[id]).filter(Boolean);
@@ -545,15 +548,15 @@ export function endTurn14(s, grid) {
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
 }
 
-// 징병: 성에서 금으로 병사를 뽑음 (1명당 5금, 인구의 20%까지)
-export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / 5 / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
+// 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
+export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / 10 / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];
   amt = Math.min(Math.floor(amt / 100) * 100, draftMax14(s, c));
   if (amt < 100) return { ok: false, msg: '뽑을 수 없습니다.' };
-  n.gold -= amt * 5;
+  n.gold -= amt * 10;
   c.troops += amt;
   c.pop = Math.max(1, Math.round((c.pop - amt / 1000) * 10) / 10);
-  return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * 5)})` };
+  return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * 10)})` };
 }

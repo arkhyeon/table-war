@@ -2,7 +2,7 @@
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { POOLS } from './generals.js';
-import { EXTRA } from './hex14roster.js';
+import { EXTRA, aliveIn, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
@@ -22,14 +22,20 @@ export function initGov(s, rng) {
   for (const n of s.nations) {
     const troops = s.castles.filter((c) => c.owner === n.id).reduce((a, c) => a + c.troops, 0);
     n.gold = Math.min(n.gold, 30000 + 8000 * s.castles.filter((c) => c.owner === n.id).length);
-    n.food = Math.round(troops * FOOD_PER * 24 + 20000);
+    n.food = Math.round(troops * FOOD_PER * 40 + 30000);
   }
   s.rel = {};
   s.pacts = [];
   s.inbox = [];
   // 역사 인물은 원래 능력치로 (기존 게임의 무작위 능력치 설정을 따르지 않음)
-  const known = new Map(Object.values(POOLS).concat(Object.values(EXTRA)).flat().map((d) => [d.name, d]));
+  const known = new Map(Object.values(POOLS).concat(Object.values(EXTRA), [Object.values(RULERS)]).flat().map((d) => [d.name, d]));
   for (const g of Object.values(s.generals)) { const d = known.get(g.name); if (d) Object.assign(g, { war: d.war, lead: d.lead, intel: d.intel, pol: d.pol }); }
+  // 그 해에 없던 사람은 빼고, 재야 명단 인물이 처음부터 어느 나라에 들어가 있으면 재야로 돌림
+  const year = s.startYear ?? 200;
+  for (const g of Object.values(s.generals)) {
+    if (!aliveIn(g.name, year)) { delete s.generals[g.id]; continue; }
+    if (FREE_NAMES.has(g.name) && !g.ruler) Object.assign(g, { status: 'free', nation: null });
+  }
   const used = new Set(Object.values(s.generals).map((g) => g.name));
   // 각 세력의 그 시대 장수를 모두 불러 도시마다 나눠 둠 (병력 많은 도시부터)
   for (const n of s.nations) {
@@ -49,7 +55,7 @@ export function initGov(s, rng) {
     }
   }
   // 재야 장수: 각 나라 출신 인재 몇 명을 아무 도시에나
-  const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name));
+  const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name) && aliveIn(x.name, year));
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   for (let i = 0; i < Math.min(pool.length, Math.round(cities.length / 3)); i++) {
     const d = pool.splice(Math.floor(rng() * pool.length), 1)[0];
@@ -79,10 +85,10 @@ export function acceptChance(s, a, b, type) {
     // 가장 강한 나라를 함께 두려워하면 잘 받아줌
     const top = s.nations.filter((n) => n.alive).sort((x, y) => powerOf(s, y.id) - powerOf(s, x.id))[0];
     const fear = top && top.id !== a && top.id !== b ? 0.2 : -0.1;
-    return Math.max(0, Math.min(0.95, (rel - 25) / 50 + fear));
+    return Math.max(0, Math.min(0.95, (rel - 35) / 60 + fear));
   }
   // 정전: 약한 쪽이 더 바람
-  return Math.max(0, Math.min(0.95, (rel - 15) / 60 + (pa > pb ? 0.25 : -0.1)));
+  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1)));
 }
 
 export function gift(s, a, b, amt) {
@@ -101,13 +107,16 @@ export function propose(s, a, b, type, rng = Math.random) {
   if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
   if (b === s.playerId && !s.spectator) {
+    // 플레이어에게는 나라마다 석 달에 한 번, 한 번에 한 통만
+    if (s.inbox.length || s.turn - (n.askedPlayer ?? -99) < 9) return { ok: false, msg: '' };
+    n.askedPlayer = s.turn;
     s.inbox.push({ from: a, type });
     return { ok: true, msg: '제안을 보냈습니다.' };
   }
   const yes = rng() < acceptChance(s, a, b, type);
   if (yes) makePact(s, a, b, type);
   else { addRel(s, a, b, -3); log(s, `✉️ ${s.nations[b].name}이(가) ${n.name}의 ${PACT[type]} 제안을 거절했습니다.`, 'diplo', [a, b]); }
-  return { ok: true, accepted: yes, msg: yes ? `${s.nations[b].name}와(과) ${PACT[type]}을 맺었습니다!` : `${s.nations[b].name}이(가) 거절했습니다.` };
+  return { ok: true, accepted: yes, msg: yes ? `${s.nations[b].name}과(와) ${PACT[type]}을 맺었습니다!` : `${s.nations[b].name}이(가) 거절했습니다.` };
 }
 
 export function makePact(s, a, b, type) {
@@ -121,7 +130,7 @@ export function makePact(s, a, b, type) {
     const other = u.nation === a ? b : a;
     if ((o?.kind === 'castle' && s.castles[o.id]?.owner === other) || (o?.kind === 'unit' && s.units.find((x) => x.id === o.id)?.nation === other)) { u.order = null; u.path = []; }
   }
-  log(s, `🤝 ${s.nations[a].name}와(과) ${s.nations[b].name}이(가) ${PACT[type]}을 맺었습니다 (${type === 'ally' ? '1년' : '반년'}).`, 'diplo', [a, b]);
+  log(s, `🤝 ${s.nations[a].name}과(와) ${s.nations[b].name}이(가) ${PACT[type]}을 맺었습니다 (${type === 'ally' ? '1년' : '반년'}).`, 'diplo', [a, b]);
 }
 
 export function answerInbox(s, i, yes) {
@@ -132,20 +141,39 @@ export function answerInbox(s, i, yes) {
   else addRel(s, p.from, s.playerId, -5);
 }
 
+// ── 시장: 금으로 병량을 사고팔기 ──
+export const MARKET = { buy: 1.5, sell: 0.5 }; // 금 1 → 병량 1.5, 병량 1 → 금 0.5
+export function trade(s, nid, kind, amt) {
+  const n = s.nations[nid];
+  if (kind === 'buy') {
+    if (n.gold < amt) return { ok: false, msg: '금이 모자랍니다.' };
+    n.gold -= amt; n.food += Math.round(amt * MARKET.buy);
+    return { ok: true, msg: `병량 +${fmtTroops(Math.round(amt * MARKET.buy))} (금 -${fmtGold(amt)})` };
+  }
+  if (n.food < amt) return { ok: false, msg: '병량이 모자랍니다.' };
+  n.food -= amt; n.gold += Math.round(amt * MARKET.sell);
+  return { ok: true, msg: `금 +${fmtGold(Math.round(amt * MARKET.sell))} (병량 -${fmtTroops(amt)})` };
+}
+
 // ── 인재 ──
+// 군주였던 사람은 남의 신하가 되지 않음
+export const isRuler = (g) => !!g.ruler;
 export function recruitChance(s, g, nid, cityId) {
-  const pol = Math.max(0, ...Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && x.castle === cityId).map((x) => x.pol));
-  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (g.status === 'prisoner' && !s.nations[g.nation]?.alive ? 0.25 : 0)));
+  if (isRuler(g)) return 0;
+  const pol = Math.max(0, ...Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && (cityId === undefined || x.castle === cityId)).map((x) => x.pol));
+  if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35, 0.08 + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
+  return Math.max(0.1, Math.min(0.85, 0.3 + (pol - 50) / 100));
 }
 
 export function recruit(s, gid, nid, rng = Math.random) {
   const g = s.generals[gid];
   if (!g) return { ok: false, msg: '없는 장수입니다.' };
   if (g.tried === s.turn) return { ok: false, msg: '이번 턴에는 이미 설득했습니다.' };
+  if (isRuler(g)) return { ok: false, msg: `${g.name}은(는) 한 나라의 군주였던 사람이라 신하가 되지 않습니다.` };
   const city = g.status === 'free' ? s.castles[g.castle] : s.castles.find((c) => c.owner === nid);
   if (!city || (g.status === 'free' && city.owner !== nid)) return { ok: false, msg: '내 도시에 있는 재야만 등용할 수 있습니다.' };
   g.tried = s.turn;
-  if (rng() >= recruitChance(s, g, nid, city.id)) return { ok: true, msg: `${g.name}이(가) 거절했습니다.` };
+  if (rng() >= recruitChance(s, g, nid, g.status === 'free' ? city.id : undefined)) return { ok: true, msg: `${g.name}이(가) 거절했습니다.` };
   const at = city;
   if (g.status === 'prisoner' && s.nations[g.nation]?.alive) addRel(s, nid, g.nation, -5);
   Object.assign(g, { nation: nid, status: 'active', castle: at.id, held: 0, captor: null });
@@ -187,7 +215,7 @@ export const jobGen = (s, c, role) => {
 };
 
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.trade * 8 * (0.4 + 0.6 * landShare(s, c))));
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.trade * 6 * (0.4 + 0.6 * landShare(s, c))));
 export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c))));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
@@ -253,7 +281,7 @@ function spreadLand(s, grid) {
 
 // 외교: 약조가 끝나면 알림, 우호는 조금씩 30으로, 컴퓨터끼리 동맹·정전
 function diplomacyTurn(s, rng) {
-  for (const p of s.pacts) if (p.until === s.turn + 1) log(s, `📜 ${s.nations[p.a].name}와(과) ${s.nations[p.b].name}의 ${PACT[p.type]}이 끝납니다.`, 'diplo', [p.a, p.b]);
+  for (const p of s.pacts) if (p.until === s.turn + 1) log(s, `📜 ${s.nations[p.a].name}과(와) ${s.nations[p.b].name}의 ${PACT[p.type]}이 끝납니다.`, 'diplo', [p.a, p.b]);
   s.pacts = s.pacts.filter((p) => p.until > s.turn + 1 && s.nations[p.a].alive && s.nations[p.b].alive);
   for (const k of Object.keys(s.rel)) s.rel[k] += s.rel[k] > 30 ? -0.5 : 0.5;
   const alive = s.nations.filter((n) => n.alive && !n.horde);
@@ -277,8 +305,9 @@ function diplomacyTurn(s, rng) {
 function people(s, rng) {
   const used = new Set(Object.values(s.generals).map((g) => g.name));
   const cities = s.castles.filter((c) => c.kind !== 'pass');
+  const year = (s.startYear ?? 200) + Math.floor((s.turn - 1) / 36);
   if (rng() < 0.25) {
-    const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => POOLS[k] || []).concat(POOLS.tk_free || []).filter((x) => !used.has(x.name));
+    const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name) && aliveIn(x.name, year));
     if (pool.length) {
       const c = rng.pick(cities);
       addFree(s, rng.pick(pool), c, `f${s.turn}_${Math.floor(rng() * 1e6)}`);
