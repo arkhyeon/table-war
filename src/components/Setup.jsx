@@ -221,13 +221,13 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <span className="muted">
             {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
-          <button disabled={!ready} onClick={() => start(false, true)} title="육각 칸 지도에서 장수가 부대를 이끌고 실시간(10일 단위)으로 움직이는 삼국지14 방식 (실험)">
-            ⬡ 삼국지14식 (실험)
+          <button className="sm" disabled={!ready} onClick={() => start(false, false)} title="지역 단위로 행동력을 써서 싸우는 예전 방식">
+            🗺️ 지역 모드(구버전)
           </button>
-          <button disabled={!ready} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행하고, 원할 때 아무 나라로 난입">
+          <button disabled={!ready} onClick={() => start(true, true)} title="모든 나라를 컴퓨터가 진행">
             👁️ 관전으로 시작
           </button>
-          <button className="primary" disabled={!ready} onClick={() => start(false)}>
+          <button className="primary" disabled={!ready} onClick={() => start(false, true)}>
             게임 시작 ▶
           </button>
         </div>

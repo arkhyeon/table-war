@@ -8,6 +8,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { initGov, govTurn, pactOf, addRel, goldOf } from './hex14gov.js';
+import { buildTurn, lv } from './hex14build.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -135,7 +136,7 @@ function pickCities(world, grid, base) {
 function districts(grid, cities) {
   const dist = new Float64Array(grid.N).fill(Infinity), own = new Array(grid.N).fill(-1);
   const q = [];
-  cities.forEach((c, i) => { if (c.kind !== 'city') return; dist[c.tile] = 0; own[c.tile] = i; q.push(c.tile); });
+  cities.forEach((c, i) => { if (c.kind !== 'city' || c.founding) return; dist[c.tile] = 0; own[c.tile] = i; q.push(c.tile); });
   for (let k = 0; k < q.length; k++) {
     const t = q[k];
     for (const nx of grid.nb[t]) {
@@ -145,6 +146,11 @@ function districts(grid, cities) {
     }
   }
   return own;
+}
+
+// 새 도시가 생기면 관할 구역을 다시 나눔
+export function redistrict(s, grid) {
+  s.district = districts(grid, s.castles);
 }
 
 // ── 새 판: 기존 게임 설정(나라·장수·지역 병력)을 칸 지도와 도시로 옮김 ──
@@ -341,7 +347,7 @@ export function sortie(s, grid, castleId, gids, troops) {
   const spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
-  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port };
+  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: lv(c, 'smithy') ? 1.1 : undefined };
   for (const g of gs) { g.castle = null; g.unit = u.id; }
   s.units.push(u);
   return { ok: true, unit: u, msg: `${gs[0].name} 부대 ${fmtTroops(troops)} 출진` };
@@ -415,8 +421,8 @@ export function stepDay(s, grid) {
     if (!tgt) continue;
     const a = unitStats(s, u), d = unitStats(s, tgt);
     // 물 위에서는 수군 장수가 없으면 약함
-    const sea = (x) => (grid.water[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : 0.75) : 1);
-    let dmg = u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt);
+    const sea = (x) => (grid.water[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships ? 1 : 0.75) : 1);
+    let dmg = u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
     maybeDuel(s, u, tgt, rng);
     // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
@@ -577,6 +583,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  buildTurn(s, grid, redistrict);
   s.duelDone = null;
   s.turn += 1;
   s.day = 0;
@@ -590,14 +597,15 @@ export function endTurn14(s, grid) {
 }
 
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
-export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / 10 / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
+export const draftCost = (c) => (lv(c, 'barracks') ? 8 : 10);
+export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c) / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];
   amt = Math.min(Math.floor(amt / 100) * 100, draftMax14(s, c));
   if (amt < 100) return { ok: false, msg: '뽑을 수 없습니다.' };
-  n.gold -= amt * 10;
+  n.gold -= amt * draftCost(c);
   c.troops += amt;
   c.pop = Math.max(1, Math.round((c.pop - amt / 1000) * 10) / 10);
-  return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * 10)})` };
+  return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * draftCost(c))})` };
 }
