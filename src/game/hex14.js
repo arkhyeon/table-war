@@ -109,17 +109,23 @@ function pickCities(world, grid, base) {
     if (!far(t, 3)) { const c = out.filter((c) => c.kind === 'city').sort((a, b) => grid.dist(a.tile, t) - grid.dist(b.tile, t))[0]; if (c) { c.capitalOf = n.id; continue; } }
     out.push({ name: base.regions[n.capital].name, tile: t, kind: 'city', capitalOf: n.id });
   }
-  // 그 밖(삼국지가 아닌 판): 큰 지역부터 도시로
+  // 그 밖(삼국지가 아닌 판): 나라마다 자기 땅 지역 4곳당 1곳(최소 2곳), 남은 빈 땅도 4곳당 1곳 — 큰 지역부터, 서로 떨어지게
   if (!/^threekingdoms/.test(base.scenarioId) || !world.geo) {
     const land = world.regions.filter((r) => !r.sea && grid.castleTile[r.id] >= 0);
-    // 지역 4곳당 1곳, 나라가 많고 땅이 좁으면 나라마다 2~3곳은 되게
-    const want = Math.max(out.length, Math.round(land.length / 4), Math.round(base.nations.filter((n) => n.alive).length * 2.5));
-    const gap = Math.max(3, Math.round(Math.sqrt(grid.region.filter((r) => r >= 0).length / want) * 0.75));
-    const order = land.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
-    for (const r of order) {
-      if (out.length >= want) break;
-      const t = grid.castleTile[r.id];
-      if (far(t, gap)) out.push({ name: base.regions[r.id].name, tile: t, kind: 'city' });
+    const gap = Math.max(3, Math.round(Math.sqrt(grid.region.filter((r) => r >= 0).length / Math.max(1, land.length / 4)) * 0.75));
+    const groups = new Map();
+    for (const r of land) { const o = base.regions[r.id].owner ?? -1; if (!groups.has(o)) groups.set(o, []); groups.get(o).push(r); }
+    for (const [o, regs] of groups) {
+      const want = o === -1 ? Math.round(regs.length / 4) : Math.max(2, Math.round(regs.length / 4));
+      let have = out.filter((c) => (base.regions[grid.region[c.tile]]?.owner ?? -1) === o).length;
+      const order = regs.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
+      for (const g of [gap, Math.max(2, Math.round(gap / 2))]) for (const r of order) {
+        if (have >= Math.min(want, regs.length)) break;
+        const t = grid.castleTile[r.id];
+        if (out.some((c) => c.tile === t) || !far(t, g)) continue;
+        out.push({ name: base.regions[r.id].name, tile: t, kind: 'city' });
+        have += 1;
+      }
     }
   }
   return out;

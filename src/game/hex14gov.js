@@ -2,7 +2,7 @@
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { POOLS } from './generals.js';
-import { EXTRA, aliveIn, FREE_NAMES, RULERS } from './hex14roster.js';
+import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
@@ -30,32 +30,32 @@ export function initGov(s, rng) {
   // 역사 인물은 원래 능력치로 (기존 게임의 무작위 능력치 설정을 따르지 않음)
   const known = new Map(Object.values(POOLS).concat(Object.values(EXTRA), [Object.values(RULERS)]).flat().map((d) => [d.name, d]));
   for (const g of Object.values(s.generals)) { const d = known.get(g.name); if (d) Object.assign(g, { war: d.war, lead: d.lead, intel: d.intel, pol: d.pol }); }
-  // 그 해에 없던 사람은 빼고, 재야 명단 인물이 처음부터 어느 나라에 들어가 있으면 재야로 돌림
-  const year = s.startYear ?? 200;
-  for (const g of Object.values(s.generals)) {
-    if (!aliveIn(g.name, year)) { delete s.generals[g.id]; continue; }
-    if (FREE_NAMES.has(g.name) && !g.ruler) Object.assign(g, { status: 'free', nation: null });
-  }
+  // 재야 명단 인물이 처음부터 어느 나라에 들어가 있으면 재야로 돌림 (연도는 따지지 않음: 랜덤·가상 판도 있으니 되도록 많이)
+  for (const g of Object.values(s.generals)) if (FREE_NAMES.has(g.name) && !g.ruler) Object.assign(g, { status: 'free', nation: null });
   const used = new Set(Object.values(s.generals).map((g) => g.name));
-  // 각 세력의 그 시대 장수를 모두 불러 도시마다 나눠 둠 (병력 많은 도시부터)
+  // 각 나라 출신 장수를 모두 불러 도시마다 나눠 둠. 같은 명단을 여러 나라가 쓰면(예: 일본 다이묘들) 도시 수에 맞춰 고르게 나눔
+  const byPool = new Map();
   for (const n of s.nations) {
-    if (!n.alive) continue;
+    if (!n.alive || !n.pools?.length || n.pools[0] === 'tk_free') continue;
     const mine = s.castles.filter((c) => c.owner === n.id && c.kind !== 'pass').sort((a, b) => b.troops - a.troops);
     if (!mine.length) continue;
-    let k = 0;
-    for (const pool of n.pools || []) {
-      if (pool === 'tk_free') continue;
-      for (const d of [...(POOLS[pool] || []), ...(EXTRA[pool] || [])]) {
-        if (used.has(d.name)) continue;
-        used.add(d.name);
-        const id = `x_${n.id}_${k}`;
-        s.generals[id] = { id, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: n.id, castle: mine[k % mine.length].id, unit: null, status: 'active' };
-        k += 1;
-      }
+    if (!byPool.has(n.pools[0])) byPool.set(n.pools[0], []);
+    byPool.get(n.pools[0]).push({ n, mine, k: 0, got: 0 });
+  }
+  for (const [pool, members] of byPool) {
+    const list = [...(POOLS[pool] || []), ...(EXTRA[pool] || [])].filter((d) => !used.has(d.name));
+    for (const d of list) {
+      // 도시 하나당 받은 장수가 가장 적은 나라에게
+      const m = members.reduce((a, b) => (b.got / b.mine.length < a.got / a.mine.length ? b : a));
+      used.add(d.name);
+      const id = `x_${m.n.id}_${m.k}`;
+      s.generals[id] = { id, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };
+      m.k += 1;
+      m.got += 1;
     }
   }
   // 재야 장수: 각 나라 출신 인재 몇 명을 아무 도시에나
-  const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name) && aliveIn(x.name, year));
+  const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name));
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   for (let i = 0; i < Math.min(pool.length, Math.round(cities.length / 3)); i++) {
     const d = pool.splice(Math.floor(rng() * pool.length), 1)[0];
@@ -305,9 +305,8 @@ function diplomacyTurn(s, rng) {
 function people(s, rng) {
   const used = new Set(Object.values(s.generals).map((g) => g.name));
   const cities = s.castles.filter((c) => c.kind !== 'pass');
-  const year = (s.startYear ?? 200) + Math.floor((s.turn - 1) / 36);
   if (rng() < 0.25) {
-    const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name) && aliveIn(x.name, year));
+    const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name));
     if (pool.length) {
       const c = rng.pick(cities);
       addFree(s, rng.pick(pool), c, `f${s.turn}_${Math.floor(rng() * 1e6)}`);
