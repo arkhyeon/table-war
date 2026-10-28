@@ -7,7 +7,7 @@ import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
-import { initGov, govTurn, pactOf, addRel, goldOf } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST } from './hex14gov.js';
 import { buildTurn, lv } from './hex14build.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
@@ -342,11 +342,14 @@ export function sortie(s, grid, castleId, gids, troops) {
   const cap = commandCap(s, gids);
   troops = Math.min(Math.floor(troops / 100) * 100, cap, c.troops - 500);
   if (troops < 1000) return { ok: false, msg: '병력이 모자랍니다 (성에 500은 남겨야 함).' };
+  const cost = Math.round(troops * SORTIE_COST);
+  if (s.nations[c.owner].gold < cost) return { ok: false, msg: `출진 비용(군량 수송) 금 ${fmtGold(cost)}이 모자랍니다.` };
   // 성 옆 빈 칸에 나감
   const occ = unitAt(s);
   const spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
+  s.nations[c.owner].gold -= cost;
   const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: lv(c, 'smithy') ? 1.1 : undefined };
   for (const g of gs) { g.castle = null; g.unit = u.id; }
   s.units.push(u);
@@ -566,6 +569,41 @@ function capture(s, grid, c, u) {
   checkFall(s, old);
 }
 
+// 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾임. 이을 사람이 없으면 나라가 무너져 도시는 주인 없는 땅이 됨
+export function checkRulers(s) {
+  for (const n of s.nations) {
+    if (!n.alive || n.horde) continue;
+    const gens = Object.values(s.generals).filter((g) => g.nation === n.id);
+    const ruler = gens.find((g) => g.ruler && g.status === 'active');
+    if (ruler) continue;
+    if (!gens.some((g) => g.ruler)) { // 처음부터 군주 표시가 없던 나라: 가장 나은 장수를 군주로
+      const b = gens.filter((g) => g.status === 'active').sort((a, c) => c.lead + c.pol - (a.lead + a.pol))[0];
+      if (b) b.ruler = true;
+      continue;
+    }
+    const old = gens.find((g) => g.ruler);
+    old.ruler = false;
+    old.exRuler = true;
+    const heir = gens.filter((g) => g.status === 'active').sort((a, c) => c.lead + c.pol - (a.lead + a.pol))[0];
+    const why = old.status === 'prisoner' ? '사로잡혔' : '세상을 떠났';
+    if (heir) {
+      heir.ruler = true;
+      for (const u of s.units) if (u.nation === n.id) u.morale = Math.max(0, u.morale - 15);
+      log(s, `👑 ${n.name}의 군주 ${old.name}이(가) ${why}습니다. ${heir.name}이(가) 뒤를 이었습니다.`, 'capture', [n.id]);
+      s.eventsQ = s.eventsQ || [];
+      if (n.id === s.playerId || old.captor === s.playerId) s.eventsQ.push({ title: `${n.name}의 군주 교체`, text: `${old.name}이(가) ${why}습니다. ${heir.name}이(가) 뒤를 이었지만 군의 사기가 꺾였습니다.`, faces: [old.name, heir.name], nations: [n.id] });
+    } else {
+      // 이을 사람이 없음: 나라가 무너짐
+      for (const c of s.castles) if (c.owner === n.id) { c.owner = null; c.troops = Math.round(c.troops * 0.5); c.capital = false; }
+      for (let i = 0; i < s.owner.length; i++) if (s.owner[i] === n.id) s.owner[i] = -1;
+      for (const u of s.units) if (u.nation === n.id) u.dead = true;
+      s.units = s.units.filter((u) => !u.dead);
+      n.alive = false;
+      log(s, `☠️ ${n.name}의 군주 ${old.name}이(가) ${why}고 이을 사람이 없어 나라가 무너졌습니다.`, 'capture', [n.id]);
+    }
+  }
+}
+
 function checkFall(s, nid) {
   if (nid === null || nid === -1 || nid === undefined) return;
   const n = s.nations[nid];
@@ -583,6 +621,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  checkRulers(s);
   buildTurn(s, grid, redistrict);
   s.duelDone = null;
   s.turn += 1;

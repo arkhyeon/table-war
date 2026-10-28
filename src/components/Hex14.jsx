@@ -739,7 +739,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const best = castleGens.slice().sort((a, b) => b.lead + b.war - (a.lead + a.war))[0];
     const ids = best ? [best.id] : [];
     setPickG(ids);
-    setAmt(Math.max(0, Math.min(commandCap(game, ids), selCastle.troops - 500)));
+    // 기본 출진 병력: 근처(6칸) 적 병력만큼은 성에 남김
+    const foes = game.units.filter((u) => enemy(game, pid, u.nation) && grid.dist(u.tile, selCastle.tile) <= 6).reduce((a, u) => a + u.troops, 0);
+    const keep = Math.max(500, Math.ceil(foes / 100) * 100);
+    const safe = Math.min(commandCap(game, ids), selCastle.troops - keep);
+    setAmt(Math.max(0, safe >= 1000 ? safe : Math.min(commandCap(game, ids), selCastle.troops - 500)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortieOpen, sel?.id]);
   const cap = commandCap(game, pickG);
@@ -874,7 +878,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       }} /> <Face g={g} col={me.color} /> {g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel}{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
                     </label>
                   ))}
-                  <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(amt)} / 지휘 한도 {fmtTroops(cap)}</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(amt)} / 지휘 한도 {fmtTroops(cap)} · 출진 비용 금 {fmtGold(Math.round(Math.min(amt, maxAmt) / 2))}</div>
+                  {(() => {
+                    // 남는 수비와 6칸 안 적 병력 비교
+                    const left = selCastle.troops - Math.min(amt, maxAmt);
+                    const foes = game.units.filter((u) => enemy(game, pid, u.nation) && grid.dist(u.tile, selCastle.tile) <= 6).reduce((a, u) => a + u.troops, 0);
+                    const danger = foes > 0 && left < foes;
+                    return (
+                      <div style={{ fontSize: 12, color: danger ? 'var(--danger)' : 'var(--muted)' }}>
+                        남는 수비 {fmtTroops(left)} · 6칸 안 적 {fmtTroops(foes)}{danger ? ' — ⚠️ 이대로 나가면 성을 빼앗길 수 있습니다' : ''}
+                      </div>
+                    );
+                  })()}
                   <Slider min={0} max={maxAmt} step={100} value={Math.min(amt, maxAmt)} onChange={setAmt} style={{ width: '100%' }} />
                   <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
                     <button onClick={() => setSortieOpen(false)}>취소</button>
@@ -1057,6 +1072,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>이름난 장수는 고유 전법(★)을 씁니다: 관우 「청룡언월」, 장비 「장판교 일갈」(주변 적 발 묶음), 제갈량 「팔진」(받는 피해 절반) …</li>
                 <li>무력 75 이상 대장끼리 붙으면 가끔 <b>일기토</b>. 지면 사기가 크게 꺾이고 사로잡히기도 합니다.</li>
                 <li>날씨: ❄️ 겨울 눈은 북쪽 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
+                <li>💰 금 지출: 장수 녹봉 1명당 200/순, 시설 유지비 단계당 300/순, 출진 비용 병사 2명당 1금, 징병 1명당 10금(병영 8금).</li>
+                <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
                 <li>🏗️ 도시를 눌러 시설(농지·시장·병영·성벽 증축·대장간·조선소·학당)을 짓습니다. 도시마다 4칸(수도 6칸), 한 번에 하나씩.</li>
                 <li>🏗️ 세력 탭의 「새 도시 세우기」로 내 땅 빈 곳(다른 성과 4칸 이상, 초록 칸)에 도시를 세웁니다. 완공되면 주변 땅이 그 도시 관할이 됩니다.</li>
                 <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>

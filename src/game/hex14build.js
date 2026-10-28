@@ -118,7 +118,7 @@ export function buildTurn(s, grid, redistrict) {
 // 컴퓨터: 금이 넉넉하면 도시 하나에 쓸모 있는 시설을 지음 (위협받는 곳은 성벽, 아니면 시장·농지·병영 순)
 export function aiBuild(s, grid, nid, threat) {
   const n = s.nations[nid];
-  if (n.gold < 90000) return;
+  if (n.gold < 40000) return;
   const mine = s.castles.filter((c) => c.owner === nid && !c.build && !c.founding);
   for (const c of mine.sort((a, b) => threat(b) - threat(a))) {
     const order = threat(c) > 0 ? ['wall', 'barracks', 'smithy'] : ['market', 'farm', 'barracks', 'academy', 'shipyard', 'smithy', 'wall'];
