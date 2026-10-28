@@ -1,7 +1,7 @@
 import { G } from './rules.js';
 import { CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral } from './generals.js';
-import { addGeneral, computeMaxAp, log, regionTax, commandCap, nationRegions, gensIn, getRel, setRel, checkElimination, canAct, buildCost, DRAFT_GOLD, WALL_MAX, succession, nationGenerals, nationTrait } from './engine.js';
+import { addGeneral, computeMaxAp, log, regionTax, commandCap, nationPower, nationRegions, gensIn, getRel, setRel, checkElimination, canAct, buildCost, DRAFT_GOLD, WALL_MAX, succession, nationGenerals, nationTrait } from './engine.js';
 import { rating } from './generals.js';
 import { tv } from './traits.js';
 import { fmtTroops } from './format.js';
@@ -521,12 +521,35 @@ export function spawnHorde(s, world, rng) {
 // ───────── 해적단: 바다에 머물며 해안 땅을 약탈하고 함대를 덮침. 땅은 빼앗지 않고 피해만 줌. 격퇴(해전)할 때까지 머묾 ─────────
 const yearNow = (s) => (getScenario(s.scenarioId)?.startYear ?? 1) + Math.floor((s.turn - 1) / 4);
 const coastsOf = (s, world, z) => world.regions[z].neighbors.filter((x) => !s.regions[x.id].sea && s.regions[x.id].owner !== null && !s.nations[s.regions[x.id].owner].horde).map((x) => x.id);
+// 해안 주인 중 가장 센 나라의 국력 (해적은 강한 나라를 노림)
+const prey = (s, world, z) => Math.max(0, ...coastsOf(s, world, z).map((c) => nationPower(s, s.regions[c].owner)));
+// 해적선 이동: 지금 바다에서 바닷길 4칸 안의 빈 바다 중, 센 나라의 해안을 낀 곳으로 (같은 곳에 머물지 않음)
+function sail(s, world, n, z, rng) {
+  const dist = new Map([[z, 0]]);
+  const q = [z];
+  for (let k = 0; k < q.length; k++) {
+    if (dist.get(q[k]) >= 4) continue;
+    for (const x of world.regions[q[k]].neighbors) if (s.regions[x.id].sea && !dist.has(x.id)) { dist.set(x.id, dist.get(q[k]) + 1); q.push(x.id); }
+  }
+  const cand = [...dist.keys()].filter((i) => i !== z && (s.regions[i].owner === null || s.regions[i].troops <= 0) && coastsOf(s, world, i).length);
+  if (!cand.length) return z;
+  const to = rng.weighted(cand, (i) => prey(s, world, i) ** 2 + 1);
+  const me = s.regions[z];
+  s.regions[to].owner = n.id;
+  s.regions[to].troops = me.troops;
+  for (const g of Object.values(s.generals)) if (g.nation === n.id && g.region === z) g.region = to;
+  me.owner = null;
+  me.troops = 0;
+  n.capital = to;
+  return to;
+}
 export function spawnPirates(s, world, rng) {
   if (s.turn < 10 || s.opts?.noRise || s.nations.length >= MAX_IDS) return;
   if (s.nations.filter((n) => n.alive && n.pirate).length >= 2 || rng() >= 0.04) return;
   const zones = s.regions.map((r, i) => i).filter((i) => s.regions[i].sea && (s.regions[i].owner === null || s.regions[i].troops <= 0) && coastsOf(s, world, i).length);
   if (!zones.length) return;
-  const z = rng.weighted(zones, (i) => coastsOf(s, world, i).length + coastsOf(s, world, i).filter((c) => s.regions[c].buildings.port).length * 2);
+  // 센 나라 앞바다에 잘 나타남
+  const z = rng.weighted(zones, (i) => prey(s, world, i) ** 2 + 1);
   const civ = civNear(s, world, z);
   const n = newNation(s, civ, outlawName(PIRATES, civ, yearNow(s), rng));
   const df = s.df || 1;
@@ -569,21 +592,12 @@ export function pirateTurn(s, world, rng) {
       log(s, `🏴‍☠️ ${n.name}이(가) ${f.name}의 ${s.nations[victim].name} 함대를 덮쳐 ${fmtTroops(lost)}을(를) 수장시켰습니다!`, [n.id, victim], 'warn');
       continue;
     }
-    // 2) 해안 약탈: 나타난 바다에서 가장 가까운 해안 땅을 침. 해적 1명 = 병사 1명으로 맞바꿔 죽음
+    // 2) 해안 약탈: 그 바다에 닿은 해안 중 가장 센 나라 땅을 침 (같으면 가까운 곳). 해적 1명 = 병사 1명으로 맞바꿔 죽음
     const coasts = coastsOf(s, world, z);
-    if (!coasts.length) {
-      // 칠 해안이 없으면 다른 바다로 옮겨 감
-      const next = world.regions[z].neighbors.map((x) => x.id).filter((i) => s.regions[i].sea && (s.regions[i].owner === null || s.regions[i].troops <= 0) && coastsOf(s, world, i).length);
-      if (next.length) {
-        const to = rng.pick(next);
-        s.regions[to].owner = n.id; s.regions[to].troops = me.troops;
-        for (const g of Object.values(s.generals)) if (g.nation === n.id && g.region === z) g.region = to;
-        me.owner = null; me.troops = 0; n.capital = to;
-      }
-      continue;
-    }
+    if (!coasts.length) { sail(s, world, n, z, rng); continue; }
     const zc = world.regions[z];
-    const t = coasts.slice().sort((a, b) => Math.hypot(world.regions[a].cx - zc.cx, world.regions[a].cy - zc.cy) - Math.hypot(world.regions[b].cx - zc.cx, world.regions[b].cy - zc.cy))[0];
+    const d = (a) => Math.hypot(world.regions[a].cx - zc.cx, world.regions[a].cy - zc.cy);
+    const t = coasts.slice().sort((a, b) => nationPower(s, s.regions[b].owner) - nationPower(s, s.regions[a].owner) || d(a) - d(b))[0];
     const r = s.regions[t];
     const owner = s.nations[r.owner];
     const D = r.troops;
@@ -615,6 +629,8 @@ export function pirateTurn(s, world, rng) {
     const burnMk = short > want / 2 && !!r.buildings.market;
     if (burnMk) r.buildings.market = 0;
     me.troops = Math.min(n.pirateMax || left * 2, left + Math.round((taken * 1000 * 0.2) / 100) * 100);
+    // 털고 나면 배를 몰아 다른 바다로 (센 나라 해안 쪽)
+    sail(s, world, n, z, rng);
     log(s, `🏴‍☠️ ${n.name}(${fmtTroops(P)})이(가) ${r.name}(${owner.name})을(를) 덮쳤습니다! 수비대 ${fmtTroops(D)} 전멸(해적 -${fmtTroops(dead)}), 금 -${fmtGold(gold)}, 백성 ${Math.round(taken * 10) / 10}천 납치${short > 0 ? '(금이 모자라 더 끌고 감)' : ''}${burn ? ', 항구 불탐' : ''}${burnMk ? ', 시장 불탐' : ''}.`, [n.id, r.owner], 'warn');
   }
 }
