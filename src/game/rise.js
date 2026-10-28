@@ -469,8 +469,8 @@ function hardenLeader(king, base, tier) {
 
 export function spawnHorde(s, world, rng) {
   if (s.turn < 8 || s.opts?.noRise || s.nations.length >= MAX_IDS || topShare(s).share >= ENDGAME) return;
-  // 변방 침입: 턴당 8% (해적 4%와 합쳐 8턴에 한 번꼴)
-  if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 4 || rng() >= 0.08) return;
+  // 변방 침입: 턴당 6% (해적 4%와 합쳐 10턴에 한 번꼴)
+  if (s.nations.filter((n) => n.alive && n.horde && !n.pirate).length >= 4 || rng() >= 0.06) return;
   const ew = edgeWeight(s, world);
   const df = s.df || 1;
   const opts = [];

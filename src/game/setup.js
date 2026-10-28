@@ -3,7 +3,7 @@ import { makeRng, hashString } from './rng.js';
 import { T, G, DIFFICULTY } from './rules.js';
 import { CIVS, RANDOM_CIVS, makeNamer } from './civs.js';
 import { POOLS, parseGeneral, rating } from './generals.js';
-import { addGeneral, computeMaxAp, nationPower, spawnGeneral } from './engine.js';
+import { addGeneral, computeMaxAp, nationPower, spawnGeneral, nationRegions, nationGenerals } from './engine.js';
 import { rollWeather } from './weather.js';
 import { detailFactor } from './mapgen.js';
 import { assignRealNames } from './places.js';
@@ -187,7 +187,7 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     // 변방(나라들의 한가운데에서 멀수록)일수록 최대 2.4배 강함 → 변방국이 공짜로 커지지 못하고 중앙과 맞붙게
     const strong = owner[i] === null && rng() < 0.15;
     const edge = owner[i] === null ? 1 + 1.4 * Math.min(1, Math.hypot(wr.cx - mid[0], wr.cy - mid[1]) / spread) : 1;
-    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1) * (frontier.has(i) ? 0.5 : 1)) / df)) * 100;
+    const troops = Math.max(5, Math.round((owner[i] === null ? (rng.int(45, 100) + (wr.terrain === T.MOUNTAIN ? 30 : 0)) * (strong ? rng.range(2, 3) : 1) * edge : rng.int(50, 90) * (plan[owner[i]].power || 1) * (frontier.has(i) ? 0.75 : 1)) / df)) * 100;
     return {
       name: isCap && isCap.capital ? isCap.capital : real[i] || namer(civ),
       owner: owner[i],
@@ -292,6 +292,11 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
     const extra = d < 0.3 ? 2 : d < 0.55 ? 1 : 0;
     for (let q = 0; q < extra; q++) spawnGeneral(s, n.id, rng, true);
   }
+  // 땅이 넓은 나라: 땅 6곳마다 장수 1명은 되게 채움(최대 5명까지만) (넓은 땅을 지킬 군단이 모자라 일찍 무너지지 않게)
+  for (const n of s.nations) {
+    const want = Math.min(5, Math.ceil(nationRegions(s, n.id).length / 6));
+    for (let q = nationGenerals(s, n.id).length; q < want; q++) if (!spawnGeneral(s, n.id, rng, true)) break;
+  }
   for (const n of s.nations) {
     n.maxAp = computeMaxAp(s, n.id);
     n.ap = n.maxAp;
@@ -343,16 +348,20 @@ export function createGame(world, scn, seed, playerId, opts = {}, appearHistory 
         mine.push(add);
       }
     }
-    n.gold = Math.round(n.gold * 2.5); // 넉넉한 금으로 초반 외교·징병
+    // 이미 가장 큰 나라면 보너스 절반 (큰 나라에 중원 보너스까지 겹쳐 독주하지 않게)
+    const biggest = mine.length >= Math.max(...s.nations.map((x) => nationRegions(s, x.id).length));
+    const k = biggest ? 0.5 : 1;
+    n.gold = Math.round(n.gold * (1 + 1.5 * k)); // 넉넉한 금으로 초반 외교·징병
     for (const i of mine) {
       const r = s.regions[i];
       r.plain = true;
       r.home = n.id; // 중원 본토: 지킬 때 결집 보너스
-      r.pop = Math.round(r.pop * 1.5 * 10) / 10;
-      r.troops = Math.round((r.troops * 1.6) / 100) * 100;
+      r.pop = Math.round(r.pop * (1 + 0.5 * k) * 10) / 10;
+      r.troops = Math.round((r.troops * (1 + 0.6 * k)) / 100) * 100;
     }
-    for (let q = 0; q < 3; q++) spawnGeneral(s, n.id, rng, true);
-    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +3, 병력 +60%, 금 2.5배, 시작 땅이 대평야(세금 +20%·인구 +50%)입니다.`, nations: [n.id], kind: 'info' });
+    const gp = biggest ? 1 : 3;
+    for (let q = 0; q < gp; q++) spawnGeneral(s, n.id, rng, true);
+    s.log.push({ turn: 1, text: `🌾 ${n.name}: 사방에 적을 둔 중원의 나라 — 인재가 모여 장수 +${gp}, 병력 +${Math.round(60 * k)}%, 금 ${1 + 1.5 * k}배, 시작 땅이 대평야(세금 +20%·인구 +${Math.round(50 * k)}%)입니다.${biggest ? ' (이미 가장 큰 나라라 보너스 절반)' : ''}`, nations: [n.id], kind: 'info' });
   }
   // 도적단: 빈 땅 열 곳 중 세 곳쯤에 그 시대의 도적이 소굴을 틀고 있음 (변방일수록 많이). 수비만 하고 천천히 불어남
   const year = scn.startYear ?? 1;
