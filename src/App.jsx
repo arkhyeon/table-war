@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Setup from './components/Setup.jsx';
 import Game from './components/Game.jsx';
+import Hex14 from './components/Hex14.jsx';
 import { generateWorld } from './game/mapgen.js';
 import { getScenario } from './game/scenarios.js';
 import { loadSave, writeSave, writeHistory, loadSlot, SLOT_COUNT } from './storage.js';
@@ -28,14 +29,16 @@ export default function App() {
     const save = data || loadSave();
     if (!save) return false;
     const scn = getScenario(save.scenarioId);
-    if (!scn || save.state?.version !== 5) return false;
+    if (!scn || (save.state?.version !== 5 && save.state?.version !== 14)) return false;
     const world = generateWorld(scn, save.seed, save.state.opts?.detail || 'normal');
-    if (world.regions.length !== save.state.regions.length) return false;
+    if (save.state.version === 5 && world.regions.length !== save.state.regions.length) return false;
     start(world, scn, save.state);
     return true;
   };
 
   if (!session || !game) return <Setup onStart={start} onResume={resume} hasSave={!!loadSave() || hasSlots()} />;
+  if (game.mode === 'hex14')
+    return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { setSession(null); setGame(null); }} />;
   return (
     <Game
       key={gen}

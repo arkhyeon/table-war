@@ -6,6 +6,7 @@ import { SCENARIOS, canWorld, worldVariant } from '../game/scenarios.js';
 import { generateWorld, MAP_DETAIL } from '../game/mapgen.js';
 import { fmtYear } from '../game/weather.js';
 import { createGame } from '../game/setup.js';
+import { createHex14 } from '../game/hex14.js';
 import { CIVS } from '../game/civs.js';
 import { nationRegions } from '../game/engine.js';
 import { loadHistory } from '../storage.js';
@@ -50,9 +51,9 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const preview = useMemo(() => (ready ? createGame(world, scn, seed, 0, opts) : null), [ready, world, scn, seed, opts]); // eslint-disable-line react-hooks/exhaustive-deps
   const pid = preview && player < preview.nations.length ? player : 0;
 
-  const start = (spectator = false) => {
+  const start = (spectator = false, hex = false) => {
     const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator, detail }, loadHistory());
-    onStart(world, scn, state);
+    onStart(world, scn, hex ? createHex14(world, state) : state);
   };
   const nameOf = (n) => names[n.id] || n.name;
   const pick = (id) => {
@@ -220,6 +221,9 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <span className="muted">
             {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
+          <button disabled={!ready} onClick={() => start(false, true)} title="육각 칸 지도에서 장수가 부대를 이끌고 실시간(10일 단위)으로 움직이는 삼국지14 방식 (실험)">
+            ⬡ 삼국지14식 (실험)
+          </button>
           <button disabled={!ready} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행하고, 원할 때 아무 나라로 난입">
             👁️ 관전으로 시작
           </button>

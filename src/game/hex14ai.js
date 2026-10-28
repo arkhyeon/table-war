@@ -1,0 +1,97 @@
+// ───────── 삼국지14식 모드: 컴퓨터 나라 (출진·공성·요격·귀환) ─────────
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14 } from './hex14.js';
+
+// 성 주변 위협: 6칸 안 적 부대 병력 합
+function threatNear(s, grid, c) {
+  let t = 0;
+  for (const u of s.units) if (u.nation !== c.owner && grid.dist(u.tile, c.tile) <= 6) t += u.troops;
+  return t;
+}
+
+export function aiTurn14(s, grid, nid) {
+  const n = s.nations[nid];
+  if (!n.alive) return;
+  const mine = s.castles.filter((c) => c.owner === nid);
+  const myUnits = s.units.filter((u) => u.nation === nid);
+  // 1) 이미 나간 부대: 약해지면 귀환, 목표가 없어지면 새 목표
+  for (const u of myUnits) {
+    const home = nearestCastle(s, grid, u.tile, nid);
+    if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }
+    const o = u.order;
+    const bad = !o || (o.kind === 'castle' && s.castles[o.id].owner === nid && o.id !== home?.id) || (o.kind === 'unit' && !s.units.some((x) => x.id === o.id)) || (o.kind === 'tile' && !u.path.length);
+    if (bad || !u.path.length) {
+      const t = pickTarget(s, grid, nid, u.tile, u.troops);
+      if (t) order(s, grid, u, 'castle', t.id);
+      else if (home) order(s, grid, u, 'castle', home.id);
+    }
+  }
+  // 2) 성에 다가온 적 부대를 요격
+  for (const c of mine) {
+    const foe = s.units.filter((u) => u.nation !== nid && grid.dist(u.tile, c.tile) <= 4).sort((a, b) => a.troops - b.troops)[0];
+    if (!foe) continue;
+    const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+    if (!gs.length || c.troops < foe.troops * 1.3 + 2000) continue;
+    const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
+    if (r.ok) order(s, grid, r.unit, 'unit', foe.id);
+  }
+  // 3) 출진: 남는 병력이 있는 성에서 가까운 약한 성을 노림
+  const maxUnits = Math.max(2, Math.ceil(mine.length * 0.6));
+  for (const c of mine.sort((a, b) => b.troops - a.troops)) {
+    if (s.units.filter((u) => u.nation === nid).length >= maxUnits) break;
+    const reserve = 2500 + threatNear(s, grid, c) * 0.8;
+    const spare = c.troops - reserve;
+    if (spare < 4000) continue;
+    const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+    if (!gs.length) continue;
+    const gids = gs.slice(0, Math.min(2, gs.length)).map((g) => g.id);
+    const troops = Math.min(commandCap(s, gids), spare);
+    const t = pickTarget(s, grid, nid, c.tile, troops);
+    if (!t) continue;
+    const r = sortie(s, grid, c.id, gids, troops);
+    if (r.ok) order(s, grid, r.unit, 'castle', t.id);
+  }
+  // 4) 징병: 금이 남으면 장수 있는 성부터 (유지비 1명당 0.5금/턴을 감당할 만큼)
+  if (n.gold > 50000) {
+    const hub = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active')).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
+    const per = Math.floor((n.gold - 30000) / 5 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
+    for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
+  }
+  // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)
+  const hubs = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'));
+  for (const c of mine) {
+    if (hubs.includes(c) || threatNear(s, grid, c) > 0) continue;
+    const extra = c.troops - 1500;
+    if (extra < 1000) continue;
+    const to = hubs.map((h) => [h, grid.dist(h.tile, c.tile)]).filter(([, d]) => d <= 12).sort((a, b) => a[1] - b[1])[0];
+    if (!to) continue;
+    c.troops -= extra;
+    to[0].troops += Math.round(extra * 0.95);
+  }
+  // 5) 장수 재배치: 장수 없는 성에 남는 장수를 보냄 (입성 명령 대신 즉시 이동: 같은 나라 성끼리)
+  const empty = mine.filter((c) => !Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'));
+  for (const c of empty) {
+    const donor = mine.find((d) => Object.values(s.generals).filter((g) => g.castle === d.id && g.status === 'active').length >= 3);
+    if (!donor) break;
+    const g = Object.values(s.generals).filter((x) => x.castle === donor.id && x.status === 'active').sort((a, b) => a.lead - b.lead)[0];
+    g.castle = c.id;
+  }
+}
+
+// 노릴 성: 가까우면서(25칸 이내) 수비가 내 병력보다 약한 남의 성
+function pickTarget(s, grid, nid, from, troops) {
+  let best = null, bv = Infinity;
+  for (const c of s.castles) {
+    if (c.owner === nid) continue;
+    const d = grid.dist(c.tile, from);
+    if (d > 25) continue;
+    const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3).reduce((a, u) => a + u.troops, 0);
+    // 이미 그 성으로 가는 우리 부대와 힘을 합침
+    const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
+    if (guard > (troops + ours) * 1.1) continue;
+    const v = d * 1.5 + guard / 2000 + (c.owner === null || c.owner === -1 ? -3 : 0);
+    if (v < bv) { bv = v; best = c; }
+  }
+  return best;
+}
+
+export { gensOf };
