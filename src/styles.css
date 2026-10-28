@@ -338,3 +338,5 @@ details.more > .kv { margin-top: 6px; }
 .cutin b { font-size: 24px; color: #ff9ff3; text-shadow: 0 2px 0 #000; }
 @keyframes cutin { 0% { transform: translateX(-160%); opacity: 0; } 15% { transform: translateX(-50%); opacity: 1; } 85% { transform: translateX(-50%); opacity: 1; } 100% { transform: translateX(60%); opacity: 0; } }
 .event-card { max-width: 420px; text-align: center; }
+.end-turn-box { position: absolute; right: 14px; bottom: 14px; z-index: 6; display: flex; gap: 8px; align-items: center; }
+.end-turn-box .end-turn { position: static; }

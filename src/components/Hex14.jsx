@@ -677,22 +677,38 @@ export default function Hex14({ world, game, setGame, onExit }) {
     setSheet(false);
   };
 
-  // ── 턴 진행: 컴퓨터 명령 → 10일 재생 → 마무리 ──
-  const runTurn = () => {
+  // ── 진행: 하루씩(기본) 또는 순(10일) 끝까지. 순의 첫날에 컴퓨터가 명령을 내리고, 순이 끝나면 정산 ──
+  const runTurn = (toEnd = false) => {
     if (playing || game.over) return;
     const s = clone(game);
     const startN = s.logN || 0;
-    for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
-    if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
-    else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), corps: c.id });
+    if (s.day === 0) {
+      for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
+      if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
+      else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), corps: c.id });
+    }
     setPlaying(true);
-    setSheet(false);
     setReport(null);
-    let d = 0;
+    const finish = (snap) => {
+      // 순이 끝남: 정산 후 이번 순 소식
+      snap.fx = [];
+      endTurn14(snap, grid);
+      const news = snap.log.filter((l) => (l.n || 0) > startN && l.nations?.includes(pid) && ['capture', 'battle', 'diplo', 'bad'].includes(l.kind) && !l.text.startsWith('🔥')).map((l) => l.text);
+      for (const c of snap.castles.filter((x) => x.owner === pid)) {
+        const foes = snap.units.filter((u) => enemy(snap, pid, u.nation) && ((u.order?.kind === 'castle' && u.order.id === c.id) || grid.dist(u.tile, c.tile) <= 3));
+        if (foes.length) news.push(`⚠️ ${[...new Set(foes.map((u) => snap.nations[u.nation].name))].join('·')}군 ${foes.length}부대(${fmtTroops(foes.reduce((a, u) => a + u.troops, 0))})가 ${c.name}(수비 ${fmtTroops(c.troops)})을 노립니다`);
+      }
+      setReport(news.length ? news.slice(0, 8) : null);
+      return snap;
+    };
+    const done = (snap) => {
+      setGame(snap);
+      setPlaying(false);
+      setSel((v) => (v?.type === 'unit' && !snap.units.some((u) => u.id === v.id) ? null : v));
+    };
     const tick = () => {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
       stepDay(s, grid);
-      d += 1;
       spawnFx(s);
       // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
       const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
@@ -701,25 +717,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (dl) setDuel(dl);
       const wait = dl ? 3600 : 0;
       const snap = clone(s);
-      if (d >= DAYS || s.over) {
-        setTimeout(() => {
-          snap.fx = [];
-          endTurn14(snap, grid);
-          // 이번 턴 소식: 내 나라에 관한 함락·전투·외교·위기 + 내 도시 가까이 온 적군
-          const news = snap.log.filter((l) => (l.n || 0) > startN && l.nations?.includes(pid) && ['capture', 'battle', 'diplo', 'bad'].includes(l.kind) && !l.text.startsWith('🔥')).map((l) => l.text);
-          for (const c of snap.castles.filter((x) => x.owner === pid)) {
-            const foes = snap.units.filter((u) => enemy(snap, pid, u.nation) && ((u.order?.kind === 'castle' && u.order.id === c.id) || grid.dist(u.tile, c.tile) <= 3));
-            if (foes.length) news.push(`⚠️ ${[...new Set(foes.map((u) => snap.nations[u.nation].name))].join('·')}군 ${foes.length}부대(${fmtTroops(foes.reduce((a, u) => a + u.troops, 0))})가 ${c.name}(수비 ${fmtTroops(c.troops)})을 노립니다`);
-          }
-          setReport(news.length ? news.slice(0, 8) : null);
-          setGame(snap);
-          setPlaying(false);
-          setSel((v) => (v?.type === 'unit' && !snap.units.some((u) => u.id === v.id) ? null : v));
-        }, speed);
-        setGame(snap);
+      setGame(snap);
+      const endOfTurn = s.day >= DAYS || s.over;
+      if (endOfTurn || !toEnd) {
+        setTimeout(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
         return;
       }
-      setGame(snap);
       setTimeout(() => { setDuel(null); tick(); }, speed + wait);
     };
     setTimeout(tick, 60);
@@ -791,7 +794,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <b>🏛️ 내정</b>
               <div className="kv" style={{ marginTop: 4 }}>
                 <span>농업</span><span>{selCastle.farm} / {selCastle.devMax} · 가을 수확 약 {fmtTroops(harvestOf(game, selCastle))}</span>
-                <span>상업</span><span>{selCastle.trade} / {selCastle.devMax} · 금 +{fmtGold(goldOf(game, selCastle))}/턴</span>
+                <span>상업</span><span>{selCastle.trade} / {selCastle.devMax} · 금 +{fmtGold(goldOf(game, selCastle))}/순</span>
               </div>
               {selCastle.owner === pid ? (
                 <>
@@ -930,8 +933,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {tab === 'home' && (
             <div className="card" style={{ fontSize: 13 }}>
               <div className="kv">
-                <span>금</span><span>{fmtGold(me.gold)} ({inc >= 0 ? '+' : ''}{fmtGold(inc)}/턴)</span>
-                <span>병량</span><span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>{fmtTroops(food)} (−{fmtTroops(use)}/턴 · 수확까지 {turnsToHarvest}턴)</span>
+                <span>금</span><span>{fmtGold(me.gold)} ({inc >= 0 ? '+' : ''}{fmtGold(inc)}/순)</span>
+                <span>병량</span><span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>{fmtTroops(food)} (−{fmtTroops(use)}/순 · 수확까지 {turnsToHarvest}순)</span>
                 <span>병력</span><span>{fmtTroops(powerOf(game, pid))}</span>
                 <span>장수</span><span>{Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length}명</span>
               </div>
@@ -1037,7 +1040,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
           {tab === 'help' && (
             <div className="card muted" style={{ fontSize: 13 }}>
-              내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>진행</b>을 누르면 10일 동안 모든 부대가 함께 움직입니다.
+              내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
               <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
                 <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 턴 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
                 <li>금은 상업에서 매 턴, 병량은 농업에서 가을(8월)에 한 해 몫이 들어옵니다. 병사는 병량을 먹고, 병량이 떨어지면 흩어집니다.</li>
@@ -1081,9 +1084,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
     <div className="h14">
       <div className="topbar">
         <b><span className="chip" style={{ background: me.color }} /> {me.name}</b>
-        <span>{dateOf(game, startYear)}{playing ? ` · ${game.day}일째` : ''}</span>
+        <span>{dateOf(game, startYear)} {game.day + 1}일</span>
         <span title="눈: 북쪽 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
-        <span>💰 {fmtGold(me.gold)} <small className="muted" style={{ color: inc < 0 ? 'var(--danger)' : undefined }}>({inc >= 0 ? '+' : ''}{fmtGold(inc)}/턴)</small></span>
+        <span>💰 {fmtGold(me.gold)} <small className="muted" style={{ color: inc < 0 ? 'var(--danger)' : undefined }}>({inc >= 0 ? '+' : ''}{fmtGold(inc)}/순)</small></span>
         <span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>🍚 {fmtTroops(food)}</span>
         <span>🏯 {myCities}/{cities.length}도시</span>
         <span>⚑ 부대 {myUnits.length}</span>
@@ -1101,10 +1104,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
           </div>
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
           {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — 지도를 눌러 명령 <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️</button> <button className="sm" onClick={() => setSel(null)}>해제</button></div>}
-          {playing && <div className="h14-day">{dateOf(game, startYear)} · {game.day}일</div>}
-          <button className="primary end-turn" disabled={playing || !!game.over} onClick={runTurn}>
-            {playing ? `⏳ ${game.day}/${DAYS}일` : '진행 ▶ (10일)'}
-          </button>
+          
+          <div className="end-turn-box">
+            <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>
+            <button className="primary end-turn" disabled={playing || !!game.over} onClick={() => runTurn(false)}>
+              {playing ? '⏳ 진행 중' : `하루 진행 ▶ (${game.day + 1}/${DAYS}일)`}
+            </button>
+          </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
           {duel && <DuelView d={duel} game={game} />}
           {cutin && (() => {
@@ -1136,7 +1142,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           })()}
           {report && !playing && (
             <div className="h14-report">
-              <div className="row" style={{ justifyContent: 'space-between' }}><b>📰 이번 턴 소식</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
+              <div className="row" style={{ justifyContent: 'space-between' }}><b>📰 이번 순 소식</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
               {report.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
             </div>
           )}
