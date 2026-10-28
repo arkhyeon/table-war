@@ -309,6 +309,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (busy) raf.current = requestAnimationFrame(draw);
   };
   useEffect(() => { draw(); });
+  // 자동 시험용: 부대·도시의 화면 좌표
+  useEffect(() => {
+    window.__h14 = {
+      screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x, y] = grid.center(tile); return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
+      units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name })),
+    };
+  });
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
   useEffect(() => {
     const onR = () => draw();
@@ -335,6 +342,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     return [v.x + (px - r.left) / v.k, v.y + (py - r.top) / v.k];
   };
   const onDown = (e) => {
+    if (e.target !== canvas.current) return; // 지도 위 버튼은 지도 누르기로 치지 않음
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
     if (pointers.current.size === 2) { const [[ax, ay], [bx, by]] = [...pointers.current.values()]; drag.current = { pinch: Math.hypot(ax - bx, ay - by), k: view.current.k, moved: true }; return; }
     drag.current = { x: e.clientX, y: e.clientY, vx: view.current.x, vy: view.current.y, moved: false };
@@ -382,11 +390,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
 
   // 누른 곳 근처의 부대·도시 (깃발과 성은 칸보다 크게 그려지므로 넉넉히)
   const pick = (wx, wy) => {
-    const r2 = (grid.size * 1.6) ** 2;
-    let best = null, bd = r2;
-    for (const u of game.units) { const [x, y] = grid.center(u.tile); const d = (x - wx) ** 2 + (y + grid.size * 0.8 - wy) ** 2; if (d < bd) { bd = d; best = { type: 'unit', o: u }; } }
+    // 깃발은 칸 위쪽에 그려지므로 칸 중심~깃발 사이를 기준으로, 멀리서 볼 때도 손가락 크기만큼은 잡히게
+    const minR = 16 / (view.current?.k || 1);
+    let best = null, bd = Math.max(grid.size * 1.8, minR) ** 2;
+    for (const u of game.units) { const [x, y] = grid.center(u.tile); const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2); if (d < bd) { bd = d; best = { type: 'unit', o: u }; } }
     if (best) return best;
-    bd = (grid.size * 2) ** 2;
+    bd = Math.max(grid.size * 2, minR) ** 2;
     for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < bd) { bd = d; best = { type: 'castle', o: c }; } }
     return best;
   };
@@ -413,7 +422,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       });
       return;
     }
-    if (u) { setSel({ type: 'unit', id: u.id }); setSortieOpen(false); setSheet(true); return; }
+    if (u) { setSel({ type: 'unit', id: u.id }); setSortieOpen(false); setSheet(u.nation !== pid); return; }
     if (c) { setSel({ type: 'castle', id: c.id }); setSortieOpen(false); setSheet(true); return; }
     setSel(null);
     setSheet(false);
@@ -636,7 +645,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <thead><tr><th align="left">도시</th><th>병력</th><th>장수</th><th>농·상</th></tr></thead>
                 <tbody>
                   {game.castles.filter((c) => c.owner === pid).map((c) => (
-                    <tr key={c.id} className="clickable" onClick={() => goTo(c)}>
+                    <tr key={c.id} className="clickable" onClick={() => { goTo(c); setSheet(false); }}>
                       <td>{c.kind === 'pass' ? '⛩️' : c.capital ? '♛' : ''}{c.name}</td>
                       <td align="center">{fmtTroops(c.troops)}</td>
                       <td align="center">{Object.values(game.generals).filter((g) => g.castle === c.id && g.status === 'active').length}</td>
@@ -748,8 +757,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
           <div className="map-ctrl">
             <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.4); }}>＋</button>
             <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.4); }}>－</button>
+            <button className="h14-menu" title="세력·외교·인재" onClick={() => { setSel(null); setSheet(true); }}>📋</button>
           </div>
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 — 지도를 눌러 명령 <button className="sm" onClick={() => setSel(null)}>해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — 지도를 눌러 명령 <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️</button> <button className="sm" onClick={() => setSel(null)}>해제</button></div>}
           {playing && <div className="h14-day">{dateOf(game, startYear)} · {game.day}일</div>}
           <button className="primary end-turn" disabled={playing || !!game.over} onClick={runTurn}>
             {playing ? `⏳ ${game.day}/${DAYS}일` : '진행 ▶ (10일)'}
