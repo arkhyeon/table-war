@@ -481,7 +481,7 @@ export function spawnPirates(s, world, rng) {
   const r = s.regions[z];
   r.owner = n.id;
   r.troops = Math.round((rng.int(8000, 15000) * df) / 100) * 100;
-  n.pirateMax = r.troops * 2;
+  n.pirateMax = r.troops * 3;
   const lead = leaderFor(s, civ, rng);
   const king = lead.old || addGeneral(s, lead.data, n.id, z, rng, true);
   finish(s, n, king);
@@ -512,7 +512,8 @@ export function pirateTurn(s, world, rng) {
       continue;
     }
     // 2) 해안 약탈: 땅은 뺏지 않고 병사·백성·금·항구에 피해
-    const coasts = coastsOf(s, world, z);
+    // 한 번 털린 땅은 3턴 동안 건드리지 않음 (털 게 남지 않음)
+    const coasts = coastsOf(s, world, z).filter((c) => !(s.turn - (s.regions[c].raided ?? -99) < 3));
     if (!coasts.length || rng() < 0.25) {
       // 노릴 곳이 없으면 다른 바다로 옮겨 감
       n.idle = (n.idle || 0) + 1;
@@ -528,25 +529,44 @@ export function pirateTurn(s, world, rng) {
       continue;
     }
     n.idle = 0;
-    const t = rng.pick(coasts);
-    const r = s.regions[t];
-    const owner = s.nations[r.owner];
-    const D = r.troops * (r.buildings.walls ? 1.5 : 1) * (r.buildings.port ? 1.2 : 1);
-    if (P * rng.range(0.6, 1.1) > D * 0.6) {
-      const killed = Math.min(r.troops - 100, Math.round((P * 0.15) / 100) * 100);
-      const gold = Math.min(owner.gold, Math.round((regionTax(s, t) * 3) / 1000) * 1000);
-      r.troops -= Math.max(0, killed);
-      r.pop = Math.max(1, Math.round(r.pop * 0.92 * 10) / 10);
-      owner.gold -= gold;
-      n.gold += gold;
-      const burn = r.buildings.port && rng() < 0.3;
-      if (burn) r.buildings.port = 0;
-      me.troops = Math.min(n.pirateMax || me.troops, me.troops + Math.round((500 * df) / 100) * 100);
-      log(s, `🏴‍☠️ ${n.name}이(가) ${r.name}(${owner.name}) 해안을 약탈했습니다! 병사 -${fmtTroops(Math.max(0, killed))}, 백성 -8%, 금 -${fmtGold(gold)}${burn ? ', 항구 불탐' : ''}.`, [n.id, r.owner], 'warn');
-    } else {
-      const lost = Math.round((P * rng.range(0.1, 0.2)) / 100) * 100;
-      me.troops = Math.max(1000, me.troops - lost);
-      log(s, `🛡️ ${r.name}(${owner.name})이(가) ${n.name}의 약탈을 막아냈습니다. (해적 -${fmtTroops(lost)})`, [n.id, r.owner], 'info');
+    // 해적 수 vs 해안 수비대: 해적이 많을수록 크게 털고 더 불어나며(강하면 한 턴에 두 곳), 수비가 두터우면 깨져서 줄어들다 흩어짐
+    const raids = me.troops >= Math.max(...coasts.map((c) => s.regions[c].troops)) * 2 ? 2 : 1;
+    // 수비가 약한 해안부터 노림
+    const order = coasts.slice().sort((a, b) => s.regions[a].troops * rng.range(0.7, 1.3) - s.regions[b].troops * rng.range(0.7, 1.3));
+    for (const t of order.slice(0, raids)) {
+      const P = me.troops;
+      const r = s.regions[t];
+      const owner = s.nations[r.owner];
+      const D = Math.max(1, r.troops * (r.buildings.walls ? 1.5 : 1) * (r.buildings.port ? 1.2 : 1));
+      const k = Math.min(3, (P * rng.range(0.85, 1.15)) / D);
+      if (k >= 0.5) {
+        // 털림: 해적이 셀수록 크게 — 병사 손실, 백성 납치(5~25%), 몇 턴치 세금 약탈, 항구 불탐
+        const heavy = k >= 1;
+        const killed = Math.max(0, Math.min(r.troops - 100, Math.round((P * (heavy ? 0.25 : 0.1)) / 100) * 100));
+        const popCut = Math.min(0.2, 0.05 + 0.05 * k);
+        const gold = Math.min(owner.gold, Math.round((regionTax(s, t) * (1 + 2 * k)) / 1000) * 1000);
+        r.troops -= killed;
+        r.raided = s.turn;
+        r.pop = Math.max(1, Math.round(r.pop * (1 - popCut) * 10) / 10);
+        owner.gold -= gold;
+        n.gold += gold;
+        const burn = r.buildings.port && rng() < (heavy ? 0.5 : 0.15);
+        if (burn) r.buildings.port = 0;
+        // 약탈이 잘 되면 무리가 불어남, 버텨내면 해적도 다침
+        me.troops = heavy ? Math.min(n.pirateMax || P * 2, P + Math.round((P * 0.1) / 100) * 100) : Math.max(1000, P - Math.round((P * 0.05) / 100) * 100);
+        log(s, `🏴‍☠️ ${n.name}(${fmtTroops(P)})이(가) ${r.name}(${owner.name}) 해안을 ${heavy ? '휩쓸었습니다' : '약탈했습니다'}! 병사 -${fmtTroops(killed)}, 백성 -${Math.round(popCut * 100)}%, 금 -${fmtGold(gold)}${burn ? ', 항구 불탐' : ''}.`, [n.id, r.owner], 'warn');
+      } else {
+        const lost = Math.round((P * rng.range(0.2, 0.3)) / 100) * 100;
+        me.troops = P - lost;
+        log(s, `🛡️ ${r.name}(${owner.name})이(가) ${n.name}의 약탈을 막아냈습니다. (해적 -${fmtTroops(lost)})`, [n.id, r.owner], 'info');
+      }
+      // 무리가 2천 아래로 줄면 흩어짐 (토벌)
+      if (me.troops < 2000 * df) {
+        me.owner = null; me.troops = 0; n.alive = false;
+        for (const g of Object.values(s.generals)) if (g.nation === n.id && g.status === 'active') g.status = 'gone';
+        log(s, `⚓ ${n.name}이(가) 계속 격퇴당하다 흩어졌습니다.`, [n.id, r.owner], 'info');
+        break;
+      }
     }
   }
 }

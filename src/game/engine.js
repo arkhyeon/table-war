@@ -1468,9 +1468,7 @@ export function doMove(s, world, nid, from, to, count, genIds = [], opts = {}) {
       if (flee !== undefined) s.regions[flee].troops += Math.floor(reserve / 200) * 100;
       report.defLoss = eng + Math.round(sup * 0.5) + Math.ceil(reserve / 200) * 100;
     }
-    // 도적 소굴 소탕: 쌓아둔 약탈품을 거둠
-    const loot = defender === null && tr.bandit ? Math.round((10 * G + tr.pop * 1000) / 1000) * 1000 : 0;
-    if (loot) { n.gold += loot; lines.push(`${tr.bandit} 소굴 소탕, 전리품 ${fmtGold(loot)}`); }
+    if (defender === null && tr.bandit) lines.push(`${tr.bandit} 소굴 소탕`);
     tr.troops = 0;
     if (defender !== null && plunder) {
       s.nations[defender].gold -= plunder;

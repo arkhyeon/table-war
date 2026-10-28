@@ -269,7 +269,7 @@ export default function SidePanel({ world, game, selected, vis, spectator, moveM
                   {owner.name} {relTag(game, pid, owner.id)}
                 </>
               ) : r.bandit ? (
-                <span title="도적 소굴: 수비만 하고 3턴마다 조금씩 불어남. 소탕하면 전리품">🏴 {r.bandit} 소굴</span>
+                <span title="도적 소굴: 수비만 하고 3턴마다 조금씩 불어남">🏴 {r.bandit} 소굴</span>
               ) : (
                 '중립 세력'
               )}

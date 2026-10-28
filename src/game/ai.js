@@ -420,6 +420,16 @@ export function aiActions(s, world, nid) {
         break;
       }
     }
+    // 해적 대비: 해적 배가 붙은 해안 땅이 해적보다 약하면 옆 내 땅에서 병력을 보냄
+    for (const r of mine) {
+      const pir = world.regions[r].neighbors.map((x) => s.regions[x.id]).find((z) => z.sea && z.owner !== null && s.nations[z.owner]?.pirate);
+      if (!pir || s.regions[r].troops >= pir.troops * 1.2) continue;
+      const need = Math.round((pir.troops * 1.3 - s.regions[r].troops) / 100) * 100;
+      const src = world.regions[r].neighbors.map((x) => x.id).filter((x) => s.regions[x].owner === nid && !s.regions[x].sea && movable(s, x) > 3000 && !(threat[x] > 10)).sort((a, b) => s.regions[b].troops - s.regions[a].troops)[0];
+      if (src === undefined) continue;
+      const cnt = Math.min(need, Math.floor((movable(s, src) - 2000) / 100) * 100);
+      if (cnt >= 1000 && !moveCheck(s, world, nid, src, r, cnt, [])) { opts.push({ score: 34, run: () => planMove(s, world, nid, src, r, cnt, [], {}) }); break; }
+    }
     // 계략: 지력 높은 장수가 맞닿은 적 대군에 화계, 장수 많은 적진엔 유언비어
     if (n.ap >= 3) {
       for (const g of Object.values(s.generals)) {
