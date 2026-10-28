@@ -551,8 +551,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
     window.__h14 = {
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x, y] = grid.center(tile); return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],
-      castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops })),
-      units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name })),
+      castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops, kind: c.kind, dur: c.dur, building: !!c.build, founding: !!c.founding })),
+      units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name, troops: u.troops, order: u.order?.kind || null, target: u.order?.id ?? null, moving: u.path.length > 0 })),
+      dist: (a, b) => grid.dist(a, b),
+      focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
+      state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
+      gensAt: (cid) => Object.values(gameRef.current.generals).filter((g) => g.castle === cid && g.status === 'active').length,
     };
   });
   useEffect(() => () => cancelAnimationFrame(raf.current), []);
