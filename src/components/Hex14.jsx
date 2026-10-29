@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
-import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
@@ -1108,6 +1108,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   const low = gs.filter((g) => loyalOf(g) < 40);
                   return <><span>충성</span><span style={{ color: low.length ? 'var(--danger)' : undefined }}>평균 {avg}{low.length ? ` · 불만 ${low.length}명 (${low.slice(0, 3).map((g) => g.name).join(', ')}${low.length > 3 ? '…' : ''})` : ''}</span></>;
                 })()}
+                {sprawlOf(game, pid) < 1 && <><span>영토 관리</span><span className="muted">도시가 15개를 넘어 수입·수확·자원병 −{Math.round((1 - sprawlOf(game, pid)) * 100)}%</span></>}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6 }}>
                 <button className="sm" disabled={playing || me.gold < rewardCost(game, pid)} title="충성 35 아래면 다른 나라로 떠날 수 있습니다. 금이 바닥나면 충성이 떨어집니다." onClick={() => act((s) => rewardAll(s, pid))}>🎁 전체 포상 (금 {fmtGold(rewardCost(game, pid))}, 충성 +12)</button>
@@ -1254,6 +1255,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🪨 공성병기(출진 때 체크하거나 들판에서 부대로 만들기, 금 5천)는 성벽을 5배로 깎지만 느려지고 들판 싸움에 약하며(공격 −20%·받는 피해 +35%) 함락하면 부서집니다. 장수 여럿 부대는 「✂️ 나누기」로 언제든 갈라 협공할 수 있습니다.</li>
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
+                <li>🔥 아주 커진 나라는 도읍에서 먼, 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나갑니다(수비 2만 넘으면 안전).</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>

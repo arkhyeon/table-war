@@ -219,6 +219,7 @@ export function eventsTurn(s, grid) {
   }
   const rng = makeRng(`ev:${s.seed}:${s.turn}`);
   outlaws(s, grid, rng);
+  revolts(s, grid, rng);
   for (const n of s.nations) {
     if (!n.alive || n.horde || rng() > 0.03) continue;
     let r = rng(), pick = RANDOM[0];
@@ -258,5 +259,31 @@ function outlaws(s, grid, rng) {
         else log(s, `🏴‍☠️ ${text}`, 'info', [c.owner]);
       }
     }
+  }
+}
+
+// 반란: 너무 커진 나라는 도읍에서 먼 변방 도시가 가끔 떨어져 나감 (수비가 얇을수록, 충성 높은 장수가 지키면 덜)
+function revolts(s, grid, rng) {
+  const total = s.castles.filter((c) => c.kind === 'city').length || 1;
+  for (const n of s.nations) {
+    if (!n.alive || n.horde) continue;
+    const mine = s.castles.filter((c) => c.owner === n.id && c.kind === 'city');
+    const share = mine.length / total;
+    if (mine.length < 10 || share < 0.18 || rng() > Math.min(0.1, (share - 0.12) * 0.35)) continue;
+    const cap = s.castles.find((c) => c.owner === n.id && c.capital) || mine[0];
+    const guard = (c) => Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').reduce((a, g) => Math.max(a, g.loyal ?? 70), 0);
+    const c = mine.filter((x) => x !== cap && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2))
+      .map((x) => [x, grid.dist(x.tile, cap.tile) / (1 + x.troops / 15000) / (1 + guard(x) / 100)]).sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (!c || c.troops > 20000) continue; // 수비가 두터우면 반란이 못 일어남
+    // 장수는 도읍으로 피신, 성은 반란군(중립)이 차지
+    for (const g of Object.values(s.generals)) if (g.castle === c.id && g.status === 'active') g.castle = cap.id;
+    c.owner = null;
+    c.bandit = '반란군';
+    c.troops = Math.max(4000, Math.round(c.troops * 0.8));
+    for (const t of districtTiles(s)[c.id]) if (s.owner[t] === n.id) s.owner[t] = -1;
+    s.owner[c.tile] = -1;
+    const text = `나라가 너무 커져 변방이 흔들립니다. ${c.name}에서 반란이 일어나 떨어져 나갔습니다!`;
+    if (n.id === s.playerId && !s.spectator) pushEvent(s, { title: '변방 반란', text, nations: [n.id] });
+    else log(s, `🔥 ${n.name}: ${text}`, 'bad', [n.id]);
   }
 }

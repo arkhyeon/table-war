@@ -227,8 +227,14 @@ export const jobGen = (s, c, role) => {
 
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
 // 금 수입: 도시 기본 세금 1,200(인구와 상관없이, 작은 나라도 움직일 수 있게) + 상업×5 × 관할 땅 비율
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * (c.founding ? 0.3 : 1)));
-export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * (c.founding ? 0.3 : 1)));
+// 넓은 영토 관리: 도시 15개를 넘으면 1개마다 수입·수확·자원병 −1.2% (최대 −45%) — 큰 나라가 끝없이 불어나지 않게
+export const sprawlOf = (s, nid) => {
+  if (nid === null || nid === undefined) return 1;
+  const n = s.castles.reduce((a, c) => a + (c.owner === nid && c.kind !== 'pass' ? 1 : 0), 0);
+  return Math.max(0.55, Math.min(1, 1 - (n - 15) * 0.012));
+};
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
@@ -249,7 +255,7 @@ export function govTurn(s, grid) {
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
       c.popMax = c.popMax || c.pop * 1.2;

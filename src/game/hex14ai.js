@@ -56,7 +56,7 @@ export function chooseStrategy(s, grid, nid) {
     k = 'hold';
     // 수성: 이웃 하나만 침
     focus = prey();
-  } else if (topShare >= 0.28 && nb.includes(top.id) && rng() < 0.75) {
+  } else if ((topShare >= 0.28 || (topShare >= 0.2 && ranked[1] && powerOf(s, top.id) > powerOf(s, ranked[1].id) * 1.5)) && nb.includes(top.id) && rng() < 0.75) {
     k = 'coalition'; focus = top.id;
   } else if (nb.length >= 3 && rng() < 0.6) {
     k = 'center'; focus = prey();
