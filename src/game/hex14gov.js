@@ -224,7 +224,8 @@ export const jobGen = (s, c, role) => {
 };
 
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.trade * 5 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (c.founding ? 0.3 : 1)));
+// 금 수입: 도시 기본 세금 1,200(인구와 상관없이, 작은 나라도 움직일 수 있게) + 상업×5 × 관할 땅 비율
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (c.founding ? 0.3 : 1)));
 export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
