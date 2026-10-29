@@ -340,3 +340,4 @@ details.more > .kv { margin-top: 6px; }
 .event-card { max-width: 420px; text-align: center; }
 .end-turn-box { position: absolute; right: 14px; bottom: 14px; z-index: 6; display: flex; gap: 8px; align-items: center; }
 .end-turn-box .end-turn { position: static; }
+.map-hint .hint-clear { pointer-events: auto; margin-left: 6px; padding: 6px 12px; font-size: 14px; font-weight: bold; border-radius: 8px; background: #c0392b; color: #fff; border: none; }
