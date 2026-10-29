@@ -96,8 +96,10 @@ export function acceptChance(s, a, b, type) {
     const fear = top && top.id !== a && top.id !== b ? 0.2 : -0.1;
     return Math.max(0, Math.min(0.95, (rel - 35) / 60 + fear));
   }
-  // 정전: 약한 쪽이 더 바람
-  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1)));
+  // 정전: 약한 쪽이 더 바람. 지키는 전략(수성·사방 방어·내실)인 나라는 노리는 상대가 아니면 잘 받아 줌
+  const nb = s.nations[b];
+  const calm = ['hold', 'center', 'build'].includes(nb?.strat) && nb.focus !== a ? 0.25 : 0;
+  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm));
 }
 
 export function gift(s, a, b, amt) {

@@ -115,9 +115,9 @@ export function buildTurn(s, grid, redistrict) {
 }
 
 // 컴퓨터: 금이 넉넉하면 위협받는 도시에 성벽, 아니면 시장·농장·조선소
-export function aiBuild(s, grid, nid, threat) {
+export function aiBuild(s, grid, nid, threat, minGold = 40000) {
   const n = s.nations[nid];
-  if (n.gold < 40000) return;
+  if (n.gold < minGold) return;
   const mine = s.castles.filter((c) => c.owner === nid && !c.build && !c.founding);
   for (const c of mine.sort((a, b) => threat(b) - threat(a))) {
     const order = threat(c) > 0 ? ['wall'] : ['market', 'farmland', 'shipyard'];
@@ -138,7 +138,7 @@ export function fortCheck(s, grid, u, kind) {
   const f = FORTS[kind];
   if (!f) return '없는 시설입니다.';
   if (u.path?.length && kind !== 'palisade') return '멈춰 있는 부대만 지을 수 있습니다.';
-  if (grid.water?.[u.tile]) return '물 위에는 지을 수 없습니다.';
+  if (grid.water?.[u.tile] && kind !== 'palisade') return '물 위에는 목책만 세울 수 있습니다.';
   if (s.castles.some((c) => c.tile === u.tile)) return '성 칸에는 지을 수 없습니다.';
   if (fortAt(s, u.tile)) return '이미 시설이 있는 칸입니다.';
   if (s.castles.some((c) => grid.dist(c.tile, u.tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';

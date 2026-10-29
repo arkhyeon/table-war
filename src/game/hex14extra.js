@@ -218,6 +218,7 @@ export function eventsTurn(s, grid) {
     if (ev.run(s, grid) || s.turn > at + 36) s.evDone[ev.id] = true;
   }
   const rng = makeRng(`ev:${s.seed}:${s.turn}`);
+  outlaws(s, grid, rng);
   for (const n of s.nations) {
     if (!n.alive || n.horde || rng() > 0.03) continue;
     let r = rng(), pick = RANDOM[0];
@@ -225,5 +226,37 @@ export function eventsTurn(s, grid) {
     const text = pick[2](s, n, rng);
     if (!text) continue;
     if (n.id === s.playerId && !s.spectator) pushEvent(s, { title: pick[0], text, nations: [n.id] });
+  }
+}
+
+// 도적·해적: 관할 땅이 넓은데 수비가 얇은 변방 도시는 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털림
+function outlaws(s, grid, rng) {
+  const dt = districtTiles(s);
+  const sizes = s.castles.filter((c) => c.kind === 'city').map((c) => dt[c.id].length).sort((a, b) => a - b);
+  const med = sizes[sizes.length >> 1] || 1;
+  for (const c of s.castles) {
+    if (c.owner === null || c.kind !== 'city' || !s.nations[c.owner]?.alive) continue;
+    const n = s.nations[c.owner], tiles = dt[c.id];
+    const big = tiles.length / med;
+    // 넓을수록·수비병이 적을수록 잦음 (수비병 1만 넘으면 거의 안 옴)
+    if (big > 1.3 && rng() < 0.012 * big * Math.max(0.1, 1 - c.troops / 12000)) {
+      const mine = tiles.filter((t) => s.owner[t] === c.owner && t !== c.tile).sort((a, b) => grid.dist(b, c.tile) - grid.dist(a, c.tile));
+      const k = Math.floor(mine.length * 0.25);
+      if (k >= 3) {
+        for (const t of mine.slice(0, k)) s.owner[t] = -1;
+        const text = `${c.name} 변두리에 도적 떼가 들끓어 관할 땅 ${k}칸을 잃었습니다. (수비병을 늘리면 덜 옵니다)`;
+        if (c.owner === s.playerId && !s.spectator) pushEvent(s, { title: '도적 출몰', text, nations: [c.owner] });
+        else log(s, `🗡️ ${text}`, 'info', [c.owner]);
+      }
+    }
+    if (c.port && !(c.bld?.shipyard) && rng() < 0.008) {
+      const x = Math.min(8000, Math.round(n.gold * 0.06));
+      if (x >= 500) {
+        n.gold -= x;
+        const text = `해적이 ${c.name} 항구를 털어 금 ${fmtGold(x)}을(를) 빼앗았습니다. (조선소가 있으면 막습니다)`;
+        if (c.owner === s.playerId && !s.spectator) pushEvent(s, { title: '해적', text, nations: [c.owner] });
+        else log(s, `🏴‍☠️ ${text}`, 'info', [c.owner]);
+      }
+    }
   }
 }
