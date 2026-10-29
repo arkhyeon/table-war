@@ -127,7 +127,7 @@ export function aiBuild(s, grid, nid, threat) {
 // 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 목책: 적이 지나갈 수 없는 길막이
 export const FORTS = {
   camp: { name: '진지', icon: '⛺', cost: 8000, days: 5, hp: 2500, desc: '안의 아군 피해 −30%, 보급 거점' },
-  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대를 매일 공격' },
+  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대·성 수비병을 매일 공격' },
   palisade: { name: '목책', icon: '🚧', cost: 4000, days: 3, hp: 3500, desc: '적이 지나갈 수 없는 길막이' },
 };
 export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;
@@ -175,6 +175,13 @@ export function fortsDay(s, grid) {
         u.troops -= dmg;
         u.morale -= 2;
         s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
+      }
+      // 공성 지원: 2칸 안 적 성의 수비병도 쏨 (망루만으로는 함락 못 함)
+      for (const c of s.castles) {
+        if (!enemy(s, f.owner, c.owner) || grid.dist(c.tile, f.tile) > 2 || c.troops <= 500) continue;
+        const dmg = Math.min(c.troops - 500, Math.round(150 + c.troops * 0.004));
+        c.troops -= dmg;
+        s.fx.push({ type: 'hit', tile: c.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: c.tile });
       }
     }
   }

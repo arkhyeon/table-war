@@ -341,3 +341,4 @@ details.more > .kv { margin-top: 6px; }
 .end-turn-box { position: absolute; right: 14px; bottom: 14px; z-index: 6; display: flex; gap: 8px; align-items: center; }
 .end-turn-box .end-turn { position: static; }
 .map-hint .hint-clear { pointer-events: auto; margin-left: 6px; padding: 6px 12px; font-size: 14px; font-weight: bold; border-radius: 8px; background: #c0392b; color: #fff; border: none; }
+.h14-peek { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 8px; background: rgba(20, 24, 32, 0.92); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: 14px; white-space: nowrap; }

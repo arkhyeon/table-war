@@ -33,6 +33,15 @@ export function buildGrid(world) {
     const r = world.region[f];
     if (r >= 0 && !world.regions[r].sea && terrain[i] !== T.SEA && terrain[i] !== T.PEAK) region[i] = r;
   }
+  // 세계 지도: 북극·날짜변경선에서 땅이 일직선으로 잘려 보이지 않게 가장자리를 들쭉날쭉한 바다로
+  const bb = getScenario(world.scenarioId)?.bbox;
+  if (bb && bb[2] - bb[0] >= 359) {
+    const wob = (v, a) => 1.6 + Math.sin(v * 0.37 + a) * 1.1 + Math.sin(v * 0.11 + a * 2) * 1.3;
+    for (let i = 0; i < N; i++) {
+      const c = i % cols, r = Math.floor(i / cols);
+      if (r < wob(c, 0) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; }
+    }
+  }
   const nb = [];
   for (let i = 0; i < N; i++) {
     const list = [];
@@ -246,7 +255,9 @@ const has = (g, t) => (g.traits || []).some(([x]) => x === t);
 export const unitStats = (s, u) => {
   const gs = gensOf(s, u.gens);
   const best = (k) => (gs.length ? Math.max(...gs.map((g) => g[k])) : 30); // 대장을 잃은 부대는 약함
-  return { atk: 40 + best('war') * 0.4 + best('lead') * 0.6, def: 40 + best('lead') * 0.6 + best('intel') * 0.4, intel: best('intel') };
+  // 부장 보좌: 부장 하나마다 공격·방어 +12% (둘까지) — 둘이 따로 나가 협공하는 것과 비슷하게
+  const aid = 1 + 0.12 * Math.min(2, Math.max(0, gs.length - 1));
+  return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid, intel: best('intel') };
 };
 // 지휘 한도: 가장 통솔 높은 장수 8천+통솔×800, 부장은 절반씩
 export const commandCap = (s, gids) => {
@@ -255,7 +266,7 @@ export const commandCap = (s, gids) => {
 };
 export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6); // 하루에 평지 0.6칸 (기마 0.8칸)
 export const moveCost = (grid, from, to, s, u) => {
-  if (grid.water?.[to]) return 0.7; // 배는 빠름
+  if (grid.water?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
   if (u && grid.river[to] && gensOf(s, u.gens).some((g) => has(g, '수군'))) c *= 0.6; // 수군 장수는 강을 따라 빠름
   return s ? weatherCost(s, grid, to, c) : c;
@@ -323,7 +334,9 @@ export function findPath(s, grid, from, to, nation, navy = false) {
       }
       // 남의 진지·망루·목책: 부숴야 지나가므로 아주 비싼 길 (돌아갈 길이 멀면 부수고 감)
       const ef = forts.get(nx);
-      const ng = g.get(cur) + moveCost(grid, cur, nx) + (occ.get(nx) ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
+      // 배에 타고 내리는 데 품이 들어서, 땅길이 웬만큼 돌아가도 땅으로 감
+      const board = grid.water[nx] !== grid.water[cur] ? 4 : 0;
+      const ng = g.get(cur) + moveCost(grid, cur, nx) + board + (occ.get(nx) ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
       if (ng < (g.get(nx) ?? Infinity)) {
         g.set(nx, ng);
         prev.set(nx, cur);
@@ -408,8 +421,8 @@ export function stepDay(s, grid) {
       u.tile = nx;
       occ.set(nx, u);
       u.path.shift();
-      // 칠하기: 내 것이 아닌 칸을 지나가면 내 땅이 됨 (성 칸 제외)
-      if (!c && grid.passable(nx) && s.owner[nx] !== u.nation) s.owner[nx] = u.nation;
+      // 칠하기: 적·빈 땅을 지나가면 내 땅이 됨 (성 칸·동맹/정전국 땅 제외)
+      if (!c && grid.passable(nx) && s.owner[nx] !== u.nation && enemy(s, u.nation, s.owner[nx])) s.owner[nx] = u.nation;
       // 내 성에 들어가면 입성 (병력·장수가 성으로)
       if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { enter(s, u, c); break; }
       // 통제 구역: 적 부대 옆에 서면 그날은 더 못 감
@@ -505,7 +518,12 @@ export function stepDay(s, grid) {
   const supplied = {};
   for (const u of s.units) {
     if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
-    if (!grid.water[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.985; u.morale -= 3; u.cut = true; } else { u.cut = false; u.morale = Math.min(100, u.morale + 1); }
+    if (!grid.water[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.985; u.morale -= 3; u.cut = true; continue; }
+    u.cut = false;
+    // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
+    const rest = !hits.has(u) && ![...hits.values()].some((l) => l.some((x) => x.u === u)) && !sieges.some(([x]) => x === u);
+    const camp = (s.forts || []).some((f) => f.tile === u.tile && f.kind === 'camp' && f.owner === u.nation && !f.left);
+    u.morale = Math.min(100, u.morale + (!rest ? 1 : camp ? 6 : s.owner[u.tile] === u.nation ? 3 : 1));
   }
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {

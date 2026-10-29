@@ -263,6 +263,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [peek, setPeek] = useState(false); // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [speed, setSpeed] = useState(420);
   const [toastMsg, setToast] = useState(null);
   const [sheet, setSheet] = useState(false);
@@ -594,8 +595,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x, y] = grid.center(tile); return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],
       castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops, kind: c.kind, dur: c.dur, building: !!c.build, founding: !!c.founding })),
-      units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name, troops: u.troops, order: u.order?.kind || null, target: u.order?.id ?? null, moving: u.path.length > 0 })),
+      units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name, troops: u.troops, order: u.order?.kind || null, target: u.order?.id ?? null, moving: u.path.length > 0, dest: u.path[u.path.length - 1] ?? null })),
       dist: (a, b) => grid.dist(a, b),
+      nb: (t) => grid.nb[t].filter((x) => grid.passable(x)),
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       gensAt: (cid) => Object.values(gameRef.current.generals).filter((g) => g.castle === cid && g.status === 'active').length,
@@ -677,10 +679,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const pick = (wx, wy) => {
     // 깃발은 칸 위쪽에 그려지므로 칸 중심~깃발 사이를 기준으로, 멀리서 볼 때도 손가락 크기만큼은 잡히게
     const minR = 16 / (view.current?.k || 1);
-    let bu = null, du = Math.max(grid.size * 1.8, minR) ** 2;
-    for (const u of game.units) { const [x, y] = grid.center(u.tile); const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2); if (d < du) { du = d; bu = u; } }
+    // 부대 칸이 아닌 옆 칸을 누르면 그 칸이 잡히도록, 그때는 깃발 바로 위만 부대로 봄
+    const t = pixelToCell(grid.size, grid.cols, grid.rows, wx, wy);
+    const wide = Math.max(grid.size * 1.8, minR) ** 2, tight = Math.max(grid.size * 0.75, minR * 0.6) ** 2;
+    let bu = null, du = wide;
+    for (const u of game.units) {
+      const [x, y] = grid.center(u.tile);
+      const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2);
+      if (d < du && (u.tile === t || d < tight)) { du = d; bu = u; }
+    }
     let bc = null, dc = Math.max(grid.size * 2, minR) ** 2;
-    for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < dc) { dc = d; bc = c; } }
+    for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < dc && (c.tile === t || d < Math.max(grid.size * 1.1, minR * 0.6) ** 2)) { dc = d; bc = c; } }
     // 성 그림이 크므로 성 안쪽을 누르면 근처 부대보다 성을 우선
     if (bc && (!bu || dc * 0.5 < du)) return { type: 'castle', o: bc };
     if (bu) return { type: 'unit', o: bu };
@@ -737,6 +746,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // ── 진행: 하루씩(기본) 또는 순(10일) 끝까지. 순의 첫날에 컴퓨터가 명령을 내리고, 순이 끝나면 정산 ──
   const runTurn = (toEnd = false) => {
     if (playing || game.over) return;
+    if (game.inbox?.length) { setPeek(false); return; } // 사신에게 먼저 답해야 진행
     const s = clone(game);
     const startN = s.logN || 0;
     if (s.day === 0) {
@@ -996,7 +1006,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
             <div className="kv">
               <span>병력</span><span>{fmtTroops(selUnit.troops)} / {fmtTroops(selUnit.max)}</span>
-              <span>사기</span><span>{Math.round(selUnit.morale)}</span>
+              <span>사기 (파란 막대)</span><span>{Math.round(selUnit.morale)} <small className="muted">5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일</small></span>
               <span>공·방</span><span>{Math.round(st.atk)} · {Math.round(st.def)}</span>
               <span>전법</span><span>{gs.map(tacticName).filter(Boolean).join(', ') || '없음'}</span>
               <span>보급</span><span style={{ color: selUnit.cut ? 'var(--danger)' : undefined }}>{selUnit.cut ? '끊김 (병력·사기 감소)' : '이어짐'}</span>
@@ -1022,7 +1032,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     </div>
                   );
                 })()}
-                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점 · 망루: 2칸 안 적 매일 공격 · 목책: 적 길막이. 부대가 그 칸에 멈춰 지어야 합니다.</div>
+                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대·성 수비병 매일 공격 · 목책: 적 길막이. 부대가 그 칸에 멈춰 지어야 합니다.</div>
               </>
             )}
           </div>
@@ -1172,7 +1182,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>금은 상업에서 매 턴, 병량은 농업에서 가을(8월)에 한 해 몫이 들어옵니다. 병사는 병량을 먹고, 병량이 떨어지면 흩어집니다.</li>
                 <li>적 부대 옆 칸에 들어서면 그날은 더 못 갑니다(통제 구역). 여러 방향에서 치면 <b>협공</b>(+30%씩).</li>
                 <li>무력·통솔·지력 70 이상 장수는 <b>돌격·일제사격·화계</b> 전법을 씁니다.</li>
+                <li>깃발 아래 초록 막대는 병력, 파란 막대는 사기. 병력 300 이하나 사기 5 이하면 부대가 무너지고 장수는 가까운 성으로 도망칩니다.</li>
+                <li>사기는 싸우지 않고 내 땅에서 쉬면 하루 +3, 내 <b>진지</b> 안이면 +6 회복 — 성에 돌아갈 필요 없음.</li>
                 <li>내 도시·땅과 끊기면 보급이 끊겨 병력·사기가 줄어듭니다(주황 테두리).</li>
+                <li>장수 둘 이상이 한 부대로 나가면 능력은 가장 높은 장수 기준, 부장 하나마다 공·방 +12%(둘까지).</li>
+                <li>포로 석방: 그 나라가 살아 있으면 돌아가고(우호 +), 없으면 재야로. 등용 확률은 다시 잡아도 오르지 않습니다.</li>
                 <li>성벽이 남아 있으면 수비병이 잘 안 죽습니다. 수비병이 0이면 함락, 관할 땅이 통째로 넘어옵니다.</li>
                 <li>⛩️ 관문은 수입이 없지만 성벽이 두꺼운 길목입니다.</li>
                 <li>⚓ 항구에서 나간 부대는 배로 바닷길(뭍에서 3칸 안 바다)을 갑니다. 물 위에선 수군 장수가 없으면 약합니다.</li>
@@ -1186,7 +1200,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕯️ 장수는 해마다 나이를 먹고 60세 무렵부터 세상을 떠날 수 있습니다.</li>
                 <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
                 <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
-                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점)·망루(2칸 안 적 매일 공격)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
+                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대·성 수비병 매일 공격)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>
                 <li>🏗️ 세력 탭의 「새 도시 세우기」로 내 땅 빈 곳(다른 성과 4칸 이상, 초록 칸)에 도시를 세웁니다. 완공되면 주변 땅이 그 도시 관할이 됩니다.</li>
                 <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>
@@ -1280,8 +1294,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
               {report.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
             </div>
           )}
-          {!playing && !game.over && game.inbox?.length > 0 && (() => {
+          {!playing && !game.over && game.inbox?.length > 0 && peek && (() => {
+            const n = game.nations[game.inbox[0].from];
+            return (
+              <div className="h14-peek">
+                <span className="chip" style={{ background: n.color }} /> {n.name} (선택한 성)
+                <button className="primary sm" onClick={() => setPeek(false)}>✉️ 답하기</button>
+              </div>
+            );
+          })()}
+          {!playing && !game.over && game.inbox?.length > 0 && !peek && (() => {
             const p = game.inbox[0], n = game.nations[p.from];
+            const cap = game.castles.find((c) => c.owner === p.from && c.capital) || game.castles.find((c) => c.owner === p.from);
             return (
               <div className="h14-over" style={{ fontSize: 16, fontWeight: 'normal' }}>
                 <div className="card" style={{ maxWidth: 340, textAlign: 'center' }}>
@@ -1289,6 +1313,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div>{PACT[p.type]}을 맺자고 합니다 ({p.type === 'ally' ? '1년' : '반년'}).</div>
                   <div className="muted" style={{ fontSize: 12, margin: '6px 0' }}>우호 {Math.round(relOf(game, pid, p.from))} · {n.name} 병력 {fmtTroops(powerOf(game, p.from))}</div>
                   <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
+                    {cap && <button onClick={() => { goTo(cap); setPeek(true); }}>📍 지도에서 보기</button>}
                     <button onClick={() => act((s) => answerInbox(s, 0, false))}>거절</button>
                     <button className="primary" onClick={() => act((s) => answerInbox(s, 0, true))}>수락</button>
                   </div>
