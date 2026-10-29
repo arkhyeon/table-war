@@ -1004,8 +1004,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   </label>
                   <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
                     <button onClick={() => setSortieOpen(false)}>취소</button>
-                    <button className="primary" disabled={!pickG.length || amt < 1000} onClick={() => {
-                      const r = act((s) => sortie(s, grid, selCastle.id, pickG, amt, withSiege));
+                    <button className="primary" disabled={!pickG.length || Math.min(amt, maxAmt) < 1000} onClick={() => {
+                      const r = act((s) => sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt), withSiege));
                       if (r?.ok) { setSortieOpen(false); setSel({ type: 'unit', id: r.unit.id }); setSheet(false); toast('부대가 나왔습니다. 지도에서 목적지·공격할 곳을 누르세요.'); }
                     }}>출진</button>
                   </div>
@@ -1255,7 +1255,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🪨 공성병기(출진 때 체크하거나 들판에서 부대로 만들기, 금 5천)는 성벽을 5배로 깎지만 느려지고 들판 싸움에 약하며(공격 −20%·받는 피해 +35%) 함락하면 부서집니다. 장수 여럿 부대는 「✂️ 나누기」로 언제든 갈라 협공할 수 있습니다.</li>
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
-                <li>🔥 아주 커진 나라는 도읍에서 먼, 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나갑니다(수비 2만 넘으면 안전).</li>
+                <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(수비 2만 넘으면 안전).</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>

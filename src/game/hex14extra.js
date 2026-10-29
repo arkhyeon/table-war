@@ -269,7 +269,7 @@ function revolts(s, grid, rng) {
     if (!n.alive || n.horde) continue;
     const mine = s.castles.filter((c) => c.owner === n.id && c.kind === 'city');
     const share = mine.length / total;
-    if (mine.length < 10 || share < 0.18 || rng() > Math.min(0.1, (share - 0.12) * 0.35)) continue;
+    if (mine.length < 15 || share < 0.18 || rng() > Math.min(0.1, (mine.length - 12) * 0.003 + (share - 0.12) * 0.25)) continue;
     const cap = s.castles.find((c) => c.owner === n.id && c.capital) || mine[0];
     const guard = (c) => Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').reduce((a, g) => Math.max(a, g.loyal ?? 70), 0);
     const c = mine.filter((x) => x !== cap && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2))
@@ -277,12 +277,15 @@ function revolts(s, grid, rng) {
     if (!c || c.troops > 20000) continue; // 수비가 두터우면 반란이 못 일어남
     // 장수는 도읍으로 피신, 성은 반란군(중립)이 차지
     for (const g of Object.values(s.generals)) if (g.castle === c.id && g.status === 'active') g.castle = cap.id;
-    c.owner = null;
-    c.bandit = '반란군';
-    c.troops = Math.max(4000, Math.round(c.troops * 0.8));
-    for (const t of districtTiles(s)[c.id]) if (s.owner[t] === n.id) s.owner[t] = -1;
-    s.owner[c.tile] = -1;
-    const text = `나라가 너무 커져 변방이 흔들립니다. ${c.name}에서 반란이 일어나 떨어져 나갔습니다!`;
+    // 절반은 가까운 이웃 나라(약조 없는)로 귀순, 아니면 반란군(중립)
+    const near = s.castles.filter((x) => x.owner !== null && x.owner !== n.id && s.nations[x.owner]?.alive && !s.nations[x.owner].horde && enemy(s, n.id, x.owner) && grid.dist(x.tile, c.tile) <= 10 * grid.k).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];
+    const to = near && rng() < 0.5 ? near.owner : null;
+    c.owner = to;
+    c.bandit = to === null ? '반란군' : null;
+    c.troops = Math.max(6000, Math.round(c.troops * 0.9));
+    for (const t of districtTiles(s)[c.id]) if (s.owner[t] === n.id) s.owner[t] = to === null ? -1 : to;
+    s.owner[c.tile] = to === null ? -1 : to;
+    const text = `나라가 너무 커져 변방이 흔들립니다. ${c.name}에서 반란이 일어나 ${to === null ? '떨어져 나갔습니다' : `${s.nations[to].name}에 귀순했습니다`}!`;
     if (n.id === s.playerId && !s.spectator) pushEvent(s, { title: '변방 반란', text, nations: [n.id] });
     else log(s, `🔥 ${n.name}: ${text}`, 'bad', [n.id]);
   }
