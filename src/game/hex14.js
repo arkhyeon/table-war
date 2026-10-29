@@ -216,6 +216,7 @@ export function createHex14(world, base) {
   };
   initGov(st, makeRng(`gov0:${base.seed}`));
   rollWeather(st);
+  st.playerStart = castles.filter((c) => c.owner === base.playerId && c.kind !== 'pass').length; // 작은 나라로 시작하면 숨 돌릴 틈이 김
   return st;
 }
 

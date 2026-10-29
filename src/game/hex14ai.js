@@ -7,6 +7,8 @@ import { makeRng } from './rng.js';
 import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST } from './hex14.js';
 
 export const GRACE = 9;
+// 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
+export const graceOf = (s) => (s.playerStart ?? 99) <= 3 ? 36 : GRACE;
 
 // ── 전략: 나라마다 형편에 맞게 고르고 1년(36순)·큰 변화마다 다시 고름 ──
 // reserve: 성에 남길 몫 · bold: 얼마나 센 성까지 노리나 · units: 동시에 내보낼 부대 수 배율
@@ -44,7 +46,7 @@ export function chooseStrategy(s, grid, nid) {
   const topShare = citiesOf(s, top.id) / total;
   // 노릴 나라: 이미 둘 넘게 노리는 나라는 피함 (모두가 한 나라만 물어뜯지 않게)
   const hunted = (x) => s.nations.filter((m) => m.alive && m.id !== nid && m.focus === x).length;
-  const free = nb.filter((x) => hunted(x) < 2);
+  const free = nb.filter((x) => hunted(x) < 2 && !(x === s.playerId && !s.spectator && s.turn <= graceOf(s)));
   const pool = free.length ? free : nb;
   const weakest = pool.slice().sort((a, b) => powerOf(s, a) - powerOf(s, b))[0];
   // 맞수: 힘이 비슷한 이웃 (먹잇감 대신 고르기도 함)
@@ -217,7 +219,7 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null)
   for (const c of s.castles) {
     if (!enemy(s, nid, c.owner)) continue;
     // 처음 석 달(9순)은 플레이어 도시를 먼저 노리지 않음 (작은 나라도 숨 돌릴 틈)
-    if (c.owner === s.playerId && !s.spectator && s.turn <= GRACE) continue;
+    if (c.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) continue;
     const neutral = c.owner === null || c.owner === -1;
     if (!neutral && focus !== null && focus !== undefined && c.owner !== focus && (n.strat === 'hold' || n.strat === 'center')) continue;
     const d = grid.dist(c.tile, from);
