@@ -401,8 +401,9 @@ export function stepDay(s, grid) {
       if ((enemyU && enemyU.nation !== u.nation) || (c && c.owner !== u.nation) || (ef && ef.owner !== u.nation)) break;
       if (enemyU) { u.wait += 1; if (u.wait > 2) { const p = findPath(s, grid, u.tile, u.path[u.path.length - 1], u.nation, u.navy); u.path = p || []; u.wait = 0; } break; }
       const cost = moveCost(grid, u.tile, nx, s, u);
-      if (u.mp < cost) break;
-      u.mp -= cost;
+      // 이동력이 가득(3) 찼으면 아무리 험한 칸(눈 덮인 산 등)도 한 칸은 감
+      if (u.mp < cost && u.mp < 3) break;
+      u.mp = Math.max(0, u.mp - cost);
       occ.delete(u.tile);
       u.tile = nx;
       occ.set(nx, u);
