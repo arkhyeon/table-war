@@ -6,6 +6,8 @@ import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
 import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy } from './hex14.js';
 
+export const GRACE = 9;
+
 // 성 주변 위협: 6칸 안 적 부대 병력 합
 function threatNear(s, grid, c) {
   let t = 0;
@@ -100,6 +102,8 @@ function pickTarget(s, grid, nid, from, troops) {
   let best = null, bv = Infinity;
   for (const c of s.castles) {
     if (!enemy(s, nid, c.owner)) continue;
+    // 처음 석 달(9순)은 플레이어 도시를 먼저 노리지 않음 (작은 나라도 숨 돌릴 틈)
+    if (c.owner === s.playerId && !s.spectator && s.turn <= GRACE) continue;
     const d = grid.dist(c.tile, from);
     if (d > 25 * grid.k) continue;
     const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
