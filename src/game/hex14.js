@@ -334,8 +334,8 @@ export function findPath(s, grid, from, to, nation, navy = false) {
       }
       // 남의 진지·망루·목책: 부숴야 지나가므로 아주 비싼 길 (돌아갈 길이 멀면 부수고 감)
       const ef = forts.get(nx);
-      // 배에 타고 내리는 데 품이 들어서, 땅길이 웬만큼 돌아가도 땅으로 감
-      const board = grid.water[nx] !== grid.water[cur] ? 4 : 0;
+      // 빠른 길로 가되, 목표 바로 옆(싸울 자리)은 땅을 고름 — 물 위에서 싸우면 약하므로 상륙해서 침
+      const board = grid.water[nx] && nx !== to && grid.dist(nx, to) === 1 ? 4 : grid.water[nx] !== grid.water[cur] ? 0.5 : 0;
       const ng = g.get(cur) + moveCost(grid, cur, nx) + board + (occ.get(nx) ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
       if (ng < (g.get(nx) ?? Infinity)) {
         g.set(nx, ng);
@@ -504,6 +504,9 @@ export function stepDay(s, grid) {
     const a = unitStats(s, u);
     // 성벽이 남아 있으면 수비병 피해가 크게 줄고 반격이 셈. 성벽부터 깎아야 함
     const walled = c.dur > 0;
+    // 물 위에서 치면 약함 (수군 장수·조선소·수군 육성이 있으면 괜찮음)
+    const sea = grid.water[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
+    a.atk *= sea;
     const wall = u.troops * 0.004 * (a.atk / 100);
     c.dur = Math.max(0, c.dur - wall);
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1) * rng.range(0.9, 1.1);

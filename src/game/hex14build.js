@@ -124,10 +124,11 @@ export function aiBuild(s, grid, nid, threat) {
 }
 
 // ───────── 야전 시설: 부대가 그 칸에 멈춰 짓는 진지·망루·목책 ─────────
-// 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 목책: 적이 지나갈 수 없는 길막이
+// 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 투석기: 성벽 부수기 · 목책: 적이 지나갈 수 없는 길막이
 export const FORTS = {
   camp: { name: '진지', icon: '⛺', cost: 8000, days: 5, hp: 2500, desc: '안의 아군 피해 −30%, 보급 거점' },
-  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대·성 수비병을 매일 공격' },
+  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대를 매일 공격 (원군·출격 견제)' },
+  catapult: { name: '투석기', icon: '🪨', cost: 10000, days: 4, hp: 1500, desc: '적 성에서 2칸 자리에 지음: 성벽 매일 −300, 성벽이 무너지면 수비병을 깎음' },
   palisade: { name: '목책', icon: '🚧', cost: 4000, days: 3, hp: 3500, desc: '적이 지나갈 수 없는 길막이' },
 };
 export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;
@@ -140,6 +141,7 @@ export function fortCheck(s, grid, u, kind) {
   if (s.castles.some((c) => c.tile === u.tile)) return '성 칸에는 지을 수 없습니다.';
   if (fortAt(s, u.tile)) return '이미 시설이 있는 칸입니다.';
   if (s.castles.some((c) => grid.dist(c.tile, u.tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';
+  if (kind === 'catapult' && !s.castles.some((c) => enemy(s, u.nation, c.owner) && grid.dist(c.tile, u.tile) === 2)) return '적 성에서 2칸 떨어진 자리에만 지을 수 있습니다.';
   if (s.nations[u.nation].gold < f.cost) return `금이 모자랍니다 (${fmtGold(f.cost)}).`;
   return null;
 }
@@ -176,10 +178,14 @@ export function fortsDay(s, grid) {
         u.morale -= 2;
         s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
       }
-      // 공성 지원: 2칸 안 적 성의 수비병도 쏨 (망루만으로는 함락 못 함)
+    }
+    // 투석기: 2칸 안 적 성의 성벽을 부수고, 성벽이 없으면 수비병을 깎음 (투석기만으로 함락은 못 함)
+    if (f.kind === 'catapult') {
       for (const c of s.castles) {
-        if (!enemy(s, f.owner, c.owner) || grid.dist(c.tile, f.tile) > 2 || c.troops <= 500) continue;
-        const dmg = Math.min(c.troops - 500, Math.round(150 + c.troops * 0.004));
+        if (!enemy(s, f.owner, c.owner) || grid.dist(c.tile, f.tile) > 2) continue;
+        if (c.dur > 0) { const w = Math.min(c.dur, 300); c.dur -= w; s.fx.push({ type: 'hit', tile: c.tile, amt: Math.round(w), wall: true }, { type: 'arrow', a: f.tile, b: c.tile }); continue; }
+        if (c.troops <= 500) continue;
+        const dmg = Math.min(c.troops - 500, Math.round(200 + c.troops * 0.01));
         c.troops -= dmg;
         s.fx.push({ type: 'hit', tile: c.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: c.tile });
       }

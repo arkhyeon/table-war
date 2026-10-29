@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles } from '../game/hex14.js';
 import { aiTurn14 } from '../game/hex14ai.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
@@ -340,6 +340,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.drawImage(land.current.snow, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
       ctx.globalAlpha = 1;
     }
+    // 고른 도시의 관할 땅: 옅게 칠하고, 아직 내 것이 아닌 칸은 빗금처럼 진하게
+    if (sl?.type === 'castle' && s.castles[sl.id]) {
+      const c = s.castles[sl.id], tiles = districtTiles(s)[c.id] || [];
+      for (const t of tiles) {
+        const [hx, hy] = grid.center(t);
+        ctx.beginPath();
+        for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 0.98, d); if (d) ctx.lineTo(qx, qy); else ctx.moveTo(qx, qy); }
+        ctx.fillStyle = s.owner[t] === c.owner && c.owner !== null ? 'rgba(255,255,255,0.28)' : 'rgba(255,60,60,0.30)';
+        ctx.fill();
+      }
+    }
     const sz = grid.size;
     const px = 1 / k; // 화면 1픽셀
     const x0 = vx - sz * 4, x1 = vx + cw / k + sz * 4, y0 = vy - sz * 4, y1 = vy + ch / k + sz * 4;
@@ -446,6 +457,16 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.beginPath(); ctx.moveTo(cx - sz * 0.4, cy); ctx.lineTo(cx + sz * 0.4, cy - sz * 1.1); ctx.moveTo(cx + sz * 0.4, cy); ctx.lineTo(cx - sz * 0.4, cy - sz * 1.1); ctx.stroke();
         ctx.fillStyle = '#a06a35'; ctx.fillRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32); ctx.strokeRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32);
         ctx.beginPath(); ctx.moveTo(cx - sz * 0.75, cy - sz * 1.55); ctx.lineTo(cx, cy - sz * 2.1); ctx.lineTo(cx + sz * 0.75, cy - sz * 1.55); ctx.closePath(); ctx.fillStyle = '#4c5866'; ctx.fill(); ctx.stroke();
+      } else if (f.kind === 'catapult') {
+        // 투석기: 바퀴 달린 틀과 긴 팔, 끝에 돌
+        ctx.fillStyle = '#7a4b22';
+        ctx.fillRect(cx - sz * 0.7, cy - sz * 0.25, sz * 1.4, sz * 0.22); ctx.strokeRect(cx - sz * 0.7, cy - sz * 0.25, sz * 1.4, sz * 0.22);
+        ctx.fillRect(cx - sz * 0.1, cy - sz * 0.75, sz * 0.2, sz * 0.55);
+        ctx.lineWidth = Math.max(sz * 0.14, px); ctx.strokeStyle = '#5a3416';
+        ctx.beginPath(); ctx.moveTo(cx + sz * 0.6, cy - sz * 0.4); ctx.lineTo(cx - sz * 0.55, cy - sz * 1.35); ctx.stroke();
+        ctx.lineWidth = Math.max(sz * 0.08, px); ctx.strokeStyle = '#3a2412';
+        ctx.fillStyle = '#8d8d8d'; ctx.beginPath(); ctx.arc(cx - sz * 0.6, cy - sz * 1.4, sz * 0.2, 0, 7); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#4a2c12'; for (const dx of [-0.45, 0.45]) { ctx.beginPath(); ctx.arc(cx + dx * sz, cy + sz * 0.05, sz * 0.2, 0, 7); ctx.fill(); ctx.stroke(); }
       } else {
         ctx.fillStyle = '#8a5a2b';
         for (let q = -3; q <= 3; q++) { const x = cx + q * sz * 0.26; ctx.beginPath(); ctx.moveTo(x - sz * 0.1, cy + sz * 0.3); ctx.lineTo(x - sz * 0.1, cy - sz * 0.4); ctx.lineTo(x, cy - sz * 0.65); ctx.lineTo(x + sz * 0.1, cy - sz * 0.4); ctx.lineTo(x + sz * 0.1, cy + sz * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); }
@@ -855,7 +876,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <span>수비병</span><span>{fmtTroops(selCastle.troops)}</span>
             <span>성벽</span><span>{Math.round(selCastle.dur)} / {selCastle.maxDur}</span>
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
-            {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))}</span></>}
+            {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))} <small className="muted">지도에 흰색=내 관할, 빨강=아직 남의 것(채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)</small></span></>}
             {selCastle.kind === 'pass' && <><span>관문</span><span>수입은 없지만 성벽이 두꺼워 길목을 막음</span></>}
             <span>장수</span><span>{castleGens.length ? castleGens.map((g) => <span key={g.id} style={{ display: 'inline-block', marginRight: 6 }}><Face g={g} size={22} col={ownerColor(game, selCastle.owner)} />{g.name}{selCastle.owner === pid && <Loyal g={g} />}</span>) : '없음'}</span>
           </div>
@@ -1032,7 +1053,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     </div>
                   );
                 })()}
-                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대·성 수비병 매일 공격 · 목책: 적 길막이. 부대가 그 칸에 멈춰 지어야 합니다.</div>
+                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대 매일 공격 · 투석기: 적 성 2칸 자리, 성벽 매일 −300 · 목책: 적 길막이(물길로는 돌아옴). 부대가 그 칸에 멈춰 지어야 합니다.</div>
               </>
             )}
           </div>
@@ -1200,7 +1221,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕯️ 장수는 해마다 나이를 먹고 60세 무렵부터 세상을 떠날 수 있습니다.</li>
                 <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
                 <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
-                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대·성 수비병 매일 공격)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
+                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대 매일 공격)·🪨투석기(적 성 2칸 자리, 성벽 매일 −300)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>
                 <li>🏗️ 세력 탭의 「새 도시 세우기」로 내 땅 빈 곳(다른 성과 4칸 이상, 초록 칸)에 도시를 세웁니다. 완공되면 주변 땅이 그 도시 관할이 됩니다.</li>
                 <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>
