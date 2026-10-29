@@ -11,7 +11,8 @@ import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
 import { weatherText, uniqueOf } from '../game/hex14extra.js';
-import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP } from '../game/hex14build.js';
+import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort } from '../game/hex14build.js';
+import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
@@ -291,6 +292,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const unitById = (id) => game.units.find((u) => u.id === id);
   const selUnit = sel?.type === 'unit' ? unitById(sel.id) : null;
   const selCastle = sel?.type === 'castle' ? game.castles[sel.id] : null;
+  const selFort = sel?.type === 'fort' ? (game.forts || []).find((f) => f.id === sel.id) : null;
 
   // ── 그리기 ──
   const draw = () => {
@@ -423,6 +425,45 @@ export default function Hex14({ world, game, setGame, onExit }) {
         }
       }
     }
+    // 야전 시설 (진지·망루·목책)
+    for (const f of s.forts || []) {
+      const [cx, cy] = grid.center(f.tile);
+      if (!vis(cx, cy)) continue;
+      const col = ownerColor(s, f.owner);
+      const on = sl?.type === 'fort' && sl.id === f.id;
+      ctx.globalAlpha = f.left > 0 ? 0.5 : 1;
+      ctx.lineWidth = Math.max(sz * 0.08, px);
+      ctx.strokeStyle = '#3a2412';
+      if (f.kind === 'camp') {
+        ctx.fillStyle = '#8a5a2b';
+        for (let q = 0; q < 10; q++) { const a = (q / 10) * Math.PI * 2; const x = cx + Math.cos(a) * sz * 0.85, y = cy + Math.sin(a) * sz * 0.55; ctx.fillRect(x - sz * 0.07, y - sz * 0.45, sz * 0.14, sz * 0.45); }
+        for (const dx of [-0.35, 0.3]) { ctx.beginPath(); ctx.moveTo(cx + dx * sz - sz * 0.3, cy + sz * 0.1); ctx.lineTo(cx + dx * sz, cy - sz * 0.45); ctx.lineTo(cx + dx * sz + sz * 0.3, cy + sz * 0.1); ctx.closePath(); ctx.fillStyle = '#efe6d2'; ctx.fill(); ctx.stroke(); }
+      } else if (f.kind === 'tower') {
+        ctx.fillStyle = '#7a4b22';
+        ctx.fillRect(cx - sz * 0.45, cy - sz * 1.3, sz * 0.12, sz * 1.5); ctx.fillRect(cx + sz * 0.33, cy - sz * 1.3, sz * 0.12, sz * 1.5);
+        ctx.beginPath(); ctx.moveTo(cx - sz * 0.4, cy); ctx.lineTo(cx + sz * 0.4, cy - sz * 1.1); ctx.moveTo(cx + sz * 0.4, cy); ctx.lineTo(cx - sz * 0.4, cy - sz * 1.1); ctx.stroke();
+        ctx.fillStyle = '#a06a35'; ctx.fillRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32); ctx.strokeRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32);
+        ctx.beginPath(); ctx.moveTo(cx - sz * 0.75, cy - sz * 1.55); ctx.lineTo(cx, cy - sz * 2.1); ctx.lineTo(cx + sz * 0.75, cy - sz * 1.55); ctx.closePath(); ctx.fillStyle = '#4c5866'; ctx.fill(); ctx.stroke();
+      } else {
+        ctx.fillStyle = '#8a5a2b';
+        for (let q = -3; q <= 3; q++) { const x = cx + q * sz * 0.26; ctx.beginPath(); ctx.moveTo(x - sz * 0.1, cy + sz * 0.3); ctx.lineTo(x - sz * 0.1, cy - sz * 0.4); ctx.lineTo(x, cy - sz * 0.65); ctx.lineTo(x + sz * 0.1, cy - sz * 0.4); ctx.lineTo(x + sz * 0.1, cy + sz * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+        ctx.fillRect(cx - sz * 0.95, cy - sz * 0.1, sz * 1.9, sz * 0.1);
+      }
+      // 나라 깃발
+      ctx.fillStyle = '#3a2a1a'; ctx.fillRect(cx + sz * 0.7, cy - sz * 1.3, sz * 0.08, sz * 1.2);
+      ctx.fillStyle = col; ctx.fillRect(cx + sz * 0.78, cy - sz * 1.3, sz * 0.5, sz * 0.35);
+      ctx.globalAlpha = 1;
+      if (f.left > 0) { ctx.font = `${Math.max(sz * 0.9, 10 * px)}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🔨', cx, cy - sz * 1.4); }
+      if (f.hp < f.maxHp) { ctx.fillStyle = '#300'; ctx.fillRect(cx - sz * 0.8, cy + sz * 0.45, sz * 1.6, sz * 0.2); ctx.fillStyle = '#e8c35a'; ctx.fillRect(cx - sz * 0.8, cy + sz * 0.45, sz * 1.6 * Math.max(0, f.hp / f.maxHp), sz * 0.2); }
+      if (on) { ctx.strokeStyle = '#ffe066'; ctx.lineWidth = Math.max(sz * 0.2, 2 * px); ctx.beginPath(); ctx.arc(cx, cy - sz * 0.4, sz * 1.3, 0, 7); ctx.stroke(); }
+    }
+    // 망루 화살
+    for (const e of s.fx || []) {
+      if (e.type !== 'arrow') continue;
+      const [ax, ay] = grid.center(e.a), [bx, by] = grid.center(e.b);
+      ctx.strokeStyle = 'rgba(255,240,200,0.8)'; ctx.lineWidth = Math.max(sz * 0.08, px); ctx.setLineDash([sz * 0.25, sz * 0.2]);
+      ctx.beginPath(); ctx.moveTo(ax, ay - sz * 1.5); ctx.quadraticCurveTo((ax + bx) / 2, Math.min(ay, by) - sz * 3, bx, by); ctx.stroke(); ctx.setLineDash([]);
+    }
     // 교전 표시 (칼 엇갈림)
     for (const e of s.fx || []) {
       if (e.type !== 'clash') continue;
@@ -535,7 +576,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         else { const x = (x0 + now * sp) % cw; ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + 20, y0 - 5, x + 40, y0); ctx.stroke(); }
       }
     }
-    const busy = !!spotsRef.current || wk === 'rain' || wk === 'snow' || wk === 'wind' || f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash') || s.units.length;
+    const busy = !!spotsRef.current || wk === 'rain' || wk === 'snow' || wk === 'wind' || f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash' || e.type === 'arrow') || s.units.length;
     cancelAnimationFrame(raf.current);
     if (busy) raf.current = requestAnimationFrame(draw);
   };
@@ -641,7 +682,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
     for (const c of game.castles) { const [x, y] = grid.center(c.tile); const d = (x - wx) ** 2 + (y - wy) ** 2; if (d < dc) { dc = d; bc = c; } }
     // 성 그림이 크므로 성 안쪽을 누르면 근처 부대보다 성을 우선
     if (bc && (!bu || dc * 0.5 < du)) return { type: 'castle', o: bc };
-    return bu ? { type: 'unit', o: bu } : null;
+    if (bu) return { type: 'unit', o: bu };
+    let bf = null, df = Math.max(grid.size * 1.3, minR) ** 2;
+    for (const f of game.forts || []) { const [x, y] = grid.center(f.tile); const d = (x - wx) ** 2 + (y - grid.size * 0.6 - wy) ** 2; if (d < df) { df = d; bf = f; } }
+    return bf ? { type: 'fort', o: bf } : null;
   };
 
   const tap = (px, py) => {
@@ -660,6 +704,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const hit = pick(wx, wy);
     const u = hit?.type === 'unit' ? hit.o : null;
     const c = hit?.type === 'castle' ? hit.o : null;
+    const fo = hit?.type === 'fort' ? hit.o : null;
+    // 내 부대를 고른 상태에서 적 시설을 누르면 부수러 감
+    if (selUnit && selUnit.nation === pid && fo && fo.owner !== pid) {
+      if (!enemy(game, pid, fo.owner)) return toast('약조를 맺은 나라의 시설입니다.');
+      act((s) => { const su = s.units.find((x) => x.id === selUnit.id); const r = order(s, grid, su, 'fort', fo.id); if (r.ok) r.msg = `${FORTS[fo.kind].name} 부수러 감`; return r; });
+      return;
+    }
     // 내 부대를 고른 상태: 누른 곳으로 명령
     if (selUnit && selUnit.nation === pid && !(u && u.nation === pid)) {
       const kind = u ? 'unit' : c ? 'castle' : 'tile';
@@ -677,6 +728,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     if (u) { setSel({ type: 'unit', id: u.id }); setSortieOpen(false); setSheet(u.nation !== pid); return; }
     if (c) { setSel({ type: 'castle', id: c.id }); setSortieOpen(false); setSheet(true); return; }
+    if (fo) { setSel({ type: 'fort', id: fo.id }); setSheet(true); return; }
     setSel(null);
     setSheet(false);
   };
@@ -755,7 +807,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const inc = useMemo(
     () =>
       game.castles.filter((c) => c.owner === pid).reduce((a, c) => a + castleIncome(game, grid, c), 0) -
-      Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length * 150,
+      Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length * 200 - game.castles.filter((c) => c.owner === pid).reduce((a, c) => a + Object.values(c.bld || {}).reduce((x, y) => x + y, 0) * 300, 0) - (me.policies || []).length * POLICY_UPKEEP,
     [game, grid, pid],
   );
   const food = me.food ?? 0, use = foodUse(game, pid);
@@ -856,7 +908,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 return (
                   <div key={k} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '2px 0' }}>
                     <span title={b.desc}>{b.icon} {b.name} <small className="muted">{lv(selCastle, k)}/{b.max} · {b.desc}</small></span>
-                    {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>{fmtGold(b.cost)} · {b.turns}턴</button>}
+                    {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>{fmtGold(buildCost(game, selCastle, k))} · {b.turns}턴</button>}
                   </div>
                 );
               })}
@@ -902,13 +954,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
               )}
               {selCastle.kind !== 'pass' && (
                 <div style={{ fontSize: 13 }}>
-                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle)}금)
+                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금)
                   <Slider min={0} max={draftMax14(game, selCastle)} step={100} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={setDraftAmt} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
                 </div>
               )}
             </div>
           )}
+        </div>
+      )}
+      {selFort && (
+        <div className="card">
+          <h3 style={{ margin: '0 0 6px' }}>{FORTS[selFort.kind].icon} {FORTS[selFort.kind].name} <small className="muted">{game.nations[selFort.owner]?.name}</small></h3>
+          <div className="kv">
+            <span>내구</span><span>{Math.max(0, Math.round(selFort.hp))} / {selFort.maxHp}</span>
+            <span>효과</span><span>{FORTS[selFort.kind].desc}</span>
+            {selFort.left > 0 && <><span>공사</span><span>{selFort.left}일 남음</span></>}
+          </div>
+          {selFort.owner !== pid && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>내 부대를 고른 뒤 이 시설을 누르면 부수러 갑니다.</div>}
         </div>
       )}
       {selUnit && (() => {
@@ -937,12 +1000,25 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <button onClick={() => act((s) => { const u = s.units.find((x) => x.id === selUnit.id); const h = nearestCastle(s, grid, u.tile, pid); return h ? order(s, grid, u, 'castle', h.id) : { ok: false, msg: '돌아갈 성이 없습니다.' }; })}>🏠 귀환</button>
                   <button onClick={() => act((s) => { const u = s.units.find((x) => x.id === selUnit.id); u.path = []; u.order = null; return { ok: true, msg: '정지' }; })}>✋ 정지</button>
                 </div>
+                {(() => {
+                  const building = (game.forts || []).find((f) => f.builder === selUnit.id && f.left > 0);
+                  if (building) return <div style={{ fontSize: 12, marginTop: 6 }}>🔨 {FORTS[building.kind].icon} {FORTS[building.kind].name} 짓는 중 — {building.left}일 남음 (움직이면 취소)</div>;
+                  return (
+                    <div className="row" style={{ gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+                      {Object.entries(FORTS).map(([k, f]) => {
+                        const why = fortCheck(game, grid, selUnit, k);
+                        return <button key={k} className="sm" disabled={!!why} title={why || f.desc} onClick={() => act((s) => startFort(s, grid, s.units.find((x) => x.id === selUnit.id), k))}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days}일</button>;
+                      })}
+                    </div>
+                  );
+                })()}
+                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점 · 망루: 2칸 안 적 매일 공격 · 목책: 적 길막이. 부대가 그 칸에 멈춰 지어야 합니다.</div>
               </>
             )}
           </div>
         );
       })()}
-      {!selCastle && !selUnit && (
+      {!selCastle && !selUnit && !selFort && (
         <>
           <div className="row h14-tabs">
             {[['home', '🏯 세력'], ['diplo', '🤝 외교'], ['people', '🧑 인재'], ['log', '📜 기록'], ['help', '❓']].map(([k, l]) => (
@@ -964,6 +1040,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6, alignItems: 'center' }}>
                 <button className="sm" disabled={playing || me.gold < FOUND_COST} onClick={() => { setFounding(true); setSheet(false); toast('지도에서 새 도시 자리를 누르세요.'); }}>🏗️ 새 도시 세우기 (금 {fmtGold(FOUND_COST)} · {FOUND_TURNS}턴)</button>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="row" style={{ justifyContent: 'space-between' }}><b>📜 정책</b><small className="muted">{(me.policies || []).length}/{policySlots(game, pid)}칸 · 펼칠 때 금 {fmtGold(POLICY_COST)}, 순마다 {fmtGold(POLICY_UPKEEP)}</small></div>
+                {Object.entries(POLICIES).map(([k, p]) => {
+                  const on = (me.policies || []).includes(k);
+                  return (
+                    <div key={k} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '2px 0' }}>
+                      <span style={{ color: on ? '#ffe066' : undefined }}>{p.icon} {p.name} <small className="muted">{p.desc}</small></span>
+                      {on ? <button className="sm" disabled={playing} onClick={() => act((s) => dropPolicy(s, pid, k))}>거두기</button> : <button className="sm" disabled={playing || (me.policies || []).length >= policySlots(game, pid) || me.gold < POLICY_COST} onClick={() => act((s) => adoptPolicy(s, pid, k))}>펼치기</button>}
+                    </div>
+                  );
+                })}
               </div>
               <div style={{ marginTop: 10 }}>
                 <div className="row" style={{ justifyContent: 'space-between' }}><b>🎖️ 군단 (도시를 맡겨 컴퓨터가 운영)</b>{!corpsForm && <button className="sm" disabled={playing} onClick={() => setCorpsForm({ cities: [], leader: '' })}>＋ 만들기</button>}</div>
@@ -1074,7 +1162,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>날씨: ❄️ 겨울 눈은 북쪽 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
                 <li>💰 금 지출: 장수 녹봉 1명당 200/순, 시설 유지비 단계당 300/순, 출진 비용 병사 2명당 1금, 징병 1명당 10금(병영 8금).</li>
                 <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
-                <li>🏗️ 도시를 눌러 시설(농지·시장·병영·성벽 증축·대장간·조선소·학당)을 짓습니다. 도시마다 4칸(수도 6칸), 한 번에 하나씩.</li>
+                <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
+                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점)·망루(2칸 안 적 매일 공격)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
+                <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>
                 <li>🏗️ 세력 탭의 「새 도시 세우기」로 내 땅 빈 곳(다른 성과 4칸 이상, 초록 칸)에 도시를 세웁니다. 완공되면 주변 땅이 그 도시 관할이 됩니다.</li>
                 <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>
                 <li>삼국지 시나리오는 손책의 죽음, 관도대전, 삼고초려, 적벽대전 같은 역사 사건이 때가 되면 일어납니다.</li>
@@ -1090,7 +1180,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
         </>
       )}
-      {(selCastle || selUnit) && (
+      {(selCastle || selUnit || selFort) && (
         <div className="card h14-log">
           <b>📜 기록</b>
           {game.log.slice(0, 30).map((l, i) => (

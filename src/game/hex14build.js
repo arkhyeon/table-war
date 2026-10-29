@@ -1,22 +1,21 @@
 // ───────── 삼국지14식 모드: 도시 시설 건설과 새 도시 세우기(축성) ─────────
 import { fmtGold } from './format.js';
-import { log } from './hex14.js';
+import { log, enemy } from './hex14.js';
+import { hasPolicy } from './hex14policy.js';
 
-// 시설: 이름, 아이콘, 금, 걸리는 턴(10일), 최대 단계, 설명
+// 도시 시설은 삼국지14처럼 최소한만: 성벽 증축과 조선소 (수입·수확은 담당관·땅·정책으로)
 export const BUILDINGS = {
-  farm: { name: '농지 개간', icon: '🌾', cost: 15000, turns: 4, max: 2, desc: '가을 수확 +20%/단계' },
-  market: { name: '시장', icon: '🏪', cost: 15000, turns: 4, max: 2, desc: '금 수입 +20%/단계' },
-  barracks: { name: '병영', icon: '⛺', cost: 20000, turns: 5, max: 1, desc: '자원병 +50%, 징병 비용 1명당 8금' },
   wall: { name: '성벽 증축', icon: '🧱', cost: 25000, turns: 6, max: 2, desc: '성벽 내구 +40%/단계' },
-  smithy: { name: '대장간', icon: '⚒️', cost: 20000, turns: 5, max: 1, desc: '이 도시에서 나간 부대 공격 +10%' },
   shipyard: { name: '조선소', icon: '⛵', cost: 25000, turns: 6, max: 1, desc: '이 도시에서 나간 부대는 물 위에서도 약해지지 않음 (항구만)', port: true },
-  academy: { name: '학당', icon: '📚', cost: 20000, turns: 5, max: 1, desc: '이 도시의 재야·포로 등용 +15%, 담당관 내정 +30%' },
 };
 export const FOUND_COST = 50000, FOUND_TURNS = 9;
 
 export const lv = (c, k) => c.bld?.[k] || 0;
-export const slotsOf = (c) => (c.kind === 'pass' ? 1 : c.capital ? 6 : c.founding ? 0 : 4);
+export const slotsOf = (c) => (c.kind === 'pass' ? 2 : c.founding ? 0 : 3);
 export const usedSlots = (c) => Object.values(c.bld || {}).reduce((a, b) => a + b, 0) + (c.build ? 1 : 0);
+
+// 축성 장려 정책이면 30% 싸게
+export const buildCost = (s, c, k) => Math.round(BUILDINGS[k].cost * (hasPolicy(s, c.owner, 'fortify') ? 0.7 : 1));
 
 export function canBuild(s, c, k) {
   const b = BUILDINGS[k];
@@ -27,7 +26,7 @@ export function canBuild(s, c, k) {
   if (c.build) return `이미 ${BUILDINGS[c.build.type].name}을(를) 짓는 중입니다.`;
   if (lv(c, k) >= b.max) return '더 올릴 수 없습니다.';
   if (usedSlots(c) >= slotsOf(c)) return `건설 칸이 다 찼습니다 (${slotsOf(c)}칸).`;
-  if (s.nations[c.owner].gold < b.cost) return `금이 모자랍니다 (${fmtGold(b.cost)}).`;
+  if (s.nations[c.owner].gold < buildCost(s, c, k)) return `금이 모자랍니다 (${fmtGold(buildCost(s, c, k))}).`;
   return null;
 }
 
@@ -35,7 +34,7 @@ export function startBuild(s, cid, k) {
   const c = s.castles[cid];
   const why = canBuild(s, c, k);
   if (why) return { ok: false, msg: why };
-  s.nations[c.owner].gold -= BUILDINGS[k].cost;
+  s.nations[c.owner].gold -= buildCost(s, c, k);
   c.build = { type: k, left: BUILDINGS[k].turns };
   return { ok: true, msg: `${c.name}: ${BUILDINGS[k].name} 공사 시작 (${BUILDINGS[k].turns}턴)` };
 }
@@ -102,26 +101,104 @@ export function buildTurn(s, grid, redistrict) {
       continue;
     }
     if (!c.build) continue;
-    // 정치 높은 담당관이 있으면 빨리 (학당이 있으면 더)
     c.build.left -= 1;
     if (c.build.left > 0) continue;
     const k = c.build.type;
     c.bld = { ...(c.bld || {}), [k]: lv(c, k) + 1 };
     c.build = null;
     if (k === 'wall') { const add = Math.round((c.kind === 'pass' ? 6000 : 3000) * 0.4); c.maxDur += add; c.dur += add; }
-    if (k === 'farm' || k === 'market') c.devMax = Math.round(c.devMax * 1.1);
     log(s, `${BUILDINGS[k].icon} ${c.name}의 ${BUILDINGS[k].name}이(가) 완공되었습니다 (${lv(c, k)}단계).`, 'info', [c.owner]);
   }
   if (regrid) redistrict(s, grid);
 }
 
-// 컴퓨터: 금이 넉넉하면 도시 하나에 쓸모 있는 시설을 지음 (위협받는 곳은 성벽, 아니면 시장·농지·병영 순)
+// 컴퓨터: 금이 넉넉하면 위협받는 도시에 성벽, 항구엔 조선소
 export function aiBuild(s, grid, nid, threat) {
   const n = s.nations[nid];
   if (n.gold < 40000) return;
   const mine = s.castles.filter((c) => c.owner === nid && !c.build && !c.founding);
   for (const c of mine.sort((a, b) => threat(b) - threat(a))) {
-    const order = threat(c) > 0 ? ['wall', 'barracks', 'smithy'] : ['market', 'farm', 'barracks', 'academy', 'shipyard', 'smithy', 'wall'];
+    const order = threat(c) > 0 ? ['wall'] : ['shipyard'];
     for (const k of order) if (!canBuild(s, c, k)) { startBuild(s, c.id, k); return; }
   }
+}
+
+// ───────── 야전 시설: 부대가 그 칸에 멈춰 짓는 진지·망루·목책 ─────────
+// 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 목책: 적이 지나갈 수 없는 길막이
+export const FORTS = {
+  camp: { name: '진지', icon: '⛺', cost: 8000, days: 5, hp: 2500, desc: '안의 아군 피해 −30%, 보급 거점' },
+  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대를 매일 공격' },
+  palisade: { name: '목책', icon: '🚧', cost: 4000, days: 3, hp: 3500, desc: '적이 지나갈 수 없는 길막이' },
+};
+export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;
+
+export function fortCheck(s, grid, u, kind) {
+  const f = FORTS[kind];
+  if (!f) return '없는 시설입니다.';
+  if (u.path?.length) return '멈춰 있는 부대만 지을 수 있습니다.';
+  if (grid.water?.[u.tile]) return '물 위에는 지을 수 없습니다.';
+  if (s.castles.some((c) => c.tile === u.tile)) return '성 칸에는 지을 수 없습니다.';
+  if (fortAt(s, u.tile)) return '이미 시설이 있는 칸입니다.';
+  if (s.castles.some((c) => grid.dist(c.tile, u.tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';
+  if (s.nations[u.nation].gold < f.cost) return `금이 모자랍니다 (${fmtGold(f.cost)}).`;
+  return null;
+}
+
+// 부대(u)가 지금 선 칸에 공사 시작. 부대가 그 칸을 떠나면 공사가 멈춤 (builder가 null이면 성 수비대가 지음)
+export function startFort(s, grid, u, kind, tile = u?.tile, nid = u?.nation) {
+  if (u) { const why = fortCheck(s, grid, u, kind); if (why) return { ok: false, msg: why }; }
+  const f = FORTS[kind];
+  s.nations[nid].gold -= f.cost;
+  s.nextFort = (s.nextFort || 0) + 1;
+  s.forts = [...(s.forts || []), { id: s.nextFort, kind, tile, owner: nid, hp: f.hp, maxHp: f.hp, left: f.days, builder: u ? u.id : null }];
+  return { ok: true, msg: `${f.icon} ${f.name} 공사 시작 (${f.days}일, 부대가 그 자리에 있어야 함)` };
+}
+
+// 하루마다: 공사 진행, 망루 화살, 부서진 시설 정리
+export function fortsDay(s, grid) {
+  if (!s.forts?.length) return;
+  for (const f of s.forts) {
+    if (f.left > 0) {
+      if (f.builder !== null) {
+        const u = s.units.find((x) => x.id === f.builder);
+        if (!u || u.tile !== f.tile) { f.dead = true; continue; } // 부대가 떠나면 공사 취소
+        if (u.path.length) continue;
+      }
+      f.left -= 1;
+      if (f.left <= 0) { f.left = 0; f.builder = null; log(s, `${FORTS[f.kind].icon} ${s.nations[f.owner]?.name}의 ${FORTS[f.kind].name}이(가) 완공되었습니다.`, 'info', [f.owner]); }
+      continue;
+    }
+    if (f.kind === 'tower') {
+      for (const u of s.units) {
+        if (!enemy(s, f.owner, u.nation) || grid.dist(u.tile, f.tile) > 2) continue;
+        const dmg = Math.round(250 + u.troops * 0.01);
+        u.troops -= dmg;
+        u.morale -= 2;
+        s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
+      }
+    }
+  }
+  for (const f of s.forts) if (f.hp <= 0 && !f.dead) { f.dead = true; log(s, `💥 ${s.nations[f.owner]?.name}의 ${FORTS[f.kind].name}이(가) 부서졌습니다.`, 'battle', [f.owner]); }
+  s.forts = s.forts.filter((f) => !f.dead);
+}
+
+// 컴퓨터: 위협받는 국경 도시 앞(적 쪽 2~3칸)에 망루나 진지를 성 수비대가 지음
+export function aiForts(s, grid, nid, threat) {
+  const n = s.nations[nid];
+  if (n.gold < 30000 || (s.forts || []).filter((f) => f.owner === nid).length >= s.castles.filter((c) => c.owner === nid).length) return;
+  const c = s.castles.filter((x) => x.owner === nid && threat(x) > 0).sort((a, b) => threat(b) - threat(a))[0];
+  if (!c) return;
+  const foe = s.units.filter((u) => enemy(s, nid, u.nation)).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];
+  if (!foe) return;
+  let best = null, bd = Infinity;
+  // 성에서 2~3칸, 적에게 가장 가까운 내 땅 칸
+  const seen = new Set([c.tile]);
+  let ring = [c.tile];
+  for (let r = 1; r <= 3; r++) {
+    const next = [];
+    for (const t of ring) for (const nx of grid.nb[t]) if (!seen.has(nx) && grid.passable(nx)) { seen.add(nx); next.push(nx); if (r >= 2 && s.owner[nx] === nid && !fortAt(s, nx) && !s.units.some((u) => u.tile === nx)) { const d = grid.dist(nx, foe.tile); if (d < bd) { bd = d; best = nx; } } }
+    ring = next;
+  }
+  if (best === null) return;
+  startFort(s, grid, null, threat(c) > c.troops ? 'tower' : 'camp', best, nid);
 }

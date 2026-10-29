@@ -4,7 +4,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { POOLS } from './generals.js';
 import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
-import { lv } from './hex14build.js';
+import { hasPolicy, POLICY_UPKEEP } from './hex14policy.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
 const FOOD_PER = 0.02; // 병사 1명이 한 순(10일)에 먹는 병량
@@ -165,7 +165,7 @@ export function recruitChance(s, g, nid, cityId) {
   if (isRuler(g)) return 0;
   const pol = Math.max(0, ...Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && (cityId === undefined || x.castle === cityId)).map((x) => x.pol));
   if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35, 0.08 + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
-  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (cityId !== undefined && lv(s.castles[cityId], 'academy') ? 0.15 : 0)));
+  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0)));
 }
 
 export function recruit(s, gid, nid, rng = Math.random) {
@@ -218,8 +218,8 @@ export const jobGen = (s, c, role) => {
 };
 
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.trade * 5 * (0.4 + 0.6 * landShare(s, c)) * (1 + 0.2 * lv(c, 'market')) * (c.founding ? 0.3 : 1)));
-export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (1 + 0.2 * lv(c, 'farm')) * (c.founding ? 0.3 : 1)));
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.trade * 5 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (c.founding ? 0.3 : 1)));
+export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
@@ -234,15 +234,15 @@ export function govTurn(s, grid) {
       if (c.owner !== n.id) continue;
       if (c.auto || n.id !== s.playerId || s.spectator) autoJobs(s, c);
       const f = jobGen(s, c, 'farm'), t = jobGen(s, c, 'trade'), d = jobGen(s, c, 'draft');
-      const edu = lv(c, 'academy') ? 1.3 : 1;
+      const edu = 1;
       if (f) c.farm = Math.min(c.devMax, c.farm + Math.round((3 + f.pol / 6) * edu));
       if (t) c.trade = Math.min(c.devMax, c.trade + Math.round((3 + t.pol / 6) * edu));
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (lv(c, 'barracks') ? 1.5 : 1));
+      if (c.kind !== 'pass' && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1));
       // 성벽 보수, 인구 회복
-      c.dur = Math.min(c.maxDur, c.dur + c.maxDur * 0.05);
+      c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
       c.popMax = c.popMax || c.pop * 1.2;
       if (c.pop < c.popMax) c.pop = Math.round(Math.min(c.popMax, c.pop * 1.01 + 0.1) * 10) / 10;
     }
@@ -250,7 +250,7 @@ export function govTurn(s, grid) {
     const gens = Object.values(s.generals).filter((g) => g.nation === n.id && g.status === 'active').length;
     // 장수 녹봉 1명당 200, 시설 유지비 단계당 300
     const upkeep = s.castles.filter((c) => c.owner === n.id).reduce((a, c) => a + Object.values(c.bld || {}).reduce((x, y) => x + y, 0) * 300, 0);
-    n.gold = Math.round(n.gold + gold - gens * SALARY - upkeep);
+    n.gold = Math.round(n.gold + gold - gens * SALARY - upkeep - (n.policies || []).length * POLICY_UPKEEP);
     n.food = Math.round(n.food + food - foodUse(s, n.id));
     if (harvest && n.id === s.playerId) log(s, `🌾 가을 수확! 병량 +${fmtTroops(food)}`, 'info', [n.id]);
     if (n.gold < 0) n.gold = 0;
