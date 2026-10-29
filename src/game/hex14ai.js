@@ -58,7 +58,8 @@ export function aiTurn14(s, grid, nid, scope = null) {
     const troops = Math.min(commandCap(s, gids), spare);
     const t = pickTarget(s, grid, nid, c.tile, troops);
     if (!t) continue;
-    const r = sortie(s, grid, c.id, gids, troops);
+    // 성벽이 두꺼운 성을 칠 때는 금이 넉넉하면 공성병기를 끌고 감
+    const r = sortie(s, grid, c.id, gids, troops, t.dur > 1500 && n.gold > 25000);
     if (r.ok) order(s, grid, mark(r.unit), 'castle', t.id);
   }
   // 4) 징병: 금이 남으면 장수 있는 성부터 (유지비 1명당 0.5금/턴을 감당할 만큼)

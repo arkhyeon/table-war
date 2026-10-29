@@ -259,12 +259,28 @@ export const unitStats = (s, u) => {
   const aid = 1 + 0.12 * Math.min(2, Math.max(0, gs.length - 1));
   return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid, intel: best('intel') };
 };
+// 부대 나누기: 장수 하나를 떼어 병력을 머릿수만큼 나눠 옆 칸에 세움
+export function splitUnit(s, grid, uid, gid) {
+  const u = s.units.find((x) => x.id === uid);
+  if (!u || u.gens.length < 2 || !u.gens.includes(gid)) return { ok: false, msg: '장수가 둘 이상인 부대만 나눌 수 있습니다.' };
+  const occ = unitAt(s);
+  const spot = grid.nb[u.tile].find((t) => (grid.passable(t) || (grid.water[t] && grid.water[u.tile])) && !occ.has(t) && !s.castles.some((c) => c.tile === t) && !fortAt(s, t));
+  if (spot === undefined) return { ok: false, msg: '옆에 빈 칸이 없습니다.' };
+  const part = Math.round(u.troops / u.gens.length);
+  u.troops -= part;
+  u.max = Math.max(u.troops, Math.round(u.max * (1 - 1 / u.gens.length)));
+  u.gens = u.gens.filter((x) => x !== gid);
+  const v = { ...u, id: s.nextUnit++, gens: [gid], troops: part, max: part, tile: spot, path: [], order: null, mp: 0, wait: 0, cd: 0, siege: undefined, guard: 0 };
+  s.generals[gid].unit = v.id;
+  s.units.push(v);
+  return { ok: true, unit: v, msg: `${s.generals[gid].name} 부대 ${fmtTroops(part)} 갈라짐` };
+}
 // 지휘 한도: 가장 통솔 높은 장수 8천+통솔×800, 부장은 절반씩
 export const commandCap = (s, gids) => {
   const caps = gensOf(s, gids).map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
   return caps.length ? Math.round(caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) : 0;
 };
-export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6); // 하루에 평지 0.6칸 (기마 0.8칸)
+export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6) * (u.siege ? 0.7 : 1); // 하루에 평지 0.6칸 (기마 0.8칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
   if (grid.water?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
@@ -352,14 +368,15 @@ export function findPath(s, grid, from, to, nation, navy = false) {
 }
 
 // ── 출진: 성에서 장수와 병력을 뽑아 부대를 만듦 ──
-export function sortie(s, grid, castleId, gids, troops) {
+export const SIEGE_COST = 5000; // 공성병기(충차·투석기) 동반 비용
+export function sortie(s, grid, castleId, gids, troops, siege = false) {
   const c = s.castles[castleId];
   const gs = gids.map((id) => s.generals[id]);
   if (!gs.length || gs.some((g) => !g || g.castle !== castleId || g.nation !== c.owner)) return { ok: false, msg: '성에 있는 장수를 골라야 합니다.' };
   const cap = commandCap(s, gids);
   troops = Math.min(Math.floor(troops / 100) * 100, cap, c.troops - 500);
   if (troops < 1000) return { ok: false, msg: '병력이 모자랍니다 (성에 500은 남겨야 함).' };
-  const cost = hasPolicy(s, c.owner, 'military') ? 0 : Math.round(troops * SORTIE_COST);
+  const cost = (hasPolicy(s, c.owner, 'military') ? 0 : Math.round(troops * SORTIE_COST)) + (siege ? SIEGE_COST : 0);
   if (s.nations[c.owner].gold < cost) return { ok: false, msg: `출진 비용(군량 수송) 금 ${fmtGold(cost)}이 모자랍니다.` };
   // 성 옆 빈 칸에 나감
   const occ = unitAt(s);
@@ -367,7 +384,7 @@ export function sortie(s, grid, castleId, gids, troops) {
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
   s.nations[c.owner].gold -= cost;
-  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: hasPolicy(s, c.owner, 'military') ? 1.05 : undefined };
+  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: hasPolicy(s, c.owner, 'military') ? 1.05 : undefined, siege: siege || undefined };
   for (const g of gs) { g.castle = null; g.unit = u.id; }
   s.units.push(u);
   return { ok: true, unit: u, msg: `${gs[0].name} 부대 ${fmtTroops(troops)} 출진` };
@@ -426,7 +443,7 @@ export function stepDay(s, grid) {
       // 내 성에 들어가면 입성 (병력·장수가 성으로)
       if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { enter(s, u, c); break; }
       // 통제 구역: 적 부대 옆에 서면 그날은 더 못 감
-      if (grid.nb[nx].some((t) => { const o = occ.get(t); return o && enemy(s, u.nation, o.nation); })) { u.mp = 0; break; }
+      if (grid.nb[nx].some((t) => { const o = occ.get(t); if (o && enemy(s, u.nation, o.nation)) return true; const f = fortAt(s, t); return f && f.kind === 'palisade' && !f.left && enemy(s, u.nation, f.owner); })) { u.mp = 0; break; }
     }
   }
   s.units = s.units.filter((u) => !u.dead);
@@ -444,7 +461,7 @@ export function stepDay(s, grid) {
     const a = unitStats(s, u), d = unitStats(s, tgt);
     // 물 위에서는 수군 장수가 없으면 약함
     const sea = (x) => (grid.water[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
-    let dmg = u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
+    let dmg = (u.siege ? 0.9 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
     maybeDuel(s, u, tgt, rng);
     // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
@@ -507,7 +524,8 @@ export function stepDay(s, grid) {
     // 물 위에서 치면 약함 (수군 장수·조선소·수군 육성이 있으면 괜찮음)
     const sea = grid.water[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
     a.atk *= sea;
-    const wall = u.troops * 0.004 * (a.atk / 100);
+    // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
+    const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1);
     c.dur = Math.max(0, c.dur - wall);
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1) * rng.range(0.9, 1.1);
     c.troops -= kill;

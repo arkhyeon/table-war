@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, splitUnit, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14 } from '../game/hex14ai.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
@@ -263,7 +263,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [peek, setPeek] = useState(false); // 사신 창을 잠시 접고 그 나라를 지도에서 봄
+  const [peek, setPeek] = useState(false);
+  const [withSiege, setWithSiege] = useState(false); // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [speed, setSpeed] = useState(420);
   const [toastMsg, setToast] = useState(null);
   const [sheet, setSheet] = useState(false);
@@ -457,16 +458,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.beginPath(); ctx.moveTo(cx - sz * 0.4, cy); ctx.lineTo(cx + sz * 0.4, cy - sz * 1.1); ctx.moveTo(cx + sz * 0.4, cy); ctx.lineTo(cx - sz * 0.4, cy - sz * 1.1); ctx.stroke();
         ctx.fillStyle = '#a06a35'; ctx.fillRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32); ctx.strokeRect(cx - sz * 0.6, cy - sz * 1.55, sz * 1.2, sz * 0.32);
         ctx.beginPath(); ctx.moveTo(cx - sz * 0.75, cy - sz * 1.55); ctx.lineTo(cx, cy - sz * 2.1); ctx.lineTo(cx + sz * 0.75, cy - sz * 1.55); ctx.closePath(); ctx.fillStyle = '#4c5866'; ctx.fill(); ctx.stroke();
-      } else if (f.kind === 'catapult') {
-        // 투석기: 바퀴 달린 틀과 긴 팔, 끝에 돌
-        ctx.fillStyle = '#7a4b22';
-        ctx.fillRect(cx - sz * 0.7, cy - sz * 0.25, sz * 1.4, sz * 0.22); ctx.strokeRect(cx - sz * 0.7, cy - sz * 0.25, sz * 1.4, sz * 0.22);
-        ctx.fillRect(cx - sz * 0.1, cy - sz * 0.75, sz * 0.2, sz * 0.55);
-        ctx.lineWidth = Math.max(sz * 0.14, px); ctx.strokeStyle = '#5a3416';
-        ctx.beginPath(); ctx.moveTo(cx + sz * 0.6, cy - sz * 0.4); ctx.lineTo(cx - sz * 0.55, cy - sz * 1.35); ctx.stroke();
-        ctx.lineWidth = Math.max(sz * 0.08, px); ctx.strokeStyle = '#3a2412';
-        ctx.fillStyle = '#8d8d8d'; ctx.beginPath(); ctx.arc(cx - sz * 0.6, cy - sz * 1.4, sz * 0.2, 0, 7); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#4a2c12'; for (const dx of [-0.45, 0.45]) { ctx.beginPath(); ctx.arc(cx + dx * sz, cy + sz * 0.05, sz * 0.2, 0, 7); ctx.fill(); ctx.stroke(); }
       } else {
         ctx.fillStyle = '#8a5a2b';
         for (let q = -3; q <= 3; q++) { const x = cx + q * sz * 0.26; ctx.beginPath(); ctx.moveTo(x - sz * 0.1, cy + sz * 0.3); ctx.lineTo(x - sz * 0.1, cy - sz * 0.4); ctx.lineTo(x, cy - sz * 0.65); ctx.lineTo(x + sz * 0.1, cy - sz * 0.4); ctx.lineTo(x + sz * 0.1, cy + sz * 0.3); ctx.closePath(); ctx.fill(); ctx.stroke(); }
@@ -984,10 +975,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     );
                   })()}
                   <Slider min={0} max={maxAmt} step={100} value={Math.min(amt, maxAmt)} onChange={setAmt} style={{ width: '100%' }} />
+                  <label style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                    <input type="checkbox" checked={withSiege} onChange={(e) => setWithSiege(e.target.checked)} /> 🪨 공성병기 끌고 감 (금 {fmtGold(SIEGE_COST)}) <span className="muted">성벽 5배로 깎음 · 이동 −30% · 들판 싸움 −10%</span>
+                  </label>
                   <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
                     <button onClick={() => setSortieOpen(false)}>취소</button>
                     <button className="primary" disabled={!pickG.length || amt < 1000} onClick={() => {
-                      const r = act((s) => sortie(s, grid, selCastle.id, pickG, amt));
+                      const r = act((s) => sortie(s, grid, selCastle.id, pickG, amt, withSiege));
                       if (r?.ok) { setSortieOpen(false); setSel({ type: 'unit', id: r.unit.id }); setSheet(false); toast('부대가 나왔습니다. 지도에서 목적지·공격할 곳을 누르세요.'); }
                     }}>출진</button>
                   </div>
@@ -1023,12 +1017,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
           <div className="card">
             <h3 style={{ margin: '0 0 6px' }}>⚑ {gs.map((g) => g.name).join('·')} 부대 <small className="muted">{game.nations[selUnit.nation].name}</small></h3>
             <div className="row" style={{ gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
-              {gs.map((g) => <div key={g.id} style={{ textAlign: 'center', fontSize: 11 }}><Face g={g} size={52} col={game.nations[selUnit.nation].color} /><div>{g.name}</div><div className="muted">무{g.war} 통{g.lead} 지{g.intel}</div></div>)}
+              {gs.map((g) => <div key={g.id} style={{ textAlign: 'center', fontSize: 11 }}><Face g={g} size={52} col={game.nations[selUnit.nation].color} /><div>{g.name}</div><div className="muted">무{g.war} 통{g.lead} 지{g.intel}</div>
+                {selUnit.nation === pid && gs.length > 1 && <button className="sm" disabled={playing} title="이 장수를 떼어 병력을 나눠 옆 칸에 세움" onClick={() => act((s) => splitUnit(s, grid, selUnit.id, g.id))}>✂️ 나누기</button>}</div>)}
             </div>
             <div className="kv">
               <span>병력</span><span>{fmtTroops(selUnit.troops)} / {fmtTroops(selUnit.max)}</span>
               <span>사기 (파란 막대)</span><span>{Math.round(selUnit.morale)} <small className="muted">5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일</small></span>
-              <span>공·방</span><span>{Math.round(st.atk)} · {Math.round(st.def)}</span>
+              <span>공·방</span><span>{Math.round(st.atk)} · {Math.round(st.def)}{selUnit.siege ? ' · 🪨 공성병기' : ''}</span>
               <span>전법</span><span>{gs.map(tacticName).filter(Boolean).join(', ') || '없음'}</span>
               <span>보급</span><span style={{ color: selUnit.cut ? 'var(--danger)' : undefined }}>{selUnit.cut ? '끊김 (병력·사기 감소)' : '이어짐'}</span>
               <span>목표</span><span>{tgt}{days ? ` (약 ${days}일)` : ''}</span>
@@ -1053,7 +1048,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     </div>
                   );
                 })()}
-                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대 매일 공격 · 투석기: 적 성 2칸 자리, 성벽 매일 −300 · 목책: 적 길막이(물길로는 돌아옴). 부대가 그 칸에 멈춰 지어야 합니다.</div>
+                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대 매일 공격 · 목책: 바로 세움, 적이 못 지나가고 옆에 온 적은 그날 멈춤(이동하며 여러 개로 길 막기). 진지·망루는 부대가 그 칸에 멈춰 지어야 합니다.</div>
               </>
             )}
           </div>
@@ -1221,7 +1216,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕯️ 장수는 해마다 나이를 먹고 60세 무렵부터 세상을 떠날 수 있습니다.</li>
                 <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
                 <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
-                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대 매일 공격)·🪨투석기(적 성 2칸 자리, 성벽 매일 −300)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
+                <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대 매일 공격)·목책(바로 세움, 1500금, 적 길막이+옆에 오면 멈춤)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
+                <li>🪨 출진 때 공성병기를 끌고 가면 성벽을 5배로 깎습니다(느려짐). 장수 여럿 부대는 「✂️ 나누기」로 언제든 갈라 협공할 수 있습니다.</li>
+                <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>
                 <li>🏗️ 세력 탭의 「새 도시 세우기」로 내 땅 빈 곳(다른 성과 4칸 이상, 초록 칸)에 도시를 세웁니다. 완공되면 주변 땅이 그 도시 관할이 됩니다.</li>
                 <li>🎖️ 군단: 도시 몇 곳과 도독을 정해 맡기면 컴퓨터가 그 도시들로 알아서 싸웁니다.</li>

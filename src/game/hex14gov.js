@@ -225,8 +225,8 @@ export const jobGen = (s, c, role) => {
 
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
 // 금 수입: 도시 기본 세금 1,200(인구와 상관없이, 작은 나라도 움직일 수 있게) + 상업×5 × 관할 땅 비율
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (c.founding ? 0.3 : 1)));
-export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (c.founding ? 0.3 : 1)));
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * (c.founding ? 0.3 : 1)));
+export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
@@ -256,7 +256,7 @@ export function govTurn(s, grid) {
     // 장수 녹봉: 1명당 금 150
     const gens = Object.values(s.generals).filter((g) => g.nation === n.id && g.status === 'active').length;
     // 장수 녹봉 1명당 200, 시설 유지비 단계당 300
-    const upkeep = s.castles.filter((c) => c.owner === n.id).reduce((a, c) => a + Object.values(c.bld || {}).reduce((x, y) => x + y, 0) * 300, 0);
+    const upkeep = s.castles.filter((c) => c.owner === n.id).reduce((a, c) => a + ((c.bld?.wall || 0) + (c.bld?.shipyard || 0)) * 300, 0);
     n.gold = Math.round(n.gold + gold - gens * SALARY - upkeep - (n.policies || []).length * POLICY_UPKEEP);
     n.food = Math.round(n.food + food - foodUse(s, n.id));
     if (harvest && n.id === s.playerId) log(s, `🌾 가을 수확! 병량 +${fmtTroops(food)}`, 'info', [n.id]);
