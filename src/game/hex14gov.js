@@ -44,13 +44,17 @@ export function initGov(s, rng) {
     const mine = s.castles.filter((c) => c.owner === n.id && c.kind !== 'pass').sort((a, b) => b.troops - a.troops);
     if (!mine.length) continue;
     if (!byPool.has(n.pools[0])) byPool.set(n.pools[0], []);
-    byPool.get(n.pools[0]).push({ n, mine, k: 0, got: 0 });
+    // 시작 장수 상한: 도시 수×3+1명(최소 4명). 작은 나라가 녹봉에 짓눌리지 않게, 남는 인물은 나중에 재야로
+    const have = Object.values(s.generals).filter((g) => g.nation === n.id && g.status === 'active').length;
+    byPool.get(n.pools[0]).push({ n, mine, k: 0, got: 0, room: Math.max(0, Math.max(4, mine.length * 3 + 1) - have) });
   }
   for (const [pool, members] of byPool) {
     const list = [...(POOLS[pool] || []), ...(EXTRA[pool] || [])].filter((d) => !used.has(d.name));
     for (const d of list) {
-      // 도시 하나당 받은 장수가 가장 적은 나라에게
-      const m = members.reduce((a, b) => (b.got / b.mine.length < a.got / a.mine.length ? b : a));
+      // 도시 하나당 받은 장수가 가장 적은 나라에게 (자리가 남은 나라만)
+      const open = members.filter((x) => x.got < x.room);
+      if (!open.length) break;
+      const m = open.reduce((a, b) => (b.got / b.mine.length < a.got / a.mine.length ? b : a));
       used.add(d.name);
       const id = `x_${m.n.id}_${m.k}`;
       s.generals[id] = { id, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };

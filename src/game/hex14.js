@@ -121,7 +121,7 @@ function pickCities(world, grid, base) {
       const want = o === -1 ? Math.round(regs.length / 4) : Math.max(2, Math.round(regs.length / 4));
       let have = out.filter((c) => (base.regions[grid.region[c.tile]]?.owner ?? -1) === o).length;
       const order = regs.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
-      for (const g of [gap, Math.max(2, Math.round(gap / 2))]) for (const r of order) {
+      for (const g of [gap, Math.max(2, Math.round(gap / 2)), 2]) for (const r of order) {
         if (have >= Math.min(want, regs.length)) break;
         const t = grid.castleTile[r.id];
         if (out.some((c) => c.tile === t) || !far(t, g)) continue;
