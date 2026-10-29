@@ -2,6 +2,8 @@
 import { foodUse } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
+import { aiPeople } from './hex14people.js';
+import { makeRng } from './rng.js';
 import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy } from './hex14.js';
 
 // 성 주변 위협: 6칸 안 적 부대 병력 합
@@ -81,6 +83,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     aiBuild(s, grid, nid, threat);
     aiForts(s, grid, nid, threat);
     aiPolicy(s, nid, mine.some((c) => threat(c) > 0), n.food < foodUse(s, nid) * 12);
+    aiPeople(s, grid, nid, makeRng(`aip:${s.seed}:${s.turn}:${nid}`));
   }
   // 5) 장수 재배치: 장수 없는 성에 남는 장수를 보냄 (입성 명령 대신 즉시 이동: 같은 나라 성끼리)
   const empty = mine.filter((c) => !Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'));

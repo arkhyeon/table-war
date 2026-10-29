@@ -5,6 +5,7 @@ import { POOLS } from './generals.js';
 import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
 import { hasPolicy, POLICY_UPKEEP } from './hex14policy.js';
+import { initPeople, peopleTurn } from './hex14people.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
 const FOOD_PER = 0.02; // 병사 1명이 한 순(10일)에 먹는 병량
@@ -65,6 +66,7 @@ export function initGov(s, rng) {
     addFree(s, d, rng.pick(cities), `f0_${i}`);
   }
   for (const c of s.castles) if (c.owner !== null) autoJobs(s, c);
+  initPeople(s, rng);
 }
 
 function addFree(s, d, c, id) {
@@ -179,7 +181,7 @@ export function recruit(s, gid, nid, rng = Math.random) {
   if (rng() >= recruitChance(s, g, nid, g.status === 'free' ? city.id : undefined)) return { ok: true, msg: `${g.name}이(가) 거절했습니다.` };
   const at = city;
   if (g.status === 'prisoner' && s.nations[g.nation]?.alive) addRel(s, nid, g.nation, -5);
-  Object.assign(g, { nation: nid, status: 'active', castle: at.id, held: 0, captor: null });
+  Object.assign(g, { nation: nid, status: 'active', castle: at.id, held: 0, captor: null, loyal: g.status === 'prisoner' ? 50 : 65 });
   log(s, `⭐ ${g.name}(무${g.war}/통${g.lead}/지${g.intel}/정${g.pol})이(가) ${s.nations[nid].name}에 들어왔습니다.`, 'info', [nid]);
   return { ok: true, msg: `${g.name} 등용 성공!` };
 }
@@ -240,7 +242,7 @@ export function govTurn(s, grid) {
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
       c.popMax = c.popMax || c.pop * 1.2;
@@ -263,6 +265,7 @@ export function govTurn(s, grid) {
     }
   }
   spreadLand(s, grid);
+  peopleTurn(s);
   diplomacyTurn(s, rng);
   people(s, rng);
 }
@@ -273,7 +276,7 @@ function spreadLand(s, grid) {
   for (const u of s.units) { near.add(u.tile); for (const t of grid.nb[u.tile]) near.add(t); }
   const dt = districtTiles(s);
   for (const c of s.castles) {
-    if (c.owner === null || c.kind === 'pass') continue;
+    if (c.owner === null || c.kind === 'pass' || c.unrest >= s.turn) continue;
     let n = 4 + Math.round((s.generals[c.jobs?.farm]?.pol || 40) / 20);
     for (const t of dt[c.id]) {
       if (n <= 0) break;

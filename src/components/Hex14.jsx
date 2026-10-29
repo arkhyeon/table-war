@@ -12,6 +12,7 @@ import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
 import { weatherText, uniqueOf } from '../game/hex14extra.js';
 import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort } from '../game/hex14build.js';
+import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
@@ -823,6 +824,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
   const myPrisoners = Object.values(game.generals).filter((g) => g.status === 'prisoner' && g.captor === pid);
   const freeIn = (c) => Object.values(game.generals).filter((g) => g.status === 'free' && g.castle === c.id);
+  const Loyal = ({ g }) => (g.ruler ? null : <small style={{ color: loyalOf(g) < 40 ? 'var(--danger)' : 'var(--muted)', marginLeft: 2 }}>충{loyalOf(g)}</small>);
   const Face = ({ g, size = 26, col = '#fff' }) => <img src={portraitURL(g, col)} alt="" width={size} height={size} style={{ verticalAlign: 'middle', marginRight: 4, borderRadius: '50%' }} />;
   const tacticName = (g) => {
     const un = uniqueOf(g);
@@ -845,7 +847,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
             {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))}</span></>}
             {selCastle.kind === 'pass' && <><span>관문</span><span>수입은 없지만 성벽이 두꺼워 길목을 막음</span></>}
-            <span>장수</span><span>{castleGens.length ? castleGens.map((g) => <span key={g.id} style={{ display: 'inline-block', marginRight: 6 }}><Face g={g} size={22} col={ownerColor(game, selCastle.owner)} />{g.name}</span>) : '없음'}</span>
+            <span>장수</span><span>{castleGens.length ? castleGens.map((g) => <span key={g.id} style={{ display: 'inline-block', marginRight: 6 }}><Face g={g} size={22} col={ownerColor(game, selCastle.owner)} />{g.name}{selCastle.owner === pid && <Loyal g={g} />}</span>) : '없음'}</span>
           </div>
           {(game.corps || []).filter((co) => co.cities.includes(selCastle.id)).map((co) => <div key={co.id} className="muted" style={{ fontSize: 12, marginTop: 4 }}>🎖️ {game.generals[co.leader]?.name} 군단이 맡은 도시입니다 (직접 출진도 가능)</div>)}
           {selCastle.port && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>⚓ 항구: 여기서 나간 부대는 배로 바닷길을 갈 수 있습니다.</div>}
@@ -893,6 +895,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
               {freeIn(selCastle).length ? ` · 재야 ${freeIn(selCastle).length}명` : ''}
             </div>
           )}
+          {selCastle.owner !== pid && selCastle.owner !== null && enemy(game, pid, selCastle.owner) && !playing && (
+            <div className="row" style={{ gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+              <small className="muted" style={{ width: '100%' }}>🕵️ 계략 {selCastle.schemed === game.turn ? '(이번 순 사용함)' : ''}</small>
+              {Object.entries(SCHEMES).map(([k, sc]) => (
+                <button key={k} className="sm" title={sc.desc} disabled={selCastle.schemed === game.turn || me.gold < sc.cost || schemeChance(game, pid, selCastle, k) <= 0} onClick={() => act((s) => doScheme(s, pid, selCastle.id, k))}>{sc.icon} {sc.name} {Math.round(schemeChance(game, pid, selCastle, k) * 100)}% · {fmtGold(sc.cost)}</button>
+              ))}
+            </div>
+          )}
           {selCastle.owner !== null && (selCastle.owner === pid || Object.keys(selCastle.bld || {}).length > 0) && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
               <div className="row" style={{ justifyContent: 'space-between' }}><b>🏗️ 시설</b><small className="muted">{usedSlots(selCastle)}/{slotsOf(selCastle)}칸</small></div>
@@ -927,7 +937,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         const nx = e.target.checked ? [...pickG, g.id].slice(-3) : pickG.filter((x) => x !== g.id);
                         setPickG(nx);
                         setAmt(Math.max(0, Math.min(commandCap(game, nx), selCastle.troops - 500)));
-                      }} /> <Face g={g} col={me.color} /> {g.name} <small className="muted">무{g.war} 통{g.lead} 지{g.intel}{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
+                      }} /> <Face g={g} col={me.color} /> {g.name}<Loyal g={g} /> <small className="muted">무{g.war} 통{g.lead} 지{g.intel}{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
                     </label>
                   ))}
                   <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(amt)} / 지휘 한도 {fmtTroops(cap)} · 출진 비용 금 {fmtGold(Math.round(Math.min(amt, maxAmt) / 2))}</div>
@@ -1032,6 +1042,15 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <span>병량</span><span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>{fmtTroops(food)} (−{fmtTroops(use)}/순 · 수확까지 {turnsToHarvest}순)</span>
                 <span>병력</span><span>{fmtTroops(powerOf(game, pid))}</span>
                 <span>장수</span><span>{Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length}명</span>
+                {(() => {
+                  const gs = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && !g.ruler);
+                  const avg = gs.length ? Math.round(gs.reduce((a, g) => a + loyalOf(g), 0) / gs.length) : 100;
+                  const low = gs.filter((g) => loyalOf(g) < 40);
+                  return <><span>충성</span><span style={{ color: low.length ? 'var(--danger)' : undefined }}>평균 {avg}{low.length ? ` · 불만 ${low.length}명 (${low.slice(0, 3).map((g) => g.name).join(', ')}${low.length > 3 ? '…' : ''})` : ''}</span></>;
+                })()}
+              </div>
+              <div className="row" style={{ gap: 4, marginTop: 6 }}>
+                <button className="sm" disabled={playing || me.gold < rewardCost(game, pid)} title="충성 35 아래면 다른 나라로 떠날 수 있습니다. 금이 바닥나면 충성이 떨어집니다." onClick={() => act((s) => rewardAll(s, pid))}>🎁 전체 포상 (금 {fmtGold(rewardCost(game, pid))}, 충성 +12)</button>
               </div>
               <div className="row" style={{ gap: 4, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <small>🏪 시장</small>
@@ -1161,6 +1180,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>무력 75 이상 대장끼리 붙으면 가끔 <b>일기토</b>. 지면 사기가 크게 꺾이고 사로잡히기도 합니다.</li>
                 <li>날씨: ❄️ 겨울 눈은 북쪽 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
                 <li>💰 금 지출: 장수 녹봉 1명당 200/순, 시설 유지비 단계당 300/순, 출진 비용 병사 2명당 1금, 징병 1명당 10금(병영 8금).</li>
+                <li>🎁 장수마다 충성이 있습니다. 금이 바닥나면 떨어지고, 35 아래면 가끔 다른 나라로 떠납니다. 세력 탭 「전체 포상」 한 번으로 챙기세요.</li>
+                <li>🕵️ 적 도시를 누르면 계략: 유언비어(수비병↓·자원병 멈춤), 이간(장수 충성↓), 매수(충성 낮은 장수 빼 오기). 지력 높은 장수가 있으면 잘 됩니다.</li>
+                <li>🕯️ 장수는 해마다 나이를 먹고 60세 무렵부터 세상을 떠날 수 있습니다.</li>
                 <li>👑 군주가 사로잡히거나 죽으면 통솔+정치가 가장 높은 장수가 잇고 사기가 꺾입니다. 이을 사람이 없으면 나라가 무너집니다.</li>
                 <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
                 <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점)·망루(2칸 안 적 매일 공격)·목책(적 길막이)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
