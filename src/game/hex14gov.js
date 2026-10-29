@@ -86,30 +86,47 @@ export const PACT = { ally: '동맹', truce: '정전' };
 
 export const powerOf = (s, nid) => s.castles.filter((c) => c.owner === nid).reduce((a, c) => a + c.troops, 0) + s.units.filter((u) => u.nation === nid).reduce((a, u) => a + u.troops, 0);
 
+// 사신: 정치가 가장 높은 장수(부대에 나가 있지 않은)가 맡음 — 제안 성공률과 친선 효과가 달라짐
+export function envoyOf(s, nid) {
+  const g = Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && !x.unit).sort((x, y) => y.pol - x.pol)[0];
+  const pol = g ? g.pol : 40;
+  return { g: g || null, pol, bonus: Math.max(-0.05, Math.min(0.2, (pol - 60) / 200)), mult: 0.7 + pol / 150 };
+}
+// 한 순 금 수입 (도시 세금 합)
+export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === nid ? goldOf(s, c) : 0), 0);
+// 친선 금액: 주는 나라와 받는 나라 수입(2순 치)의 기하평균 — 내가 커질수록, 상대가 클수록 같은 우호에 돈이 더 듦
+const giftBase = (s, a, b) => Math.max(5000, Math.sqrt(Math.max(5000, incomeOf(s, a) * 2) * Math.max(5000, incomeOf(s, b) * 2)));
+export const giftSizes = (s, a, b) => { const small = Math.round(giftBase(s, a, b) / 1000) * 1000; return [small, small * 3]; };
+export const giftGain = (s, a, b, amt) => Math.min(30, Math.round((amt / giftBase(s, a, b)) * 8 * envoyOf(s, a).mult));
+// 약소국 결속: 도시 4개 이하면 자원병 +50%·징병비 −25%·재야 등용 +10%p·성 수비 피해 −15%
+export const isSmall = (s, nid) => nid !== null && nid !== undefined && nid >= 0 && s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length <= 4;
+
 // 받아들일 확률 (b가 a의 제안을)
 export function acceptChance(s, a, b, type) {
   const rel = relOf(s, a, b);
+  const env = envoyOf(s, a).bonus;
   const pa = powerOf(s, a), pb = powerOf(s, b);
   if (type === 'ally') {
     // 가장 강한 나라를 함께 두려워하면 잘 받아줌
     const top = s.nations.filter((n) => n.alive).sort((x, y) => powerOf(s, y.id) - powerOf(s, x.id))[0];
     const fear = top && top.id !== a && top.id !== b ? 0.2 : -0.1;
-    return Math.max(0, Math.min(0.95, (rel - 35) / 60 + fear));
+    return Math.max(0, Math.min(0.95, (rel - 35) / 60 + fear + env));
   }
   // 정전: 약한 쪽이 더 바람. 지키는 전략(수성·사방 방어·내실)인 나라는 노리는 상대가 아니면 잘 받아 줌
   const nb = s.nations[b];
   const calm = ['hold', 'center', 'build'].includes(nb?.strat) && nb.focus !== a ? 0.25 : 0;
-  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm));
+  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm + env));
 }
 
 export function gift(s, a, b, amt) {
   const n = s.nations[a];
   if (n.gold < amt) return { ok: false, msg: '금이 모자랍니다.' };
+  const up = giftGain(s, a, b, amt);
   n.gold -= amt;
   s.nations[b].gold += amt;
-  addRel(s, a, b, Math.round(amt / 1000));
+  addRel(s, a, b, up);
   log(s, `🎁 ${n.name}이(가) ${s.nations[b].name}에 금 ${fmtGold(amt)}을(를) 보내 친선했습니다.`, 'diplo', [a, b]);
-  return { ok: true, msg: `친선: ${s.nations[b].name} 우호 +${Math.round(amt / 1000)}` };
+  return { ok: true, msg: `친선: ${s.nations[b].name} 우호 +${up}` };
 }
 
 export function propose(s, a, b, type, rng = Math.random) {
@@ -173,7 +190,7 @@ export function recruitChance(s, g, nid, cityId) {
   if (isRuler(g)) return 0;
   const pol = Math.max(0, ...Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && (cityId === undefined || x.castle === cityId)).map((x) => x.pol));
   if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35, 0.08 + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
-  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0)));
+  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0) + (isSmall(s, nid) ? 0.1 : 0)));
 }
 
 export function recruit(s, gid, nid, rng = Math.random) {
@@ -245,6 +262,7 @@ export function govTurn(s, grid) {
   for (const n of s.nations) {
     if (!n.alive) continue;
     let gold = 0, food = 0;
+    const small = isSmall(s, n.id);
     for (const c of s.castles) {
       if (c.owner !== n.id) continue;
       if (c.auto || n.id !== s.playerId || s.spectator) autoJobs(s, c);
@@ -255,7 +273,7 @@ export function govTurn(s, grid) {
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
       c.popMax = c.popMax || c.pop * 1.2;
@@ -317,7 +335,7 @@ function diplomacyTurn(s, rng) {
       const m = cand.length ? rng.pick(cand) : null;
       if (m) propose(s, n.id, m.id, 'ally', rng);
     }
-    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id)); if (m) gift(s, n.id, m.id, 10000); }
+    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id)); const amt = m && giftSizes(s, n.id, m.id)[0]; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
     const foe = ranked.find((m) => m.id !== n.id && !pactOf(s, n.id, m.id) && powerOf(s, m.id) > powerOf(s, n.id) * 1.8);
     if (foe && rng() < 0.4) propose(s, n.id, foe.id, 'truce', rng);
   }

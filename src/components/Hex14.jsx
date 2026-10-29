@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
-import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
@@ -1108,6 +1108,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   const low = gs.filter((g) => loyalOf(g) < 40);
                   return <><span>충성</span><span style={{ color: low.length ? 'var(--danger)' : undefined }}>평균 {avg}{low.length ? ` · 불만 ${low.length}명 (${low.slice(0, 3).map((g) => g.name).join(', ')}${low.length > 3 ? '…' : ''})` : ''}</span></>;
                 })()}
+                {isSmall(game, pid) && <><span>약소국 결속</span><span style={{ color: '#6fd37f' }}>도시 4개 이하: 자원병 +50% · 징병비 −25% · 재야 등용 +10%p · 성 수비 피해 −15%</span></>}
                 {sprawlOf(game, pid) < 1 && <><span>영토 관리</span><span className="muted">도시가 15개를 넘어 수입·수확·자원병 −{Math.round((1 - sprawlOf(game, pid)) * 100)}%</span></>}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6 }}>
@@ -1179,6 +1180,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
           {tab === 'diplo' && (
             <div className="card" style={{ fontSize: 13 }}>
+              {(() => {
+                const e = envoyOf(game, pid);
+                return <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>🕊️ 사신 {e.g ? <><Face g={e.g} col={me.color} /> {e.g.name} (정치 {e.pol})</> : '없음'} — 제안 성공률 {e.bonus >= 0 ? '+' : ''}{Math.round(e.bonus * 100)}%, 친선 효과 ×{e.mult.toFixed(2)} <small>(정치 높은 장수가 성에 있으면 맡음)</small></div>;
+              })()}
               {game.nations.filter((n) => n.alive && n.id !== pid).sort((a, b) => powerOf(game, b.id) - powerOf(game, a.id)).map((n) => {
                 const p = pactOf(game, pid, n.id), r = Math.round(relOf(game, pid, n.id));
                 return (
@@ -1191,14 +1196,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     <div className="row" style={{ gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                       <small>우호 {r}{p ? ` · ${PACT[p.type]} (${p.until - game.turn}턴 남음)` : ''}{STRATS[n.strat] ? <span title={STRATS[n.strat].desc}> · 전략 {STRATS[n.strat].name}{n.focus !== null && n.focus !== undefined && game.nations[n.focus] ? `(${n.focus === pid ? '우리' : game.nations[n.focus].name} 노림)` : ''}</span> : null}</small>
                       <span style={{ marginLeft: 'auto' }} />
-                      <button className="sm" disabled={playing || me.gold < 10000} onClick={() => act((s) => gift(s, pid, n.id, 10000))}>🎁 친선 1만</button>
+                      {giftSizes(game, pid, n.id).map((amt, i) => <button key={i} className="sm" disabled={playing || me.gold < amt} title={`우호 +${giftGain(game, pid, n.id, amt)}`} onClick={() => act((s) => gift(s, pid, n.id, amt))}>🎁 {fmtGold(amt)} (+{giftGain(game, pid, n.id, amt)})</button>)}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
                     </div>
                   </div>
                 );
               })}
-              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>동맹(1년)·정전(반년) 중에는 서로 칠 수 없습니다. 친선으로 우호를 올리면 잘 받아 줍니다. 도시를 빼앗으면 우호가 크게 떨어집니다.</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>동맹(1년)·정전(반년) 중에는 서로 칠 수 없습니다. 친선 금액은 우리와 상대 나라 수입에 맞춰 정해집니다(서로 클수록 비쌈). 괄호 안 우호 상승을 보고 고르세요. 도시를 빼앗으면 우호가 크게 떨어집니다.</div>
             </div>
           )}
           {tab === 'people' && (
@@ -1256,6 +1261,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(수비 2만 넘으면 안전).</li>
+                <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선 금액은 우리·상대 수입에 맞춰 정해져, 나라가 커지면 친선도 커집니다.</li>
+                <li>🛡️ 도시 4개 이하 약소국은 결속 보너스(자원병 +50%, 징병비 −25%, 재야 등용 +10%p, 성 수비 피해 −15%)를 받습니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>

@@ -7,7 +7,7 @@ import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
-import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
@@ -567,7 +567,8 @@ export function stepDay(s, grid) {
     // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
     const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1);
     c.dur = Math.max(0, c.dur - wall);
-    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1) * rng.range(0.9, 1.1);
+    // 약소국은 결사 항전: 수비병 피해 −15%
+    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1);
     c.troops -= kill;
     u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1);
     u.morale -= walled ? 0.5 : 0;
@@ -738,7 +739,7 @@ export function endTurn14(s, grid) {
 }
 
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
-export const draftCost = (c, s) => (s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10);
+export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
