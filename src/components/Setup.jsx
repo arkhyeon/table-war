@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
 import SaveSlots from './SaveSlots.jsx';
+import { cloudList } from '../cloud.js';
 import { SCENARIOS, canWorld, worldVariant } from '../game/scenarios.js';
 import { generateWorld, MAP_DETAIL } from '../game/mapgen.js';
 import { fmtYear } from '../game/weather.js';
@@ -9,7 +10,7 @@ import { createGame } from '../game/setup.js';
 import { createHex14 } from '../game/hex14.js';
 import { CIVS } from '../game/civs.js';
 import { nationRegions } from '../game/engine.js';
-import { loadHistory } from '../storage.js';
+import { loadHistory, SLOT_COUNT } from '../storage.js';
 import { ACHIEVEMENTS, loadAchievements } from '../game/achievements.js';
 
 const randomSeed = () => Math.random().toString(36).slice(2, 8);
@@ -23,6 +24,8 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [player, setPlayer] = useState(0);
   const [error, setError] = useState('');
   const [showSaves, setShowSaves] = useState(false);
+  const [cloudHas, setCloudHas] = useState(false); // 클라우드에 저장이 있으면 이어하기 버튼을 보임
+  useEffect(() => { let on = true; cloudList(SLOT_COUNT).then((m) => on && setCloudHas(Object.keys(m).length > 0)); return () => { on = false; }; }, []);
   const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
@@ -70,7 +73,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             <div className="title">⚔️ TABLE WAR</div>
             <div className="muted">역사 속 문명과 장수로 펼치는 턴제 땅따먹기 전략 게임</div>
           </div>
-          {hasSave && (
+          {(hasSave || cloudHas) && (
             <button className="primary" onClick={() => setShowSaves((v) => !v)}>
               📂 이어하기·불러오기
             </button>

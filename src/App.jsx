@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Setup from './components/Setup.jsx';
 import Game from './components/Game.jsx';
 import Hex14 from './components/Hex14.jsx';
 import { generateWorld } from './game/mapgen.js';
 import { getScenario } from './game/scenarios.js';
 import { loadSave, writeSave, writeHistory, loadSlot, SLOT_COUNT } from './storage.js';
+import { cloudSave } from './cloud.js';
+import { describe } from './components/SaveSlots.jsx';
 
 const hasSlots = () => Array.from({ length: SLOT_COUNT }, (_, i) => loadSlot(i + 1)).some(Boolean);
 
@@ -12,11 +14,19 @@ export default function App() {
   const [session, setSession] = useState(null); // { world, scn }
   const [game, setGame] = useState(null);
   const [gen, setGen] = useState(0); // 불러올 때마다 게임 화면을 새로 그림
+  const cloudKey = useRef(null);
 
   useEffect(() => {
     if (!game || !session) return;
-    writeSave({ scenarioId: game.scenarioId, seed: game.seed, state: game });
+    const data = { scenarioId: game.scenarioId, seed: game.seed, state: game };
+    writeSave(data);
     writeHistory(game.appearHistory);
+    // 클라우드 자동 저장은 턴이 바뀔 때만 (하루마다 쓰면 너무 잦음)
+    const key = `${game.turn}:${game.over ? 1 : 0}`;
+    if (cloudKey.current !== key) {
+      cloudKey.current = key;
+      cloudSave(0, data, describe({ ...data, savedAt: Date.now() }));
+    }
   }, [game, session]);
 
   const start = (world, scn, state) => {
