@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
-import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
+import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
@@ -243,12 +243,18 @@ function paintOwners(grid, s, sc) {
 }
 
 // 일기토 장면: 두 장수 초상이 부딪치며 합마다 체력이 깎이고 승자가 남음
-function DuelView({ d, game }) {
+function DuelView({ d, game, pid }) {
   const [step, setStep] = useState(0);
   useEffect(() => {
+    holdSfx(d.rounds.length * 0.52 + 1.2);
     const t = setInterval(() => setStep((v) => Math.min(v + 1, d.rounds.length + 1)), 520);
     return () => clearInterval(t);
   }, [d]);
+  useEffect(() => {
+    if (step === 0) return;
+    if (step <= d.rounds.length) sfx('duelHit');
+    else if (step === d.rounds.length + 1) { const mineWon = (d.winner === d.a ? d.an : d.bn) === pid; sfx(mineWon ? 'duelWin' : 'duelLose'); }
+  }, [step]);
   const g = (name) => Object.values(game.generals).find((x) => x.name === name) || { name, war: 80, lead: 70, intel: 50, pol: 50 };
   const [ha, hb] = step === 0 ? [100, 100] : d.rounds[Math.min(step, d.rounds.length) - 1];
   const done = step > d.rounds.length;
@@ -731,6 +737,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
+      sfx: (k) => sfx(k),
       grid: () => grid,
       // 자동 시험용: 화면 버튼과 같은 명령을 함수로 (fn(s, grid, api))
       act: (fn) => { const s = clone(gameRef.current); const r = fn(s, grid, { sortie, order, draft14, draftMax14, sendTroops, startFort, castleFortCheck, propose, gift, adoptPolicy, buildSiege, commandCap, enemy, powerOf, relOf, pactOf, acceptChance, startBuild, canBuild, unitStats, nearestCastle, askProtection, demandVassal, urgeSurrender, trade, recruit, rewardAll, autoJobs }); if (!(r && r.ok === false)) { gameRef.current = s; setGame(s); } return JSON.parse(JSON.stringify(r ?? null, (k, v) => (k === 'unit' ? v?.id : v))); },
@@ -987,7 +994,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
       const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
       const ui = (s.fx || []).find((e) => e.type === 'tactic' && e.unique && (e.nation === pid || s.units.some((u) => u.nation === pid && u.tile === e.to)));
-      if (ui) { setCutin(ui); setTimeout(() => setCutin(null), 1500); }
+      if (ui) { setCutin(ui); sfx('cutin'); holdSfx(1.5); setTimeout(() => setCutin(null), 1500); }
       if (dl) setDuel(dl);
       const wait = dl ? 3600 : 0;
       const snap = clone(s);
@@ -1614,7 +1621,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </button>
           </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
-          {duel && <DuelView d={duel} game={game} />}
+          {duel && <DuelView d={duel} game={game} pid={pid} />}
           {cutin && (() => {
             const [gname, tname] = cutin.text.split(' 「');
             const gg = Object.values(game.generals).find((x) => x.name === gname);

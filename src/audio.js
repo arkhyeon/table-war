@@ -124,15 +124,21 @@ function startBgm() {
 
 // ── 효과음 ──
 let last = {}, recent = [];
-const IMPORTANT = new Set(['capture', 'lose', 'duel', 'gong']); // 중요한 소리는 개수 제한을 넘어도 냄
+const IMPORTANT = new Set(['capture', 'lose', 'duel', 'gong', 'duelHit', 'duelWin', 'duelLose', 'cutin']); // 중요한 소리는 개수 제한을 넘어도 냄
+// 일기토·컷인 장면 동안에는 다른 전투음을 내지 않음 (장면 소리만 또렷하게)
+let holdUntil = 0;
+export function holdSfx(sec) { if (ctx) holdUntil = Math.max(holdUntil, ctx.currentTime + sec); }
 export function sfx(kind) {
   if (!ctx || !opt.sfx) return;
   const now = ctx.currentTime;
+  if (now < holdUntil && !IMPORTANT.has(kind)) return;
   if (last[kind] && now - last[kind] < 0.35) return; // 같은 소리는 0.35초 안에 다시 안 냄
   recent = recent.filter((x) => now - x < 1);
   if (recent.length >= 3 && !IMPORTANT.has(kind)) return; // 1초에 최대 3개 (여기저기 싸워도 귀 아프지 않게)
   last[kind] = now;
   recent.push(now);
+  if (kind === 'cutin') holdUntil = Math.max(holdUntil, now + 1.5); // 컷인·일기토 동안 다른 전투음 멈춤
+  if (kind === 'duel') holdUntil = Math.max(holdUntil, now + 3.5);
   // 효과음이 날 때 배경음을 잠깐 줄였다가 되돌림
   if (opt.bgm && bgmGain) { bgmGain.gain.cancelScheduledValues(now); bgmGain.gain.setTargetAtTime(0.13, now, 0.03); bgmGain.gain.setTargetAtTime(0.22, now + 0.35, 0.3); }
   const t = now + 0.01;
@@ -153,6 +159,21 @@ export function sfx(kind) {
     g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
     o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + 2.3);
     noise(t, 0.6, 0.12, 700, sfxGain);
+  } else if (kind === 'duelHit') { // 칼 부딪힘: 높은 쇳소리 두 겹 + 짧은 잡음
+    pluck(1760 + Math.random() * 200, t, 0.35, 0.28, sfxGain); pluck(2490 + Math.random() * 200, t + 0.01, 0.25, 0.18, sfxGain); noise(t, 0.06, 0.35, 6000, sfxGain, 'highpass');
+  } else if (kind === 'duelWin') { // 일기토 승리: 북 둘 + 올라가는 세 음
+    drum(t, 0.4, sfxGain); drum(t + 0.18, 0.4, sfxGain);
+    [0, 4, 7].forEach((n, i) => pluck(hz(n + 12), t + 0.3 + i * 0.12, 0.9, 0.3, sfxGain));
+  } else if (kind === 'duelLose') { // 일기토 패배: 내려가는 두 음
+    pluck(hz(5), t, 0.8, 0.3, sfxGain); pluck(hz(-2), t + 0.25, 1.2, 0.3, sfxGain);
+  } else if (kind === 'cutin') { // 고유 전법 컷인: 바람 가르는 소리 + 큰 북 + 높은 화음
+    const len = Math.floor(ctx.sampleRate * 0.5), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((Math.PI * i) / len);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2; f.frequency.setValueAtTime(400, t); f.frequency.exponentialRampToValueAtTime(5000, t + 0.45);
+    const g = ctx.createGain(); g.gain.value = 0.45; src.connect(f); f.connect(g); g.connect(sfxGain); src.start(t);
+    drum(t + 0.42, 0.55, sfxGain);
+    [0, 7, 12].forEach((n) => pluck(hz(n + 12), t + 0.45, 1.1, 0.22, sfxGain));
   } else if (kind === 'lose') { // 내 성을 잃음: 낮은 북 + 내려가는 두 음
     drum(t, 0.45, sfxGain); pluck(hz(-5), t + 0.05, 1.0, 0.35, sfxGain); pluck(hz(-12), t + 0.35, 1.4, 0.35, sfxGain);
   } else if (kind === 'bad') { pluck(hz(-2), t, 0.5, 0.35, sfxGain); pluck(hz(-7), t + 0.18, 0.8, 0.35, sfxGain); }
