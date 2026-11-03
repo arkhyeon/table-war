@@ -518,7 +518,7 @@ export function stepDay(s, grid) {
   }
   // 컴퓨터 부대(플레이어 군단 포함): 2칸 안 적 망루에 맞고 있으면 먼저 부수고 원래 명령으로 돌아감
   for (const u of s.units) {
-    if (u.dead || (u.nation === s.playerId && !s.spectator && !u.corps) || u.order?.kind === 'fort') continue;
+    if (u.dead || (u.nation === s.playerId && !s.spectator && !u.corps && !u.autoTower) || u.order?.kind === 'fort') continue;
     if (u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id]?.tile) <= 1) continue; // 성 바로 앞 공성 중이면 계속
     const tw = (s.forts || []).find((f) => f.kind === 'tower' && !f.left && enemy(s, u.nation, f.owner) && grid.dist(f.tile, u.tile) <= 2);
     if (!tw) continue;
@@ -670,7 +670,7 @@ export function stepDay(s, grid) {
   const supplied = {};
   for (const u of s.units) {
     if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
-    if (!grid.sea[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.99; u.morale -= 2; u.cut = true; continue; }
+    if (!grid.sea[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.995; u.morale -= 1; u.cut = true; continue; } // 보급이 끊기면 병력·사기가 천천히 줄어듦
     u.cut = false;
     // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
     const rest = !hits.has(u) && ![...hits.values()].some((l) => l.some((x) => x.u === u)) && !sieges.some(([x]) => x === u);
@@ -727,9 +727,13 @@ export function supplyMap(s, grid, nation) {
   const seen = new Set();
   const q = s.castles.filter((c) => c.owner === nation).map((c) => c.tile).concat((s.forts || []).filter((f) => f.kind === 'camp' && f.owner === nation && !f.left).map((f) => f.tile));
   for (const t of q) seen.add(t);
+  // 항구가 있으면 얕은 바다(뭍에서 3칸)로도 보급선이 이어짐 (바다 건너 섬 공략)
+  const port = s.castles.some((c) => c.owner === nation && c.port);
   for (let k = 0; k < q.length; k++) for (const nx of grid.nb[q[k]]) {
     // 내 땅과 동맹·정전국 땅으로 이어지면 보급됨
-    if (seen.has(nx) || (s.owner[nx] !== nation && (s.owner[nx] < 0 || enemy(s, nation, s.owner[nx])))) continue;
+    if (seen.has(nx)) continue;
+    if (port && grid.water[nx] && !s.units.some((u) => u.tile === nx && enemy(s, nation, u.nation))) { seen.add(nx); q.push(nx); continue; }
+    if (s.owner[nx] !== nation && (s.owner[nx] < 0 || enemy(s, nation, s.owner[nx]))) continue;
     seen.add(nx);
     q.push(nx);
   }

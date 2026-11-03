@@ -138,8 +138,10 @@ export function propose(s, a, b, type, rng = Math.random) {
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
   if (b === s.playerId && !s.spectator) {
     // 플레이어에게는 나라마다 석 달에 한 번, 한 번에 한 통만
-    if (s.inbox.length || s.turn - (n.askedPlayer ?? -99) < 9) return { ok: false, msg: '' };
+    // 모든 나라 합쳐서도 3순에 한 통까지 (나라가 많은 세계 지도에서 사신 창이 쏟아지지 않게)
+    if (s.inbox.length || s.turn - (n.askedPlayer ?? -99) < 9 || s.turn - (s.envoyAt ?? -99) < 3) return { ok: false, msg: '' };
     n.askedPlayer = s.turn;
+    s.envoyAt = s.turn;
     s.inbox.push({ from: a, type });
     return { ok: true, msg: '제안을 보냈습니다.' };
   }

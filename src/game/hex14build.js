@@ -129,7 +129,7 @@ export function aiBuild(s, grid, nid, threat, minGold = 40000) {
 // 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 목책: 적이 지나갈 수 없는 길막이
 export const FORTS = {
   camp: { name: '진지', icon: '⛺', cost: 8000, days: 5, hp: 2500, desc: '안의 아군 피해 −30%, 보급 거점' },
-  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1400, desc: '2칸 안 가장 가까운 적 부대 하나를 매일 공격 (원군·출격 견제)' },
+  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1000, desc: '2칸 안 가장 가까운 적 부대 하나를 매일 공격 (원군·출격 견제)' },
   palisade: { name: '목책', icon: '🚧', cost: 1500, days: 0, hp: 2000, desc: '바로 세움. 적이 못 지나가고, 옆에 온 적은 그날 멈춤 (여러 개로 길을 막기)' },
 };
 export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;

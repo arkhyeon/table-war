@@ -998,6 +998,10 @@ export const SCENARIOS = [
   },
 ];
 
+// ── 국적이 뚜렷한 나라는 따로 명단을 씀 (스코틀랜드에 잉글랜드 장수가 들어가지 않게 등) ──
+const NAT_POOL = { 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
+for (const scn of SCENARIOS) for (const n of scn.nations || []) if (NAT_POOL[n.name] && !n.pools) n.pools = [NAT_POOL[n.name]];
+
 // ── 지역사 지도: 실제 거리 비율로 칸 수를 맞춤 ──
 // 기본 격자 한 칸 = 가로 약 50km·세로 약 43km (삼국지14식 육각 칸으로는 약 30km). 위도에 따라 경도 1도의 길이가 줄어드는 것(cos)까지 반영해
 // 지도가 옆으로 늘어나지 않게 함. 너무 넓은 무대(아프리카 등)는 계산이 무거워 칸을 키움(가장 큰 지도도 6,500칸 안).

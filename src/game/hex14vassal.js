@@ -66,7 +66,7 @@ export function demandVassal(s, a, b, rng = Math.random) {
   const n = s.nations[a];
   if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
-  if (b === s.playerId && !s.spectator) { if (!s.inbox.length) s.inbox.push({ from: a, type: 'vassal_demand' }); return { ok: true, msg: '' }; }
+  if (b === s.playerId && !s.spectator) { if (!s.inbox.length && s.turn - (s.envoyAt ?? -99) >= 3) { s.inbox.push({ from: a, type: 'vassal_demand' }); s.envoyAt = s.turn; } return { ok: true, msg: '' }; }
   if (rng() < vassalChance(s, a, b)) { makeVassal(s, a, b); return { ok: true, msg: `${s.nations[b].name}이(가) 속국이 되었습니다!` }; }
   addRel(s, a, b, -8);
   return { ok: true, msg: `${s.nations[b].name}이(가) 속국 요구를 거절했습니다. (우호 −8)` };
@@ -75,7 +75,7 @@ export function askProtection(s, a, b, rng = Math.random) {
   const n = s.nations[a];
   if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
-  if (b === s.playerId && !s.spectator) { if (!s.inbox.length) s.inbox.push({ from: a, type: 'vassal_offer' }); return { ok: true, msg: '' }; }
+  if (b === s.playerId && !s.spectator) { if (!s.inbox.length && s.turn - (s.envoyAt ?? -99) >= 3) { s.inbox.push({ from: a, type: 'vassal_offer' }); s.envoyAt = s.turn; } return { ok: true, msg: '' }; }
   if (rng() < protectChance(s, a, b)) { makeVassal(s, b, a); return { ok: true, msg: `${s.nations[b].name}의 속국이 되었습니다. 서로 치지 않고, 순마다 금 수입의 15%를 바칩니다.` }; }
   return { ok: true, msg: `${s.nations[b].name}이(가) 받아 주지 않았습니다.` };
 }

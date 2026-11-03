@@ -288,6 +288,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [peek, setPeek] = useState(false);
   const withSiege = false; // 공성병기는 들판에서 부대로 만듦
   const [autoRet, setAutoRet] = useState(true); // 출진 부대: 약해지면 자동 귀환
+  const [autoTower, setAutoTower] = useState(true); // 출진 부대: 2칸 안 적 망루를 먼저 부숨
   const [callAmt, setCallAmt] = useState(1000); // 장수 부를 때 데려올 병력
   const [showAllCall, setShowAllCall] = useState(false);
   const [sendGen, setSendGen] = useState(null);
@@ -424,6 +425,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillStyle = `rgba(80,230,120,${0.35 + 0.15 * Math.sin(now / 250)})`;
       for (const t of spotsRef.current) { const [hx, hy] = grid.center(t); if (!vis(hx, hy)) continue; ctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, sz * 0.9, d); if (d) ctx.lineTo(qx, qy); else ctx.moveTo(qx, qy); } ctx.fill(); }
     }
+    // 내 부대 도착 예정일 (진로 끝)
+    const etaOf = (u) => Math.ceil(u.path.reduce((a, t, i) => a + Math.min(3, moveCost(grid, i ? u.path[i - 1] : u.tile, t, s, u)), 0) / Math.max(0.05, speedOf(s, u)));
+    const etas = [];
+    for (const u of s.units) if (u.nation === pid && u.path.length > 1) etas.push([u.path[u.path.length - 1], etaOf(u)]);
     // 내 부대 진로
     for (const u of s.units) {
       if (u.nation !== pid || !u.path.length) continue;
@@ -652,6 +657,20 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.fillStyle = '#fff';
         ctx.strokeText(lab, cx, top - fs * 0.35);
         ctx.fillText(lab, cx, top - fs * 0.35);
+      }
+    }
+    // 진로 끝 도착 예정일 꼬리표
+    {
+      const fs = Math.max(11 * px, sz * 0.75);
+      ctx.font = `bold ${fs}px sans-serif`;
+      ctx.textAlign = 'center';
+      for (const [t, d] of etas) {
+        const [ex, ey] = grid.center(t);
+        if (!vis(ex, ey)) continue;
+        const lab = `${d}일`, w = ctx.measureText(lab).width + fs * 0.8, y = ey - sz * 1.3;
+        ctx.fillStyle = 'rgba(20,24,32,0.85)';
+        ctx.beginPath(); ctx.roundRect(ex - w / 2, y - fs * 0.75, w, fs * 1.3, fs * 0.4); ctx.fill();
+        ctx.fillStyle = '#ffe066'; ctx.fillText(lab, ex, y + fs * 0.3);
       }
     }
     // 떠오르는 글자 (피해·전법·함락)
@@ -1175,10 +1194,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <label style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
                     <input type="checkbox" checked={autoRet} onChange={(e) => setAutoRet(e.target.checked)} /> 🏠 약해지면 알아서 돌아오기 <span className="muted">(병력 30% 아래 또는 사기 25 아래면 가까운 내 성으로)</span>
                   </label>
+                  <label style={{ fontSize: 12, display: 'block', marginTop: 2 }}>
+                    <input type="checkbox" checked={autoTower} onChange={(e) => setAutoTower(e.target.checked)} /> 🗼 망루가 쏘면 먼저 부수기 <span className="muted">(2칸 안 적 망루를 부수고 원래 명령으로 돌아감)</span>
+                  </label>
                   <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
                     <button onClick={() => setSortieOpen(false)}>취소</button>
                     <button className="primary" disabled={!pickG.length || Math.min(amt, maxAmt) < 1000} onClick={() => {
-                      const r = act((s) => { const r = sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt)); if (r.ok && autoRet) r.unit.autoRet = true; return r; });
+                      const r = act((s) => { const r = sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt)); if (r.ok && autoRet) r.unit.autoRet = true; if (r.ok && autoTower) r.unit.autoTower = true; return r; });
                       if (r?.ok) { setSortieOpen(false); setSel({ type: 'unit', id: r.unit.id }); setSheet(false); toast('부대가 나왔습니다. 지도에서 목적지·공격할 곳을 누르세요.'); }
                     }}>출진</button>
                   </div>

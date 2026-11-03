@@ -1,3 +1,4 @@
+import { localName } from './localnames.js';
 import { stateRng } from './rng.js';
 import { T, TERRAIN, EDGE, MTN_EDGE, BUILDINGS, COST, G } from './rules.js';
 import { fmtTroops, fmtGold } from './format.js';
@@ -1833,15 +1834,17 @@ export function spawnGeneral(s, nid, rng, forced = false) {
   const myT = nationGenerals(s, nid).reduce((a, g) => a + rating(g), 0);
   const strength = avgT > 0 ? Math.max(0.5, Math.min(2, myT / avgT)) : 1;
   const cands = [];
+  const names = new Set(Object.values(s.generals).map((g) => g.name)); // 같은 인물이 두 명 나오지 않게 (군주·다른 명단)
   n.pools.forEach((pool, i) => {
-    for (const g of POOLS[pool] || []) if (!s.usedGen[g.id]) cands.push({ g, w: (i === 0 ? 1 : 0.45) * generalWeight(s, g, strength) });
+    for (const g of POOLS[pool] || []) if (!s.usedGen[g.id] && !names.has(g.name)) cands.push({ g, w: (i === 0 ? 1 : 0.45) * generalWeight(s, g, strength) });
   });
+  // 명단이 바닥나면 다른 나라 인물을 빌리지 않고, 그 나라 말로 된 이름의 장수를 지어 냄 (국적이 섞이지 않게)
   if (!cands.length) {
-    for (const [pool, list] of Object.entries(POOLS)) {
-      // 삼국지는 삼국지 인물만, 다른 시대는 삼국지 인물 없이 (시대가 다른 인물이 섞이지 않게)
-      if (n.pools[0].startsWith('tk') ? !pool.startsWith('tk') : pool.startsWith('tk')) continue;
-      for (const g of list) if (!s.usedGen[g.id]) cands.push({ g, w: 0.2 * generalWeight(s, g, strength) });
-    }
+    const civ = n.pools[0];
+    const taken = new Set(Object.values(s.generals).map((g) => g.name));
+    const name = localName(civ, rng, taken, n.civ);
+    const base = 55 + rng.int(0, 20);
+    cands.push({ g: { id: `local:${nid}:${name}`, name, war: base + rng.int(-10, 10), lead: base + rng.int(-10, 10), intel: base + rng.int(-10, 10), pol: base + rng.int(-10, 10), pool: civ }, w: 1 });
   }
   const pick = rng.weighted(cands, (c) => c.w);
   if (!pick) return null;

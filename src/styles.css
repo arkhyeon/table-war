@@ -465,3 +465,8 @@ tr.clickable:hover, tr.sel { background: var(--panel3); }
   .tb-stats { order: 3; flex: 0 0 100%; gap: 4px; }
   .pill { padding: 2px 7px; }
 }
+/* 폰: 정보창이 열려도 「하루 진행」 버튼은 위에 떠 있게 */
+@media (max-width: 760px) {
+  .end-turn-box { position: fixed; z-index: 25; }
+  .h14-panel { padding-bottom: 72px; }
+}
