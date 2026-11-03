@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, powerOf, trade, pactOf, propose } from './hex14gov.js';
+import { foodUse, powerOf, trade, pactOf, propose, acceptChance } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -105,6 +105,14 @@ function threatNear(s, grid, c) {
 // 전략에 맞는 외교: 수성·사방 방어는 노리지 않는 이웃과 정전, 반패권은 다른 나라와 동맹
 function strategyDiplomacy(s, grid, nid, rng) {
   const n = s.nations[nid];
+  // 약조 연장: 끝나기 3순 전, 노리는 나라가 아니고 우리만큼 센 상대면 연장을 청함 (만료되자마자 대국과 전면전이 나지 않게)
+  for (const p of (s.pacts || []).filter((x) => x.type !== 'vassal' && (x.a === nid || x.b === nid) && x.until - s.turn <= 3 && x.until > s.turn)) {
+    const o = p.a === nid ? p.b : p.a;
+    if (o === n.focus || o === s.playerId && !s.spectator || p.renewAsked === s.turn) continue;
+    if (powerOf(s, o) < powerOf(s, nid) * 0.8) continue;
+    p.renewAsked = s.turn;
+    if (rng() < acceptChance(s, nid, o, p.type)) p.until += p.type === 'ally' ? 36 : 18;
+  }
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const avgC = alive.reduce((a, m) => a + citiesOf(s, m.id), 0) / Math.max(1, alive.length);
   const small = citiesOf(s, nid) <= 3 && citiesOf(s, nid) < avgC * 0.75;

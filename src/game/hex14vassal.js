@@ -112,6 +112,8 @@ export function vassalTurn(s, grid, rng) {
   for (const p of (s.pacts || []).filter((x) => x.type === 'vassal')) {
     const lord = s.nations[p.a], vas = s.nations[p.b];
     if (!lord?.alive || !vas?.alive) continue;
+    // 컴퓨터 속국이 종주국보다 1.2배 넘게 세지면 독립 (종주국보다 커진 속국이 계속 조공하지 않게)
+    if ((p.b !== s.playerId || s.spectator) && powerOf(s, p.b) > powerOf(s, p.a) * 1.2 && cities(s, p.b) > cities(s, p.a)) { declareIndependence(s, p.b); continue; }
     const pay = Math.round(incomeOf(s, p.b) * 0.15);
     if (pay > 0 && vas.gold >= pay) { vas.gold -= pay; lord.gold += pay; }
     // 컴퓨터 속국은 종주국의 적을 함께 침
