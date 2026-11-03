@@ -236,6 +236,36 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const r = sortie(s, grid, c.id, gids, troops); // 공성병기는 끌고 가지 않고 성 앞에서 만듦 (느려지지 않게)
     if (r.ok) order(s, grid, mark(r.unit), 'castle', t.id);
   }
+  // 3.5) 합동 공격: 성 하나의 병력으론 모자라도, 가까운 여러 성의 남는 병력을 합쳐 넉넉하면 같은 날 함께 출진해 한 성을 침
+  //      (수비 3만 성은 부대 하나로는 못 치니, 혼자 기준을 넘어야 출발하던 방식으론 대국끼리 영영 교착됨)
+  if (!scope && nUnits() < maxUnits) {
+    const ready = [];
+    for (const c of mine) {
+      if (threatNear(s, grid, c) > 0) continue;
+      const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+      if (!gs.length) continue;
+      const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
+      const spare = Math.floor((c.troops - Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.4)) / 1000) * 1000;
+      const gids = gs.slice(0, Math.min(3, gs.length)).map((g) => g.id);
+      const troops = Math.min(commandCap(s, gids), spare);
+      if (troops >= 5000) ready.push({ c, gids, troops });
+    }
+    if (ready.length >= 2) {
+      const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60));
+      const need = 1.2 * (1 - stall);
+      const cands = s.castles.filter((x) => x.kind !== 'pass' && x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && frontier(s, grid, nid, x) <= 12 * grid.k)
+        .filter((x) => !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && (wars.size < 2 || wars.has(x.owner) || x.owner === focus))
+        .sort((a, b) => (b.owner === focus) - (a.owner === focus) || a.troops - b.troops);
+      for (const x of cands.slice(0, 4)) {
+        const guard = (x.troops + s.units.filter((u) => u.nation === x.owner && grid.dist(u.tile, x.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0)) * (x.dur > x.maxDur * 0.3 ? 1.5 : 1);
+        const near = ready.filter((r) => grid.dist(r.c.tile, x.tile) <= 12 * grid.k).sort((a, b) => grid.dist(a.c.tile, x.tile) - grid.dist(b.c.tile, x.tile)).slice(0, 3);
+        const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === x.id).reduce((a, u) => a + u.troops, 0);
+        if (near.length < 2 || near.reduce((a, r) => a + r.troops, 0) + ours < guard * need) continue;
+        for (const r of near) { const o = sortie(s, grid, r.c.id, r.gids, r.troops); if (o.ok) order(s, grid, mark(o.unit), 'castle', x.id); }
+        break;
+      }
+    }
+  }
   if (daily) return;
   // 4) 시장: 병량이 3년 치 넘게 쌓이고 금이 모자라면 팔고, 금이 넘치는데 병량이 모자라면 삼
   if (!scope) {
