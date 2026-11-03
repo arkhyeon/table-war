@@ -1,6 +1,6 @@
 // 배경음악·효과음: 파일 없이 브라우저에서 직접 만들어 냄 (WebAudio)
 // 배경음: 오음 음계(궁상각치우)로 뜯는 현악기(가야금·고쟁 느낌) + 낮은 지속음 + 가끔 북
-// 효과음: 누르기·부딪힘·함락·일기토·건설·순 넘김
+// 효과음: 누르기·부딪힘·함락(얻음·잃음)·일기토·건설·순 넘김 — 1초 3개 제한, 압축기, 배경음 잠깐 줄이기
 const KEY = 'tablewar-audio';
 let ctx = null, master = null, bgmGain = null, sfxGain = null, timer = null;
 let opt = (() => { try { return { bgm: true, sfx: true, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { bgm: true, sfx: true }; } })();
@@ -15,7 +15,11 @@ export function unlockAudio() {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   ctx = new AC();
-  master = ctx.createGain(); master.gain.value = 0.8; master.connect(ctx.destination);
+  // 큰 소리가 겹쳐도 귀가 아프지 않게 전체 출력에 압축기
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -18; comp.knee.value = 12; comp.ratio.value = 6; comp.attack.value = 0.005; comp.release.value = 0.25;
+  comp.connect(ctx.destination);
+  master = ctx.createGain(); master.gain.value = 0.8; master.connect(comp);
   bgmGain = ctx.createGain(); bgmGain.gain.value = opt.bgm ? 0.22 : 0; bgmGain.connect(master);
   sfxGain = ctx.createGain(); sfxGain.gain.value = opt.sfx ? 0.5 : 0; sfxGain.connect(master);
   startBgm();
@@ -27,7 +31,9 @@ export function setAudio(k, on) {
   const g = k === 'bgm' ? bgmGain : sfxGain;
   g.gain.setTargetAtTime(on ? (k === 'bgm' ? 0.22 : 0.5) : 0, ctx.currentTime, 0.1);
 }
-export function setMood(m) { mood = m; }
+let want = 'calm', wantDays = 0;
+// 하루마다 부름: 같은 분위기가 이틀 이어져야 바꿈 (왔다 갔다 하지 않게). 실제 전환은 다음 마디 첫 박에
+export function setMood(m) { if (m === want) wantDays += 1; else { want = m; wantDays = 1; } }
 
 // ── 악기 ──
 function pluck(freq, t, dur = 1.2, vol = 0.5, out = bgmGain) {
@@ -66,7 +72,12 @@ function drum(t, vol = 0.5, out = bgmGain) {
 }
 
 // ── 배경음: 4마디씩 오음 음계로 흘러가는 선율 (마디마다 조금씩 다르게) ──
-const SCALE = [0, 2, 4, 7, 9, 12, 14, 16]; // 궁상각치우
+const SCALES = {
+  calm: [0, 2, 4, 7, 9, 12, 14, 16], // 평조(밝은 오음계): 궁상각치우
+  tension: [0, 3, 5, 7, 10, 12, 15, 17], // 계면조 느낌(어두운 오음계)
+  battle: [0, 3, 5, 7, 10, 12, 15, 17],
+};
+let SCALE = SCALES.calm;
 const ROOT = 196; // G3
 const hz = (n) => ROOT * Math.pow(2, n / 12);
 let step = 0, nextT = 0, phrase = [];
@@ -83,18 +94,28 @@ function newPhrase() {
 }
 function tick() {
   if (!ctx) return;
-  const beat = mood === 'battle' ? 0.24 : 0.36;
   while (nextT < ctx.currentTime + 0.4) {
     const k = step % 16;
-    if (k === 0) { phrase = newPhrase(); drone(hz(-12), nextT, beat * 16, mood === 'battle' ? 0.1 : 0.07); drone(hz(-5), nextT, beat * 16, 0.04); }
+    if (k === 0) {
+      // 마디 첫 박에서만 분위기를 바꿈 (이틀 넘게 이어진 분위기로)
+      if (want !== mood && wantDays >= 2) mood = want;
+      SCALE = SCALES[mood];
+      phrase = newPhrase();
+      const beat0 = BEAT[mood];
+      drone(hz(-12), nextT, beat0 * 16, mood === 'calm' ? 0.07 : 0.1);
+      drone(hz(mood === 'calm' ? -5 : -9), nextT, beat0 * 16, 0.04);
+    }
+    const beat = BEAT[mood];
     const n = phrase[k];
-    if (n !== null && n !== undefined) pluck(hz(n), nextT, mood === 'battle' ? 0.6 : 1.4, 0.32);
+    if (n !== null && n !== undefined) pluck(hz(n), nextT, mood === 'battle' ? 0.6 : mood === 'tension' ? 1.0 : 1.4, mood === 'battle' ? 0.28 : 0.32);
     if (k % 4 === 0 && Math.random() < 0.5) pluck(hz(n ?? 0) / 2, nextT, 1.8, 0.18);
-    if (mood === 'battle' ? k % 2 === 0 : k === 0 || k === 8) drum(nextT, mood === 'battle' ? 0.35 : 0.22);
+    // 북: 평상시는 마디에 두 번, 긴장은 낮게 네 번(심장 박동처럼), 전투는 두 박마다 + 마디 끝 몰아치기
+    if (mood === 'calm' ? k === 0 || k === 8 : mood === 'tension' ? k % 4 === 0 : k % 2 === 0 || k === 15) drum(nextT, mood === 'calm' ? 0.22 : mood === 'tension' ? 0.26 : 0.34);
     nextT += beat;
     step++;
   }
 }
+const BEAT = { calm: 0.36, tension: 0.32, battle: 0.24 };
 function startBgm() {
   nextT = ctx.currentTime + 0.1;
   if (timer) clearInterval(timer);
@@ -102,12 +123,18 @@ function startBgm() {
 }
 
 // ── 효과음 ──
-let last = {};
+let last = {}, recent = [];
+const IMPORTANT = new Set(['capture', 'lose', 'duel', 'gong']); // 중요한 소리는 개수 제한을 넘어도 냄
 export function sfx(kind) {
   if (!ctx || !opt.sfx) return;
   const now = ctx.currentTime;
-  if (last[kind] && now - last[kind] < 0.12) return; // 한꺼번에 몰리면 하나만
+  if (last[kind] && now - last[kind] < 0.35) return; // 같은 소리는 0.35초 안에 다시 안 냄
+  recent = recent.filter((x) => now - x < 1);
+  if (recent.length >= 3 && !IMPORTANT.has(kind)) return; // 1초에 최대 3개 (여기저기 싸워도 귀 아프지 않게)
   last[kind] = now;
+  recent.push(now);
+  // 효과음이 날 때 배경음을 잠깐 줄였다가 되돌림
+  if (opt.bgm && bgmGain) { bgmGain.gain.cancelScheduledValues(now); bgmGain.gain.setTargetAtTime(0.13, now, 0.03); bgmGain.gain.setTargetAtTime(0.22, now + 0.35, 0.3); }
   const t = now + 0.01;
   if (kind === 'click') pluck(880, t, 0.12, 0.25, sfxGain);
   else if (kind === 'clash') { noise(t, 0.18, 0.5, 2500, sfxGain); noise(t + 0.06, 0.12, 0.3, 4000, sfxGain); }
@@ -126,5 +153,7 @@ export function sfx(kind) {
     g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
     o.connect(g); g.connect(sfxGain); o.start(t); o.stop(t + 2.3);
     noise(t, 0.6, 0.12, 700, sfxGain);
+  } else if (kind === 'lose') { // 내 성을 잃음: 낮은 북 + 내려가는 두 음
+    drum(t, 0.45, sfxGain); pluck(hz(-5), t + 0.05, 1.0, 0.35, sfxGain); pluck(hz(-12), t + 0.35, 1.4, 0.35, sfxGain);
   } else if (kind === 'bad') { pluck(hz(-2), t, 0.5, 0.35, sfxGain); pluck(hz(-7), t + 0.18, 0.8, 0.35, sfxGain); }
 }

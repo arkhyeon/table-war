@@ -962,6 +962,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, true);
       }
       const movingBefore = new Set(s.units.filter((u) => u.nation === pid && u.path.length).map((u) => u.id));
+      const ownBefore = s.castles.map((c) => c.owner);
       stepDay(s, grid);
       spawnFx(s);
       // 순 끝까지 넘기는 중에 내 부대가 도착해 할 일이 없어지면 그날 멈춤 (모르고 며칠을 흘려보내지 않게)
@@ -971,11 +972,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
         const mineT = new Set([...s.units.filter((u) => u.nation === pid).map((u) => u.tile), ...s.castles.filter((c) => c.owner === pid).map((c) => c.tile)]);
         const near = (e) => mineT.has(e.tile) || mineT.has(e.a) || mineT.has(e.b) || mineT.has(e.to);
         const fx = s.fx || [];
-        if (fx.some((e) => e.type === 'capture')) sfx('capture');
+        const gained = s.castles.some((c, i) => c.owner === pid && ownBefore[i] !== pid);
+        const lost = s.castles.some((c, i) => ownBefore[i] === pid && c.owner !== pid);
+        if (lost) sfx('lose');
+        else if (gained) sfx('capture');
         else if (fx.some((e) => e.type === 'clash' && near(e))) sfx('clash');
         else if (fx.some((e) => e.type === 'hit' && near(e))) sfx('hit');
         if ((s.duels || []).some((x) => x.an === pid || x.bn === pid)) sfx('duel');
-        setMood(s.units.some((u) => u.nation === pid && s.units.some((v) => enemy(s, pid, v.nation) && grid.dist(u.tile, v.tile) <= 3)) ? 'battle' : 'calm');
+        // 분위기: 내 부대가 적과 3칸 안이면 전투, 적 부대가 내 성 6칸 안에 오면 긴장, 그 밖엔 평상시
+        const fighting = s.units.some((u) => u.nation === pid && s.units.some((v) => enemy(s, pid, v.nation) && grid.dist(u.tile, v.tile) <= 3));
+        const tense = !fighting && s.castles.some((c) => c.owner === pid && s.units.some((v) => enemy(s, pid, v.nation) && grid.dist(c.tile, v.tile) <= 6));
+        setMood(fighting ? 'battle' : tense ? 'tension' : 'calm');
       }
       // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
       const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
