@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf } from '../game/hex14.js';
-import { aiTurn14, aiIdle, STRATS } from '../game/hex14ai.js';
+import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
@@ -934,9 +934,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
     };
     const tick = () => {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
-      if (s.day > 0) aiIdle(s, grid);
+      // 하루마다 컴퓨터도 군사 판단 (내정·외교는 순 첫날에만)
+      if (s.day > 0) {
+        for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id, null, true);
+        if (s.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid, null, true);
+        else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, true);
+      }
+      const movingBefore = new Set(s.units.filter((u) => u.nation === pid && u.path.length).map((u) => u.id));
       stepDay(s, grid);
       spawnFx(s);
+      // 순 끝까지 넘기는 중에 내 부대가 도착해 할 일이 없어지면 그날 멈춤 (모르고 며칠을 흘려보내지 않게)
+      const idleNow = s.spectator ? [] : s.units.filter((u) => u.nation === pid && !u.corps && movingBefore.has(u.id) && !u.path.length && !u.queue?.length);
       // 효과음: 내 부대·성이 낀 일만
       {
         const mineT = new Set([...s.units.filter((u) => u.nation === pid).map((u) => u.tile), ...s.castles.filter((c) => c.owner === pid).map((c) => c.tile)]);
@@ -957,6 +965,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const snap = clone(s);
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
+      if (toEnd && !endOfTurn && idleNow.length) {
+        setTimeout(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
+        return;
+      }
       if (endOfTurn || !toEnd) {
         setTimeout(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
         return;

@@ -209,7 +209,8 @@ export function fortsDay(s, grid) {
 export function aiForts(s, grid, nid, threat) {
   const n = s.nations[nid];
   if (n.gold < 30000) return; // 지역마다 망루 2개·시설 3개 제한만 (fortLimit)
-  const c = s.castles.filter((x) => x.owner === nid && threat(x) > 0).sort((a, b) => threat(b) - threat(a))[0];
+  // 필요한 곳에만: 다가온 적이 수비의 60%를 넘는 성, 그리고 그 성 3칸 안에 우리 망루가 아직 없을 때
+  const c = s.castles.filter((x) => x.owner === nid && threat(x) > x.troops * 0.6 && !(s.forts || []).some((f) => f.owner === nid && f.kind === 'tower' && grid.dist(f.tile, x.tile) <= 3)).sort((a, b) => threat(b) - threat(a))[0];
   if (!c) return;
   const foe = s.units.filter((u) => enemy(s, nid, u.nation)).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];
   if (!foe) return;
@@ -223,5 +224,5 @@ export function aiForts(s, grid, nid, threat) {
     ring = next;
   }
   if (best === null) return;
-  startFort(s, grid, null, threat(c) > c.troops ? 'tower' : 'camp', best, nid);
+  startFort(s, grid, null, 'tower', best, nid); // 지키는 쪽엔 망루 (진지는 공격하는 부대의 보급 거점)
 }

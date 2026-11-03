@@ -124,7 +124,8 @@ function strategyDiplomacy(s, grid, nid, rng) {
 }
 
 // scope가 있으면 군단: 그 도시들과 그 군단 부대만 움직임 (플레이어가 맡긴 군단)
-export function aiTurn14(s, grid, nid, scope = null) {
+// daily=true: 하루마다 군사 판단만 (부대 명령·요격·출진). 내정·외교·집결 수송은 순 첫날에만
+export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const n = s.nations[nid];
   if (!n.alive) return;
   // 전략은 군단(플레이어 나라)이 아닐 때만 고름: 1년마다, 또는 도시 수가 크게 바뀌면
@@ -189,7 +190,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     }
     if (u.order?.kind === 'castle' && !u.siege) {
       const c = s.castles[u.order.id];
-      if (c && enemy(s, nid, c.owner) && c.dur > 800 && grid.dist(u.tile, c.tile) <= 2 && n.gold > SIEGE_COST * 1.5) buildSiege(s, u.id);
+      if (c && enemy(s, nid, c.owner) && c.dur > 800 && grid.dist(u.tile, c.tile) <= 1 && n.gold > SIEGE_COST * 1.5) buildSiege(s, u.id);
     }
   }
   // 2) 성에 다가온 적 부대를 요격 (공성병기 낀 부대는 들판에서 약하니 더 적극적으로)
@@ -202,7 +203,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
   }
   // 2.5) 집결: 노리는 나라의 성에 가장 가까운 우리 성(장수 있음)으로, 위협 없는 다른 성의 남는 병력을 보냄
-  if (!scope && focus !== null && focus !== undefined && s.nations[focus]?.alive) {
+  if (!daily && !scope && focus !== null && focus !== undefined && s.nations[focus]?.alive) {
     const fc = s.castles.filter((x) => x.owner === focus);
     const hasGen = (c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active');
     const stage = mine.filter(hasGen).map((c) => [c, Math.min(...fc.map((x) => grid.dist(x.tile, c.tile)))]).sort((a, b) => a[1] - b[1])[0]?.[0];
@@ -233,6 +234,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     const r = sortie(s, grid, c.id, gids, troops); // 공성병기는 끌고 가지 않고 성 앞에서 만듦 (느려지지 않게)
     if (r.ok) order(s, grid, mark(r.unit), 'castle', t.id);
   }
+  if (daily) return;
   // 4) 시장: 병량이 3년 치 넘게 쌓이고 금이 모자라면 팔고, 금이 넘치는데 병량이 모자라면 삼
   if (!scope) {
     const use = Math.max(1000, foodUse(s, nid));
