@@ -823,8 +823,10 @@ export function endTurn14(s, grid) {
   eventsTurn(s, grid);
   const alive = s.nations.filter((n) => n.alive && !n.horde);
   const cities = s.castles.filter((c) => c.kind !== 'pass');
-  const top = alive.map((n) => [n, cities.filter((c) => c.owner === n.id).length]).sort((a, b) => b[1] - a[1])[0];
-  if (alive.length === 1 || (top && top[1] >= cities.length * 0.8)) s.over = { winner: top[0].id };
+  // 속국의 도시는 종주국 몫으로 셈 (속국만 남으면 천하통일)
+  const lordOfN = (id) => (s.pacts || []).find((p) => p.type === 'vassal' && p.b === id)?.a ?? id;
+  const top = alive.filter((n) => lordOfN(n.id) === n.id).map((n) => [n, cities.filter((c) => c.owner !== null && lordOfN(c.owner) === n.id).length]).sort((a, b) => b[1] - a[1])[0];
+  if (alive.length === 1 || (top && top[1] >= cities.length * 0.8)) s.over = { winner: (top || [alive[0]])[0].id };
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
 }
 

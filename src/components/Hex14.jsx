@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
+import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
@@ -836,7 +837,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (s.day === 0) {
       for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
       if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
-      else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), corps: c.id });
+      else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id });
     }
     setPlaying(true);
     setReport(null);
@@ -1245,23 +1246,29 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <div className="row" style={{ justifyContent: 'space-between' }}><b>🎖️ 군단 (도시를 맡겨 컴퓨터가 운영)</b>{!corpsForm && <button className="sm" disabled={playing} onClick={() => setCorpsForm({ cities: [], leader: '' })}>＋ 만들기</button>}</div>
                 {(game.corps || []).map((co) => (
                   <div key={co.id} className="row" style={{ justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}>
-                    <span>{game.generals[co.leader] && <Face g={game.generals[co.leader]} size={20} col={me.color} />}{game.generals[co.leader]?.name || '?'} 군단 · {co.cities.filter((id) => game.castles[id].owner === pid).map((id) => game.castles[id].name).join(', ')} · 부대 {game.units.filter((u) => u.corps === co.id).length}</span>
+                    <span>{game.generals[co.leader] && <Face g={game.generals[co.leader]} size={20} col={me.color} />}{game.generals[co.leader]?.name || '?'} 군단 · {co.cities.map((id) => game.castles[id].owner === pid ? game.castles[id].name : `${game.castles[id].name}(빼앗김·탈환 목표)`).join(', ')} · 부대 {game.units.filter((u) => u.corps === co.id).length}</span>
                     <button className="sm" disabled={playing} onClick={() => act((s) => { s.corps = s.corps.filter((x) => x.id !== co.id); for (const u of s.units) if (u.corps === co.id) delete u.corps; return { ok: true, msg: '군단을 해산했습니다.' }; })}>해산</button>
                   </div>
                 ))}
                 {corpsForm && (() => {
                   const taken = new Set((game.corps || []).flatMap((c) => c.cities));
                   const avail = game.castles.filter((c) => c.owner === pid && !taken.has(c.id));
-                  const gens = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && corpsForm.cities.includes(g.castle));
+                  const gens = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && g.castle !== null && g.castle !== undefined && !g.ruler).sort((a, b) => b.lead - a.lead);
+                  const pickLeader = (id) => {
+                    // 도독을 고르면 그 장수 성에서 8칸 안의 (다른 군단이 안 맡은) 내 성을 한 번에 고름
+                    const home = game.castles[game.generals[id]?.castle];
+                    setCorpsForm((f) => ({ ...f, leader: id, cities: home ? avail.filter((c) => grid.dist(c.tile, home.tile) <= 8).map((c) => c.id) : f.cities }));
+                  };
                   return (
                     <div className="card" style={{ background: 'var(--panel)', marginTop: 6, fontSize: 12 }}>
-                      <div>맡길 도시</div>
+                      <div style={{ marginBottom: 4 }}>① 도독 <select value={corpsForm.leader} onChange={(e) => pickLeader(e.target.value)}><option value="">(고르세요)</option>{gens.map((g) => <option key={g.id} value={g.id}>{g.name} (통{g.lead} 무{g.war}) · {game.castles[g.castle].name}</option>)}</select></div>
+                      <div>② 맡길 도시 <small className="muted">(도독 성 주변 8칸이 자동으로 골라짐, 눌러서 빼거나 더함)</small></div>
                       <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
                         {avail.map((c) => (
                           <label key={c.id}><input type="checkbox" checked={corpsForm.cities.includes(c.id)} onChange={(e) => setCorpsForm((f) => ({ ...f, cities: e.target.checked ? [...f.cities, c.id] : f.cities.filter((x) => x !== c.id) }))} /> {c.name}</label>
                         ))}
                       </div>
-                      <div style={{ marginTop: 4 }}>도독 <select value={corpsForm.leader} onChange={(e) => setCorpsForm((f) => ({ ...f, leader: e.target.value }))}><option value="">(고르세요)</option>{gens.map((g) => <option key={g.id} value={g.id}>{g.name} (통{g.lead})</option>)}</select></div>
+                      <div className="muted" style={{ marginTop: 4 }}>군단은 맡은 성을 지키고, 빼앗기면 맡은 성들의 병력을 모아 무력 높은 장수로 되찾습니다. 다른 나라를 먼저 치러 가지는 않습니다.</div>
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
                         <button className="sm" onClick={() => setCorpsForm(null)}>취소</button>
                         <button className="sm primary" disabled={!corpsForm.cities.length || !corpsForm.leader} onClick={() => { act((s) => { s.corpsN = (s.corpsN || 0) + 1; s.corps = [...(s.corps || []), { id: `k${s.corpsN}`, leader: corpsForm.leader, cities: corpsForm.cities }]; for (const id of corpsForm.cities) s.castles[id].auto = true; return { ok: true, msg: '군단을 만들었습니다. 다음 진행부터 도독이 알아서 싸웁니다.' }; }); setCorpsForm(null); }}>만들기</button>
@@ -1301,7 +1308,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div className="diplo-head">
                     <div><b>🏆 우리 순위 {rk}위</b> <small className="muted">/ {ranked.length}나라 · 도시 {cityN(pid)} · 병력 {fmtTroops(powerOf(game, pid))}</small></div>
                     <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                      {pacts.length ? pacts.map((x) => { const o = x.a === pid ? x.b : x.a; return <span key={o} className={'pact-pill ' + x.type}>{x.type === 'ally' ? '🤝' : x.type === 'vassal' ? '👑' : '🕊️'} {game.nations[o].name} {PACT[x.type]}{x.type !== 'vassal' ? ` ${x.until - game.turn}순` : ''}</span>; }) : <small className="muted">맺은 약조 없음</small>}
+                      {pacts.length ? pacts.map((x) => { const o = x.a === pid ? x.b : x.a; return <span key={o} className={'pact-pill ' + x.type}>{x.type === 'ally' ? '🤝' : x.type === 'vassal' ? '👑' : '🕊️'} {game.nations[o].name} {x.type === 'vassal' ? (x.a === pid ? '(우리 속국)' : '(종주국)') : PACT[x.type]}{x.type !== 'vassal' ? ` ${x.until - game.turn}순` : ''}</span>; }) : <small className="muted">맺은 약조 없음</small>}
                     </div>
                   </div>
                 );
@@ -1311,7 +1318,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 return (
                   <div key={n.id} style={{ borderBottom: '1px solid var(--line)', padding: '6px 0' }}>
                     <div className="row" style={{ justifyContent: 'space-between' }}>
-                      <b><span className="chip" style={{ background: n.color }} /> {n.name}{p && <span className={'pact-pill ' + p.type} style={{ marginLeft: 6 }}>{p.type === 'ally' ? '🤝 동맹' : p.type === 'vassal' ? '👑 ' + PACT.vassal : '🕊️ 정전'}{p.type !== 'vassal' ? ` ${p.until - game.turn}순` : ''}</span>}</b>
+                      <b><span className="chip" style={{ background: n.color }} /> {n.name}{p && <span className={'pact-pill ' + p.type} style={{ marginLeft: 6 }}>{p.type === 'ally' ? '🤝 동맹' : p.type === 'vassal' ? (p.a === pid ? '👑 우리 속국' : '👑 우리 종주국') : '🕊️ 정전'}{p.type !== 'vassal' ? ` ${p.until - game.turn}순` : ''}</span>}</b>
                       <small className="muted">{game.castles.filter((c) => c.owner === n.id && c.kind !== 'pass').length}도시 · {fmtTroops(powerOf(game, n.id))}</small>
                     </div>
                     <div style={{ height: 5, background: '#0006', borderRadius: 3, margin: '4px 0' }}><div style={{ width: `${r}%`, height: '100%', background: r >= 60 ? '#6fd37f' : r >= 30 ? '#e8c35a' : '#e2655a', borderRadius: 3 }} /></div>
@@ -1321,6 +1328,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       {giftSizes(game, pid, n.id).map((amt, i) => <button key={i} className="sm" disabled={playing || me.gold < amt} title={`우호 +${giftGain(game, pid, n.id, amt)}`} onClick={() => act((s) => gift(s, pid, n.id, amt))}>🎁 {fmtGold(amt)} (+{giftGain(game, pid, n.id, amt)})</button>)}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
+                      {(() => {
+                        // 속국·항복: 힘 차이가 클 때만 버튼이 나옴
+                        const asked = playing || me.lastAsk?.[n.id] === game.turn;
+                        const vc = vassalChance(game, pid, n.id), pc = protectChance(game, pid, n.id), sc = surrenderChance(game, pid, n.id);
+                        return <>
+                          {!p && vc > 0 && <button className="sm" disabled={asked} title="받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다" onClick={() => act((s) => demandVassal(s, pid, n.id))}>👑 속국 요구 {Math.round(vc * 100)}%</button>}
+                          {sc > 0 && <button className="sm" disabled={asked} title="받아들이면 도시·장수·부대가 모두 우리 것이 됩니다" onClick={() => act((s) => urgeSurrender(s, pid, n.id))}>🏳️ 항복 권유 {Math.round(sc * 100)}%</button>}
+                          {!p && pc > 0 && lordOf(game, pid) === null && <button className="sm" disabled={asked} title="그 나라가 우리를 치지 않게 되고, 순마다 금 수입의 15%를 바칩니다" onClick={() => { if (window.confirm(`${n.name}의 속국이 될까요? 순마다 금 수입의 15%를 바칩니다.`)) act((s) => askProtection(s, pid, n.id)); }}>🙇 속국 되기 {Math.round(pc * 100)}%</button>}
+                          {p?.type === 'vassal' && p.b === pid && <button className="sm danger" disabled={playing} onClick={() => { if (window.confirm('독립을 선언할까요? 우호가 크게 떨어집니다.')) act((s) => declareIndependence(s, pid)); }}>⚔️ 독립 선언</button>}
+                        </>;
+                      })()}
                     </div>
                   </div>
                 );
@@ -1385,6 +1403,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🚚 도시 패널에서 장수 없이 병력만 내 다른 성으로 보낼 수 있습니다(길 길이만큼 걸림).</li>
                 <li>🏗️ 도시 패널에서 성 수비대가 4칸 안에 망루·진지·목책을 지을 수 있습니다. 한 지역에 3개(망루 2개)까지, 성을 빼앗으면 그 지역 시설도 넘어옵니다. 부대는 옆에 붙은 적 망루를 먼저 부숩니다.</li>
                 <li>⚔️ 일기토는 무력이 높을수록 유리하지만 운도 큽니다(무력 차 10이면 약 30% 역전). 이기면 사기 +20, 적 병사 8% 도주, 무력이 자라기도 합니다. 🧠 지력 높은 장수는 적 전법을 간파해 막습니다.</li>
+                <li>👑 외교: 훨씬 약한 나라에 <b>속국 요구</b>(서로 안 싸우고 순마다 금 수입 15% 조공, 우리 전쟁을 도움), 아주 약한 나라나 1년 넘은 속국에는 <b>항복 권유</b>(통째로 흡수). 반대로 우리가 약하면 강한 나라의 <b>속국이 되어</b> 살아남을 수 있고, 나중에 독립 선언도 가능.</li>
+                <li>🎖️ 군단은 맡은 성을 지키고, 빼앗기면 맡은 성들의 병력을 모아 되찾습니다(남의 나라를 먼저 치지 않음). 도독을 고르면 주변 8칸 성이 자동으로 골라집니다.</li>
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
@@ -1504,7 +1524,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <div className="h14-over" style={{ fontSize: 16, fontWeight: 'normal' }}>
                 <div className="card" style={{ maxWidth: 340, textAlign: 'center' }}>
                   <h3 style={{ margin: '0 0 8px' }}>✉️ <span className="chip" style={{ background: n.color }} /> {n.name}의 사신</h3>
-                  <div>{PACT[p.type]}을 맺자고 합니다 ({p.type === 'ally' ? '1년' : '반년'}).</div>
+                  <div>{vassalInboxText(game, p) || `${PACT[p.type]}을 맺자고 합니다 (${p.type === 'ally' ? '1년' : '반년'}).`}</div>
                   <div className="muted" style={{ fontSize: 12, margin: '6px 0' }}>우호 {Math.round(relOf(game, pid, p.from))} · {n.name} 병력 {fmtTroops(powerOf(game, p.from))}</div>
                   <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
                     {cap && <button onClick={() => { goTo(cap); setPeek(true); }}>📍 지도에서 보기</button>}

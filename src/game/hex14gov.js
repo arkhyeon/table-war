@@ -6,6 +6,7 @@ import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
 import { hasPolicy, POLICY_UPKEEP } from './hex14policy.js';
 import { initPeople, peopleTurn } from './hex14people.js';
+import { makeVassal, vassalTurn } from './hex14vassal.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
 const FOOD_PER = 0.02; // 병사 1명이 한 순(10일)에 먹는 병량
@@ -166,8 +167,10 @@ export function answerInbox(s, i, yes) {
   const p = s.inbox[i];
   if (!p) return;
   s.inbox.splice(i, 1);
-  if (yes) makePact(s, p.from, s.playerId, p.type);
-  else addRel(s, p.from, s.playerId, -5);
+  if (!yes) { addRel(s, p.from, s.playerId, p.type === 'vassal_demand' ? -10 : -5); return; }
+  if (p.type === 'vassal_offer') makeVassal(s, s.playerId, p.from);
+  else if (p.type === 'vassal_demand') makeVassal(s, p.from, s.playerId);
+  else makePact(s, p.from, s.playerId, p.type);
 }
 
 // ── 시장: 금으로 병량을 사고팔기 ──
@@ -308,6 +311,7 @@ export function govTurn(s, grid) {
   spreadLand(s, grid);
   peopleTurn(s);
   diplomacyTurn(s, rng);
+  vassalTurn(s, grid, rng);
   people(s, rng);
 }
 
