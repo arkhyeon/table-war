@@ -219,6 +219,8 @@ export function createHex14(world, base) {
   };
   initGov(st, makeRng(`gov0:${base.seed}`));
   rollWeather(st);
+  // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
+  st.kmScale = Math.min(2, 30 / (getScenario(base.scenarioId)?.kmPerHex || 30));
   st.playerStart = castles.filter((c) => c.owner === base.playerId && c.kind !== 'pass').length; // 작은 나라로 시작하면 숨 돌릴 틈이 김
   return st;
 }
@@ -318,7 +320,7 @@ export const commandCap = (s, gids) => {
   const caps = gensOf(s, gids).map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
   return caps.length ? Math.round(caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) : 0;
 };
-export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6) * (u.siege ? 0.7 : 1); // 하루에 평지 0.6칸 (기마 0.8칸), 공성병기를 끌면 느림
+export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6) * (u.siege ? 0.7 : 1) * (s.kmScale || 1); // 하루에 평지 0.6칸 (기마 0.8칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
   if (grid.sea?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);

@@ -60,11 +60,26 @@ function paintTerrain(grid, world) {
     const x = cx + (hash(i, 2) - 0.5) * sz, y = cy + (hash(i, 3) - 0.5) * sz;
     ctx.beginPath(); ctx.arc(x - sz * 0.25, y, sz * 0.25, Math.PI * 1.1, Math.PI * 1.9); ctx.arc(x + sz * 0.25, y, sz * 0.25, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
   }
+  // 세계 지도 북쪽 끝: 북극 바다는 얼음(해빙)으로 — 지도가 잘린 게 아니라 얼어붙은 바다로 보이게
+  const bb = getScenario(world.scenarioId)?.bbox;
+  if (bb && bb[2] - bb[0] >= 359) {
+    const iceRow = (c) => 7 + Math.sin(c * 0.21) * 1.6 + Math.sin(c * 0.07 + 1.3) * 2.2 + hash(c, 77) * 1.2;
+    for (let i = 0; i < grid.N; i++) {
+      if (grid.terrain[i] !== 0) continue;
+      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c);
+      if (r > lim + 1.5) continue;
+      hexPath(i, 1.06);
+      // 가장자리는 깨진 얼음(옅게), 안쪽은 두꺼운 얼음
+      ctx.fillStyle = r > lim ? `rgba(226,238,244,${0.55 + hash(i, 78) * 0.3})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
+      ctx.fill();
+      if (r <= lim && hash(i, 80) < 0.25) { ctx.strokeStyle = 'rgba(150,180,200,0.6)'; ctx.lineWidth = sz * 0.06; const [cx, cy] = grid.center(i); ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + (hash(i, 81) - 0.5) * sz); ctx.lineTo(cx + sz * 0.1, cy); ctx.lineTo(cx + sz * 0.5, cy + (hash(i, 82) - 0.5) * sz); ctx.stroke(); }
+    }
+  }
   // 모래톱: 바다와 맞닿은 땅
   for (let i = 0; i < grid.N; i++) {
     if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue;
     hexPath(i, 1.18);
-    ctx.fillStyle = '#e8d9a8';
+    ctx.fillStyle = grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8'; // 동토 해안은 모래 대신 회색 자갈
     ctx.fill();
   }
   // 땅 바탕: 지형 색에 칸마다 살짝 다른 밝기
@@ -92,8 +107,12 @@ function paintTerrain(grid, world) {
       ctx.lineWidth = sz * 0.08;
       for (let k = 0; k < 2; k++) { const x = cx + (hash(i, 40 + k) - 0.5) * sz, y = cy + (hash(i, 50 + k) - 0.5) * sz; ctx.beginPath(); ctx.arc(x, y + sz * 0.3, sz * 0.4, Math.PI * 1.2, Math.PI * 1.8); ctx.stroke(); }
     } else if (t === 5) {
-      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      // 동토: 눈 더미 결과 마른 풀포기
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
       for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(cx + (hash(i, 60 + k) - 0.5) * sz * 1.4, cy + (hash(i, 70 + k) - 0.5) * sz * 1.4, sz * 0.08, 0, 7); ctx.fill(); }
+      ctx.strokeStyle = 'rgba(140,165,180,0.55)'; ctx.lineWidth = sz * 0.07;
+      for (let k = 0; k < 2; k++) { if (hash(i, 90 + k) > 0.55) continue; const x = cx + (hash(i, 92 + k) - 0.5) * sz * 1.2, y = cy + (hash(i, 94 + k) - 0.5) * sz; ctx.beginPath(); ctx.arc(x, y + sz * 0.25, sz * 0.35, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
+      if (hash(i, 96) < 0.3) { ctx.strokeStyle = 'rgba(120,130,90,0.6)'; ctx.lineWidth = sz * 0.05; const x = cx + (hash(i, 97) - 0.5) * sz, y = cy + (hash(i, 98) - 0.5) * sz; ctx.beginPath(); ctx.moveTo(x - sz * 0.08, y); ctx.lineTo(x - sz * 0.04, y - sz * 0.14); ctx.moveTo(x + sz * 0.06, y); ctx.lineTo(x + sz * 0.05, y - sz * 0.15); ctx.stroke(); }
     }
   }
   // 칸 테두리 (아주 옅게)
@@ -256,6 +275,7 @@ function DuelView({ d, game }) {
 
 export default function Hex14({ world, game, setGame, onExit }) {
   const grid = useMemo(() => buildGrid(world), [world]);
+  const polar = useMemo(() => { const bb = getScenario(world.scenarioId)?.bbox; return !!bb && bb[2] - bb[0] >= 359; }, [world]);
   const pid = game.playerId;
   const me = game.nations[pid];
   const startYear = getScenario(game.scenarioId)?.startYear ?? 200;
@@ -339,9 +359,20 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.setTransform(dpr * k, 0, 0, dpr * k, -vx * k * dpr, -vy * k * dpr);
     ctx.imageSmoothingEnabled = true;
     const B = land.current.base;
+    // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (잘린 끝처럼 안 보이게)
+    if (polar) { ctx.fillStyle = '#e3ecf1'; ctx.fillRect(-grid.W, -grid.H * 2, grid.W * 3, grid.H * 2 + grid.size * 2); }
     ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+    // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
+    if (!polar) {
+      const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(63,117,152,';
+      const edge = (x0, y0, x1, y1, rx, ry, rw, rh) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, sea + '1)'); g.addColorStop(1, sea + '0)'); ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh); };
+      edge(0, 0, 0, m, 0, 0, W, m);
+      edge(0, Hh, 0, Hh - m, 0, Hh - m, W, m);
+      edge(0, 0, m, 0, 0, 0, m, Hh);
+      edge(W, 0, W - m, 0, W - m, 0, m, Hh);
+    }
     // 눈 덮인 북쪽
     if (s.weather?.kind === 'snow') {
       if (!land.current.snow) {

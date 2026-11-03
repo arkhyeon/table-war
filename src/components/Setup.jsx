@@ -82,7 +82,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         {showSaves && (
           <div style={{ marginTop: 12 }}>
-            <SaveSlots onLoad={(d) => { if (!onResume(d)) setError('이 저장은 불러올 수 없습니다(이전 버전).'); }} />
+            <SaveSlots onLoad={(d) => { if (!onResume(d)) setError('이 저장은 불러올 수 없습니다 — 업데이트로 지도 크기가 바뀌었거나 이전 버전입니다. 세계사 저장은 그대로 됩니다.'); }} />
           </div>
         )}
         <h3 style={{ marginTop: 18 }}>1. 시나리오</h3>

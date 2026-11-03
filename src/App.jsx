@@ -4,6 +4,7 @@ import Game from './components/Game.jsx';
 import Hex14 from './components/Hex14.jsx';
 import { generateWorld } from './game/mapgen.js';
 import { getScenario } from './game/scenarios.js';
+import { buildGrid } from './game/hex14.js';
 import { loadSave, writeSave, writeHistory, loadSlot, SLOT_COUNT } from './storage.js';
 import { cloudSave } from './cloud.js';
 import { describe } from './components/SaveSlots.jsx';
@@ -41,6 +42,8 @@ export default function App() {
     const scn = getScenario(save.scenarioId);
     if (!scn || (save.state?.version !== 5 && save.state?.version !== 14)) return false;
     const world = generateWorld(scn, save.seed, save.state.opts?.detail || 'normal');
+    // 지도 크기가 바뀐(업데이트 전) 삼국지14식 저장은 칸 수가 달라 불러올 수 없음
+    if (save.state.mode === 'hex14' && save.state.owner?.length !== buildGrid(world).N) return false;
     if (save.state.version === 5 && world.regions.length !== save.state.regions.length) return false;
     start(world, scn, save.state);
     return true;
