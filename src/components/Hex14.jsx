@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -610,12 +610,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (on || u.cut) { ctx.beginPath(); ctx.arc(cx, cy - sz * 0.55, pr + sz * 0.12, 0, 7); ctx.lineWidth = Math.max(sz * 0.22, 2 * px); ctx.strokeStyle = on ? '#ffe066' : '#ff7a3c'; ctx.stroke(); }
       // 공성병기를 끌고 다니는 부대: 초상 왼쪽 아래에 투석기
       if (u.siege) {
-        const bx = cx - pr * 1.25, by = cy + sz * 0.35;
-        ctx.save(); ctx.lineWidth = Math.max(sz * 0.08, px); ctx.strokeStyle = '#2b1a0c';
-        ctx.fillStyle = '#7a4b22'; ctx.fillRect(bx - sz * 0.45, by - sz * 0.12, sz * 0.9, sz * 0.18); ctx.strokeRect(bx - sz * 0.45, by - sz * 0.12, sz * 0.9, sz * 0.18);
-        ctx.strokeStyle = '#5a3416'; ctx.lineWidth = Math.max(sz * 0.12, px); ctx.beginPath(); ctx.moveTo(bx + sz * 0.35, by - sz * 0.1); ctx.lineTo(bx - sz * 0.35, by - sz * 0.75); ctx.stroke();
-        ctx.fillStyle = '#9a9a9a'; ctx.beginPath(); ctx.arc(bx - sz * 0.38, by - sz * 0.8, sz * 0.14, 0, 7); ctx.fill();
-        ctx.fillStyle = '#3a220d'; for (const dx of [-0.3, 0.3]) { ctx.beginPath(); ctx.arc(bx + dx * sz, by + sz * 0.1, sz * 0.13, 0, 7); ctx.fill(); }
+        // 동그란 배지 안에 투석기 (바퀴 달린 받침 + 던지는 팔 + 돌)
+        const r = sz * 0.62, bx = cx - pr * 1.05, by = cy + sz * 0.2;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(bx, by, r, 0, 7); ctx.fillStyle = '#f4e6c4'; ctx.fill();
+        ctx.lineWidth = Math.max(sz * 0.12, 1.5 * px); ctx.strokeStyle = n.color; ctx.stroke();
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#5a3416'; ctx.lineWidth = Math.max(sz * 0.11, px);
+        ctx.beginPath(); ctx.moveTo(bx - r * 0.6, by + r * 0.3); ctx.lineTo(bx + r * 0.6, by + r * 0.3); ctx.stroke(); // 받침
+        ctx.beginPath(); ctx.moveTo(bx - r * 0.1, by + r * 0.3); ctx.lineTo(bx + r * 0.15, by - r * 0.15); ctx.stroke(); // 기둥
+        ctx.beginPath(); ctx.moveTo(bx + r * 0.5, by + r * 0.15); ctx.lineTo(bx - r * 0.45, by - r * 0.55); ctx.stroke(); // 팔
+        ctx.fillStyle = '#7d7d7d'; ctx.beginPath(); ctx.arc(bx - r * 0.5, by - r * 0.6, r * 0.2, 0, 7); ctx.fill(); // 돌
+        ctx.fillStyle = '#3a220d'; for (const dx of [-0.38, 0.38]) { ctx.beginPath(); ctx.arc(bx + dx * r, by + r * 0.45, r * 0.17, 0, 7); ctx.fill(); }
         ctx.restore();
       }
       if (u.gens.length > 1) { ctx.font = `bold ${sz * 0.6}px sans-serif`; ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#111'; ctx.lineWidth = sz * 0.12; const t = `+${u.gens.length - 1}`; ctx.strokeText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); ctx.fillText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); }
@@ -1198,7 +1204,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       {selUnit && (() => {
         const gs = gensOf(game, selUnit.gens), st = unitStats(game, selUnit);
         const tgt = selUnit.order ? (selUnit.order.kind === 'castle' ? game.castles[selUnit.order.id]?.name : selUnit.order.kind === 'unit' ? `${gensOf(game, unitById(selUnit.order.id)?.gens || [])[0]?.name || '?'} 부대` : '지정한 곳') : '없음';
-        const days = selUnit.path.length ? Math.ceil(selUnit.path.length / 0.6) : 0;
+        const days = selUnit.path.length ? Math.ceil(selUnit.path.reduce((a, t, i) => a + Math.min(3, moveCost(grid, i ? selUnit.path[i - 1] : selUnit.tile, t, game, selUnit)), 0) / speedOf(game, selUnit)) : 0;
         return (
           <div className="card">
             <h3 style={{ margin: '0 0 6px' }}>⚑ {gs.map((g) => g.name).join('·')} 부대 <small className="muted">{game.nations[selUnit.nation].name}</small></h3>
@@ -1518,7 +1524,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
           {sendGen && <div className="map-hint">➡️ {game.generals[sendGen]?.name}을(를) 보낼 내 성을 누르세요 (병력 {fmtTroops(callAmt)}) <button className="hint-clear" onClick={() => setSendGen(null)}>✕ 취소</button></div>}
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 지웠습니다' }; })}>경유지 지우기</button> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 지웠습니다' }; })}>경유지 지우기</button> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>

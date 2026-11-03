@@ -22,7 +22,7 @@ export const weatherText = (s) => { const w = s.weather || { kind: 'clear' }; re
 export function weatherCost(s, grid, to, cost) {
   const w = s.weather;
   if (!w || grid.sea?.[to]) return cost;
-  if (w.kind === 'snow' && grid.center(to)[1] < grid.H * 0.55) return cost * 1.6;
+  if (w.kind === 'snow' && grid.center(to)[1] < grid.H * 0.55) return cost * 1.35;
   if (w.kind === 'rain') return cost * 1.15 + (grid.river[to] ? 1 : 0);
   return cost;
 }

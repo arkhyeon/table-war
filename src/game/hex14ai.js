@@ -198,7 +198,9 @@ export function aiTurn14(s, grid, nid, scope = null) {
     for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
   }
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)
-  const hubs = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'));
+  // 포위된 성(적 부대가 바로 옆)에는 순간 이동으로 병력을 넣지 않음 — 원군은 부대·수송으로만
+  const besieged = (c) => s.units.some((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 1);
+  const hubs = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && !besieged(c));
   for (const c of mine) {
     if (hubs.includes(c) || threatNear(s, grid, c) > 0) continue;
     const extra = c.troops - 1500;

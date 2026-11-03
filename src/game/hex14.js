@@ -320,7 +320,7 @@ export const commandCap = (s, gids) => {
   const caps = gensOf(s, gids).map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
   return caps.length ? Math.round(caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) : 0;
 };
-export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6) * (u.siege ? 0.7 : 1) * (s.kmScale || 1); // 하루에 평지 0.6칸 (기마 0.8칸), 공성병기를 끌면 느림
+export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 1.0 : 0.75) * (u.siege ? 0.75 : 1) * (s.kmScale || 1); // 하루에 평지 0.75칸 (기마 1칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
   if (grid.sea?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
@@ -649,7 +649,7 @@ export function stepDay(s, grid) {
     const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1);
     c.dur = Math.max(0, c.dur - wall);
     // 약소국은 결사 항전: 수비병 피해 −15%
-    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1);
+    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1);
     c.troops -= kill;
     u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1);
     u.morale -= walled ? 0.5 : 0;
