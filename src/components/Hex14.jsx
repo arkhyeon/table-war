@@ -1246,9 +1246,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
       })()}
       {!selCastle && !selUnit && !selFort && (
         <>
-          <div className="row h14-tabs">
+          <div className="h14-tabs seg">
             {[['home', '🏯 세력'], ['diplo', '🤝 외교'], ['people', '🧑 인재'], ['log', '📜 기록'], ['help', '❓']].map(([k, l]) => (
-              <button key={k} className={'sm' + (tab === k ? ' primary' : '')} onClick={() => setTab(k)}>{l}</button>
+              <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>
             ))}
           </div>
           {tab === 'home' && (
@@ -1489,19 +1489,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
 
   return (
     <div className="h14">
-      <div className="topbar">
-        <b><span className="chip" style={{ background: me.color }} /> {me.name}</b>
-        <span>{dateOf(game, startYear)} {game.day + 1}일</span>
-        <span title="눈: 북쪽 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
-        <span>💰 {fmtGold(me.gold)} <small className="muted" style={{ color: inc < 0 ? 'var(--danger)' : undefined }}>({inc >= 0 ? '+' : ''}{fmtGold(inc)}/순)</small></span>
-        <span style={{ color: food < use * 6 ? 'var(--danger)' : undefined }}>🍚 {fmtTroops(food)}</span>
-        <span>🏯 {myCities}/{cities.length}도시</span>
-        <span>⚑ 부대 {myUnits.length}</span>
-        <span style={{ marginLeft: 'auto' }} />
-        <button className="sm" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
-        <button className="sm" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
-        <button className="sm" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶ 보통' : '⏩ 빠르게'}</button>
-        <button className="sm" onClick={onExit}>🚪 나가기</button>
+      <div className="topbar h14-top">
+        <b className="tb-nation"><span className="chip" style={{ background: me.color }} /> {me.name}</b>
+        <div className="tb-stats">
+          <span className="pill">📅 {dateOf(game, startYear)} {game.day + 1}일</span>
+          <span className="pill" title="눈: 북쪽 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
+          <span className="pill">💰 {fmtGold(me.gold)} <small style={{ color: inc < 0 ? 'var(--danger)' : 'var(--ok)' }}>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</small></span>
+          <span className={'pill' + (food < use * 6 ? ' bad' : '')}>🍚 {fmtTroops(food)}</span>
+          <span className="pill">🏯 {myCities}<small>/{cities.length}</small></span>
+          <span className="pill">⚑ {myUnits.length}</span>
+        </div>
+        <div className="tb-btns">
+          <button className="icon" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
+          <button className="icon" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
+          <button className="icon" title="진행 속도" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶' : '⏩'}</button>
+          <button className="icon" title="나가기" onClick={onExit}>🚪</button>
+        </div>
       </div>
       <div className="h14-body">
         <div className="h14-map" ref={wrap} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}>
@@ -1593,6 +1596,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
         </div>
         <div className={'h14-panel' + (sheet ? ' open' : '')}>
+          <div className="h14-grip" onClick={() => { setSheet(false); }} />
           <button className="sm h14-close" title="닫고 선택 해제" onClick={() => { setSheet(false); setSel(null); setSortieOpen(false); }}>✕</button>
           {panel}
         </div>

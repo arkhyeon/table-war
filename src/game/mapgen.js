@@ -113,6 +113,34 @@ function buildHistorical(scn, g) {
     }
     terrain[i] = n >= 4 ? T.PLAINS : T.SEA;
   }
+  // 세계 지도: 일본·영국·필리핀·뉴질랜드처럼 가는 섬은 칸이 굵어 실제보다 훨씬 작아 보이므로 한 겹 두껍게
+  if (scn.bbox[2] - scn.bbox[0] >= 300) {
+    const { comp, list } = landComponents(g, (i) => terrain[i] !== T.SEA);
+    const total = list.reduce((a, l) => a + l.length, 0);
+    const small = (c) => c >= 0 && list[c].length < total * 0.012;
+    // 큰 대륙에서 3칸 안의 바다는 그대로 둠 (영국 해협·대한 해협이 막히지 않게)
+    const near = new Int8Array(N).fill(-1), q = [];
+    for (let i = 0; i < N; i++) if (comp[i] >= 0 && !small(comp[i])) { near[i] = 0; q.push(i); }
+    for (let k = 0; k < q.length; k++) {
+      const t = q[k];
+      if (near[t] >= 3) continue;
+      for (let d = 0; d < 6; d++) { const j = neighborIndex(g.cols, g.rows, t, d); if (j >= 0 && near[j] < 0) { near[j] = near[t] + 1; q.push(j); } }
+    }
+    const grow = [];
+    for (let i = 0; i < N; i++) {
+      if (terrain[i] !== T.SEA || near[i] >= 0) continue;
+      let own = -1, other = false;
+      for (let d = 0; d < 6; d++) {
+        const j = neighborIndex(g.cols, g.rows, i, d);
+        if (j < 0 || comp[j] < 0) continue;
+        if (!small(comp[j])) { other = true; break; }
+        if (own >= 0 && own !== comp[j]) { other = true; break; }
+        own = comp[j];
+      }
+      if (own >= 0 && !other) grow.push(i);
+    }
+    for (const i of grow) terrain[i] = T.PLAINS;
+  }
   const n1 = makeNoise(rng), n2 = makeNoise(rng);
   const ranges = RANGES.map((r) => ({ ...r, px: r.pts.map(([lo, la]) => geo.toPx(lo, la)) }));
   for (let i = 0; i < N; i++) {
