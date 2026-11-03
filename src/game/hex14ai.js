@@ -202,6 +202,18 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
   }
+  // 2.2) 구원: 포위된 성(적 부대가 바로 옆)은 수송대가 못 들어가니, 가까운 우리 성 중 병력 많은 곳에서 장수가 부대를 이끌고 포위군을 침
+  for (const c of mine) {
+    const sieger = s.units.filter((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 1).sort((a, b) => b.troops - a.troops)[0];
+    if (!sieger || s.units.some((u) => u.nation === nid && u.order?.kind === 'unit' && u.order.id === sieger.id)) continue;
+    const from = mine.filter((d) => d !== c && threatNear(s, grid, d) === 0 && grid.dist(d.tile, c.tile) <= 14 * grid.k && Object.values(s.generals).some((g) => g.castle === d.id && g.status === 'active')).sort((a, b) => b.troops - a.troops)[0];
+    if (!from) continue;
+    const gs = Object.values(s.generals).filter((g) => g.castle === from.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war)).slice(0, 3).map((g) => g.id);
+    const amt = Math.floor(Math.min(commandCap(s, gs), from.troops - 3000) / 1000) * 1000;
+    if (amt < sieger.troops * 1.2) continue;
+    const r = sortie(s, grid, from.id, gs, amt);
+    if (r.ok) order(s, grid, mark(r.unit), 'unit', sieger.id);
+  }
   // 2.5) 집결: 노리는 나라의 성에 가장 가까운 우리 성(장수 있음)으로, 위협 없는 다른 성의 남는 병력을 보냄
   // 노릴 나라가 없는 전략(확장·내실)도 병력을 흩어 두지 않게: 가장 약한 맞닿은 이웃 쪽으로 모음
   const stageFocus = focus ?? neighbors(s, grid, nid).filter((x) => !pactOf(s, nid, x)).sort((a, b) => powerOf(s, a) - powerOf(s, b))[0] ?? null;
