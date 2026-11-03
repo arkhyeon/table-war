@@ -326,6 +326,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const drag = useRef(null);
   const pointers = useRef(new Map());
   const shiftRef = useRef(false);
+  const pressT = useRef(null); // 꾹 누르기 타이머 (폰: 경유지 추가)
   const gameRef = useRef(game);
   gameRef.current = game;
   const selRef = useRef(sel);
@@ -766,6 +767,19 @@ export default function Hex14({ world, game, setGame, onExit }) {
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
     if (pointers.current.size === 2) { const [[ax, ay], [bx, by]] = [...pointers.current.values()]; drag.current = { pinch: Math.hypot(ax - bx, ay - by), k: view.current.k, moved: true }; return; }
     drag.current = { x: e.clientX, y: e.clientY, vx: view.current.x, vy: view.current.y, moved: false };
+    clearTimeout(pressT.current);
+    const sl = selRef.current, g0 = gameRef.current;
+    if (sl?.type === 'unit' && g0.units.some((u) => u.id === sl.id && u.nation === pid)) {
+      const d0 = drag.current, x0 = e.clientX, y0 = e.clientY;
+      pressT.current = setTimeout(() => {
+        if (drag.current !== d0 || d0.moved || pointers.current.size !== 1) return;
+        d0.long = true; // 손을 떼도 보통 누르기로 치지 않음
+        shiftRef.current = true;
+        try { navigator.vibrate?.(30); } catch {}
+        tap(x0, y0);
+        shiftRef.current = false;
+      }, 450);
+    }
   };
   const onMove = (e) => {
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
@@ -779,6 +793,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const dx = e.clientX - d.x, dy = e.clientY - d.y;
     if (!d.moved && Math.hypot(dx, dy) < 6) return;
     d.moved = true;
+    clearTimeout(pressT.current);
     view.current.x = d.vx - dx / view.current.k;
     view.current.y = d.vy - dy / view.current.k;
     draw();
@@ -788,7 +803,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     pointers.current.delete(e.pointerId);
     const d = drag.current;
     drag.current = null;
-    if (d && !d.moved && !d.pinch) tap(e.clientX, e.clientY);
+    clearTimeout(pressT.current);
+    if (d && !d.moved && !d.pinch && !d.long) tap(e.clientX, e.clientY);
   };
   const zoomAt = (px, py, f) => {
     const v = view.current;
@@ -1582,7 +1598,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
           {sendGen && <div className="map-hint">➡️ {game.generals[sendGen]?.name}을(를) 보낼 내 성을 누르세요 (병력 {fmtTroops(callAmt)}) <button className="hint-clear" onClick={() => setSendGen(null)}>✕ 취소</button></div>}
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령 (PC: Shift+클릭은 경유지 추가)'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <><button className="sm" title="마지막에 넣은 경유지 하나만 취소" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️ 하나 취소</button><button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 모두 지웠습니다' }; })}>모두 지우기</button></> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '눌러서 명령 · 꾹 눌러(PC는 Shift+클릭) 경유지 추가'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <><button className="sm" title="마지막에 넣은 경유지 하나만 취소" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️ 하나 취소</button><button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 모두 지웠습니다' }; })}>모두 지우기</button></> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>
