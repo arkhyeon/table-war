@@ -2,6 +2,7 @@
 import { foodUse, powerOf, trade, pactOf, propose } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
+import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
 import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops } from './hex14.js';
@@ -64,7 +65,12 @@ export function chooseStrategy(s, grid, nid) {
   const rival = pool.slice().sort((a, b) => Math.abs(Math.log(powerOf(s, a) / mp)) - Math.abs(Math.log(powerOf(s, b) / mp)))[0];
   const prey = () => (rng() < 0.55 ? weakest : rival) ?? null;
   let k, focus = null;
-  if (top.id === nid && topShare >= 0.22) {
+  // 후반 결전: 1등이 넓게 앞서면 남은 이웃 중 가장 센 맞수(속국 아닌 나라)를 정면으로 노림 — 잔존 세력만 두드리며 교착되지 않게
+  const bigRival = pool.filter((x) => lordOf(s, x) === null).sort((a, b) => citiesOf(s, b) - citiesOf(s, a))[0];
+  if (top.id === nid && topShare >= 0.35 && bigRival !== undefined && citiesOf(s, bigRival) >= 3) {
+    k = 'blitz';
+    focus = bigRival;
+  } else if (top.id === nid && topShare >= 0.22) {
     k = 'hold';
     // 수성: 이웃 하나만 침
     focus = prey();
@@ -295,7 +301,7 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
     // 이미 그 성으로 가는 우리 부대와 힘을 합침
     const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
-    const stall = Math.max(0, Math.min(0.2, (s.turn - (n.stallSince ?? s.turn) - 12) / 60));
+    const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60)); // 교착이 길수록 과감해짐 (최대 35%)
     const need = (n.strat === 'blitz' ? 1.0 : n.strat === 'expand' || n.strat === 'ride' || n.strat === 'coalition' ? 1.1 : 1.25) * (1 - stall);
     if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * need > (troops + ours) * P.bold) continue; // 수비보다 넉넉히 모였을 때만
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
