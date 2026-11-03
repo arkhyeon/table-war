@@ -203,8 +203,10 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
   }
   // 2.5) 집결: 노리는 나라의 성에 가장 가까운 우리 성(장수 있음)으로, 위협 없는 다른 성의 남는 병력을 보냄
-  if (!daily && !scope && focus !== null && focus !== undefined && s.nations[focus]?.alive) {
-    const fc = s.castles.filter((x) => x.owner === focus);
+  // 노릴 나라가 없는 전략(확장·내실)도 병력을 흩어 두지 않게: 가장 약한 맞닿은 이웃 쪽으로 모음
+  const stageFocus = focus ?? neighbors(s, grid, nid).filter((x) => !pactOf(s, nid, x)).sort((a, b) => powerOf(s, a) - powerOf(s, b))[0] ?? null;
+  if (!daily && !scope && stageFocus !== null && stageFocus !== undefined && s.nations[stageFocus]?.alive) {
+    const fc = s.castles.filter((x) => x.owner === stageFocus);
     const hasGen = (c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active');
     const stage = mine.filter(hasGen).map((c) => [c, Math.min(...fc.map((x) => grid.dist(x.tile, c.tile)))]).sort((a, b) => a[1] - b[1])[0]?.[0];
     if (stage && fc.length) for (const c of mine) {
