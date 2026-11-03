@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
+import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
@@ -273,6 +274,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [chain, setChain] = useState(false); // 이어서 명령(경유지) 모드
   const [sendFrom, setSendFrom] = useState(null); // 병력 수송: 보내는 성
   const [sendAmt, setSendAmt] = useState(5000);
+  const [aud, setAud] = useState(audioOpt());
+  // 처음 누를 때 소리를 켬 (브라우저 규칙)
+  useEffect(() => { const on = () => unlockAudio(); window.addEventListener('pointerdown', on, { once: true }); return () => window.removeEventListener('pointerdown', on); }, []);
   const [placeFort, setPlaceFort] = useState(null); // 성 수비대가 지을 시설 {cid, kind} // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [speed, setSpeed] = useState(420);
   const [toastMsg, setToast] = useState(null);
@@ -728,6 +732,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const r = fn(s);
     if (r && r.ok === false) { toast(r.msg); return r; }
     setGame(s);
+    sfx('click');
     if (r?.msg) toast(r.msg);
     return r;
   };
@@ -845,6 +850,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 순이 끝남: 정산 후 이번 순 소식
       snap.fx = [];
       endTurn14(snap, grid);
+      sfx('gong');
       const news = snap.log.filter((l) => (l.n || 0) > startN && l.nations?.includes(pid) && ['capture', 'battle', 'diplo', 'bad'].includes(l.kind) && !l.text.startsWith('🔥')).map((l) => l.text);
       for (const c of snap.castles.filter((x) => x.owner === pid)) {
         const foes = snap.units.filter((u) => enemy(snap, pid, u.nation) && ((u.order?.kind === 'castle' && u.order.id === c.id) || grid.dist(u.tile, c.tile) <= 3));
@@ -862,6 +868,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
       stepDay(s, grid);
       spawnFx(s);
+      // 효과음: 내 부대·성이 낀 일만
+      {
+        const mineT = new Set([...s.units.filter((u) => u.nation === pid).map((u) => u.tile), ...s.castles.filter((c) => c.owner === pid).map((c) => c.tile)]);
+        const near = (e) => mineT.has(e.tile) || mineT.has(e.a) || mineT.has(e.b) || mineT.has(e.to);
+        const fx = s.fx || [];
+        if (fx.some((e) => e.type === 'capture')) sfx('capture');
+        else if (fx.some((e) => e.type === 'clash' && near(e))) sfx('clash');
+        else if (fx.some((e) => e.type === 'hit' && near(e))) sfx('hit');
+        if ((s.duels || []).some((x) => x.an === pid || x.bn === pid)) sfx('duel');
+        setMood(s.units.some((u) => u.nation === pid && s.units.some((v) => enemy(s, pid, v.nation) && grid.dist(u.tile, v.tile) <= 3)) ? 'battle' : 'calm');
+      }
       // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
       const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
       const ui = (s.fx || []).find((e) => e.type === 'tactic' && e.unique && (e.nation === pid || s.units.some((u) => u.nation === pid && u.tile === e.to)));
@@ -1450,6 +1467,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
         <span>🏯 {myCities}/{cities.length}도시</span>
         <span>⚑ 부대 {myUnits.length}</span>
         <span style={{ marginLeft: 'auto' }} />
+        <button className="sm" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
+        <button className="sm" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
         <button className="sm" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶ 보통' : '⏩ 빠르게'}</button>
         <button className="sm" onClick={onExit}>🚪 나가기</button>
       </div>
