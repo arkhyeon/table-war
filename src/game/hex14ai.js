@@ -166,6 +166,10 @@ export function aiTurn14(s, grid, nid, scope = null) {
         continue;
       }
     }
+    // 2칸 안 적 망루(완공)에 맞고 있으면 성 바로 앞에서 공성 중이 아닌 한 먼저 부숨
+    const tw = (s.forts || []).find((f) => f.kind === 'tower' && !f.left && enemy(s, nid, f.owner) && grid.dist(f.tile, u.tile) <= 2);
+    if (tw && u.order?.kind !== 'fort' && !(u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1)) { order(s, grid, u, 'fort', tw.id); continue; }
+    if (u.order?.kind === 'fort') continue;
     const o = u.order;
     const bad = !o || (o.kind === 'castle' && !enemy(s, nid, s.castles[o.id].owner) && o.id !== home?.id) || (o.kind === 'unit' && !s.units.some((x) => x.id === o.id)) || (o.kind === 'tile' && !u.path.length);
     if (bad || !u.path.length) {

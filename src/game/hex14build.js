@@ -194,9 +194,9 @@ export function fortsDay(s, grid) {
       // 2칸 안에서 가장 가까운 적 부대 하나만 쏨 (여러 부대를 한꺼번에 녹이지 않게)
       const u = s.units.filter((x) => enemy(s, f.owner, x.nation) && grid.dist(x.tile, f.tile) <= 2).sort((a, b) => grid.dist(a.tile, f.tile) - grid.dist(b.tile, f.tile))[0];
       if (u) {
-        const dmg = Math.round(70 + u.troops * 0.003);
+        const dmg = Math.round(100 + u.troops * 0.005);
         u.troops -= dmg;
-        u.morale -= 1;
+        u.morale -= 3; // 화살 비: 쉬어도 사기가 오르지 않음
         s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
       }
     }
@@ -208,7 +208,7 @@ export function fortsDay(s, grid) {
 // 컴퓨터: 위협받는 국경 도시 앞(적 쪽 2~3칸)에 망루나 진지를 성 수비대가 지음
 export function aiForts(s, grid, nid, threat) {
   const n = s.nations[nid];
-  if (n.gold < 30000 || (s.forts || []).filter((f) => f.owner === nid).length >= Math.ceil(s.castles.filter((c) => c.owner === nid).length * 0.5)) return; // 시설은 도시 2곳당 1개까지
+  if (n.gold < 30000) return; // 지역마다 망루 2개·시설 3개 제한만 (fortLimit)
   const c = s.castles.filter((x) => x.owner === nid && threat(x) > 0).sort((a, b) => threat(b) - threat(a))[0];
   if (!c) return;
   const foe = s.units.filter((u) => enemy(s, nid, u.nation)).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];

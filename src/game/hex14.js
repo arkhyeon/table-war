@@ -516,6 +516,15 @@ export function stepDay(s, grid) {
     const home = nearestCastle(s, grid, u.tile, u.nation);
     if (home && order(s, grid, u, 'castle', home.id).ok) log(s, `🏠 ${gensOf(s, u.gens)[0]?.name} 부대가 약해져 ${home.name}(으)로 돌아갑니다.`, 'info', [u.nation]);
   }
+  // 컴퓨터 부대(플레이어 군단 포함): 2칸 안 적 망루에 맞고 있으면 먼저 부수고 원래 명령으로 돌아감
+  for (const u of s.units) {
+    if (u.dead || (u.nation === s.playerId && !s.spectator && !u.corps) || u.order?.kind === 'fort') continue;
+    if (u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id]?.tile) <= 1) continue; // 성 바로 앞 공성 중이면 계속
+    const tw = (s.forts || []).find((f) => f.kind === 'tower' && !f.left && enemy(s, u.nation, f.owner) && grid.dist(f.tile, u.tile) <= 2);
+    if (!tw) continue;
+    const prev = u.order ? { ...u.order } : null, q = u.queue || [];
+    if (order(s, grid, u, 'fort', tw.id).ok) u.queue = prev ? [prev, ...q] : q;
+  }
   const rng = makeRng(`hex:${s.seed}:${s.turn}:${s.day}`);
   const cas = castleAt(s);
   // 1) 이동 (느린 부대부터 섞어서): 하루 이동력만큼, 적 부대 옆 칸에 들어서면 멈춤(통제 구역)
