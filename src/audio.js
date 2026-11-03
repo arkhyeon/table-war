@@ -71,51 +71,98 @@ function drum(t, vol = 0.5, out = bgmGain) {
   o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.45);
 }
 
-// ── 배경음: 4마디씩 오음 음계로 흘러가는 선율 (마디마다 조금씩 다르게) ──
+// ── 배경음: 대금 선율 + 가야금 반주 + 장구 장단 (전통 음악 분위기, 곡은 그때그때 새로 지음 — 기존 곡을 옮기지 않음) ──
+// 선율은 한 동기(4마디)를 만들어 A·A·A′·B로 되풀이하며 변형 → 흘러가기만 하지 않고 노래처럼 들리게
 const SCALES = {
-  calm: [0, 2, 4, 7, 9, 12, 14, 16], // 평조(밝은 오음계): 궁상각치우
-  tension: [0, 3, 5, 7, 10, 12, 15, 17], // 계면조 느낌(어두운 오음계)
-  battle: [0, 3, 5, 7, 10, 12, 15, 17],
+  calm: [0, 2, 4, 7, 9, 12, 14, 16, 19], // 평조: 밝은 오음계
+  tension: [0, 3, 5, 7, 10, 12, 15, 17, 19], // 계면조 느낌: 어두운 오음계
+  battle: [0, 3, 5, 7, 10, 12, 15, 17, 19],
 };
 let SCALE = SCALES.calm;
 const ROOT = 196; // G3
 const hz = (n) => ROOT * Math.pow(2, n / 12);
-let step = 0, nextT = 0, phrase = [];
-function newPhrase() {
-  // 앞 음에서 가까운 음으로 걷는 선율, 마지막은 으뜸음으로
+// 장단 (12칸 한 장단): 덩=양손, 쿵=북편, 덕=채편, 기=채편 작게
+const JANGDAN = {
+  calm: ['덩', '', '', '덕', '', '쿵', '', '덕', '기', '쿵', '', ''], // 굿거리처럼 느긋하게
+  tension: ['덩', '', '', '', '', '', '쿵', '', '', '덕', '', ''], // 무겁고 느리게
+  battle: ['덩', '', '덕', '쿵', '', '덕', '덩', '', '덕', '쿵', '덕', '덕'], // 자진모리처럼 몰아치게
+};
+const BEAT = { calm: 0.25, tension: 0.3, battle: 0.15 }; // 12칸 한 칸 길이(초)
+let step = 0, nextT = 0, song = null, sect = -1;
+
+// 대금: 숨소리 섞인 부드러운 소리, 길게 끌면 떨림
+function daegeum(freq, t, dur, vol = 0.22) {
+  const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
+  o.type = 'sine'; o.frequency.value = freq;
+  const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = freq * 2; const g2 = ctx.createGain(); g2.gain.value = 0.12;
+  const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 5.2; lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(dur > 0.6 ? freq * 0.012 : 0, t + Math.min(dur, 0.5));
+  lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+  f.type = 'lowpass'; f.frequency.value = freq * 5;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.08); g.gain.setValueAtTime(vol * 0.85, t + dur * 0.7); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g); g.connect(bgmGain);
+  [o, o2, lfo].forEach((x) => { x.start(t); x.stop(t + dur + 0.05); });
+  noise(t, Math.min(0.25, dur), vol * 0.25, freq * 3, bgmGain); // 숨소리
+}
+// 장구: 쿵(낮은 북편), 덕(채편 따닥), 덩(둘 다)
+function janggu(kind, t, vol) {
+  if (!kind) return;
+  if (kind === '쿵' || kind === '덩') drum(t, vol, bgmGain);
+  if (kind === '덕' || kind === '덩') noise(t, 0.05, vol * 0.9, 3200, bgmGain);
+  if (kind === '기') noise(t, 0.03, vol * 0.5, 4200, bgmGain);
+}
+
+// 동기 하나(4마디×12칸): 음과 길이. 디딤음(으뜸·5도)에 오래 머물고 이웃 음으로 움직임
+function motif() {
   const out = [];
-  let i = 3;
-  for (let k = 0; k < 16; k++) {
-    i = Math.max(0, Math.min(SCALE.length - 1, i + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
-    out.push(Math.random() < 0.28 ? null : SCALE[i]);
+  let i = 4;
+  for (let b = 0; b < 4; b++) {
+    let k = 0;
+    while (k < 12) {
+      const len = [3, 3, 6, 2, 1, 3][Math.floor(Math.random() * 6)];
+      const l = Math.min(len, 12 - k);
+      i = Math.max(0, Math.min(SCALE.length - 1, i + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
+      out.push({ at: b * 12 + k, len: l, n: Math.random() < 0.15 && k > 0 ? null : SCALE[i] });
+      k += l;
+    }
   }
-  out[15] = 0;
+  // 마지막 마디는 으뜸음으로 길게 맺음
+  const last = out.filter((x) => x.at >= 36);
+  if (last.length) { last[last.length - 1].n = SCALE[0] + 12; }
   return out;
 }
+// 곡: A·A·A′(끝만 다르게)·B(높은 데서) — 16마디마다 새 곡
+function newSong() {
+  const A = motif(), B = motif().map((x) => ({ ...x, n: x.n === null ? null : Math.min(x.n + 5, SCALE[SCALE.length - 1]) }));
+  const A2 = A.map((x) => ({ ...x }));
+  for (const x of A2) if (x.at >= 36 && x.n !== null) x.n = SCALE[3];
+  return [A, A, A2, B];
+}
+
 function tick() {
   if (!ctx) return;
   while (nextT < ctx.currentTime + 0.4) {
-    const k = step % 16;
-    if (k === 0) {
-      // 마디 첫 박에서만 분위기를 바꿈 (이틀 넘게 이어진 분위기로)
-      if (want !== mood && wantDays >= 2) mood = want;
-      SCALE = SCALES[mood];
-      phrase = newPhrase();
-      const beat0 = BEAT[mood];
-      drone(hz(-12), nextT, beat0 * 16, mood === 'calm' ? 0.07 : 0.1);
-      drone(hz(mood === 'calm' ? -5 : -9), nextT, beat0 * 16, 0.04);
+    const k = step % 48; // 4마디(=동기 하나) 안의 칸
+    if (step % 12 === 0) {
+      // 마디 첫 박: 분위기 바꿈(이틀 넘게 이어진 분위기로) — 바뀌면 그 분위기의 새 곡
+      if (want !== mood && wantDays >= 2) { mood = want; SCALE = SCALES[mood]; song = null; }
+      // 낮은 지속음 (가야금 저음현 울림)
+      drone(hz(-12), nextT, BEAT[mood] * 12, mood === 'calm' ? 0.05 : 0.08);
     }
+    // 4마디마다 다음 동기 (A·A·A′·B), 한 바퀴 돌면 새 곡
+    if (k === 0) { sect = (sect + 1) % 4; if (sect === 0 || !song) song = newSong(); }
+    if (!song) song = newSong();
     const beat = BEAT[mood];
-    const n = phrase[k];
-    if (n !== null && n !== undefined) pluck(hz(n), nextT, mood === 'battle' ? 0.6 : mood === 'tension' ? 1.0 : 1.4, mood === 'battle' ? 0.28 : 0.32);
-    if (k % 4 === 0 && Math.random() < 0.5) pluck(hz(n ?? 0) / 2, nextT, 1.8, 0.18);
-    // 북: 평상시는 마디에 두 번, 긴장은 낮게 네 번(심장 박동처럼), 전투는 두 박마다 + 마디 끝 몰아치기
-    if (mood === 'calm' ? k === 0 || k === 8 : mood === 'tension' ? k % 4 === 0 : k % 2 === 0 || k === 15) drum(nextT, mood === 'calm' ? 0.22 : mood === 'tension' ? 0.26 : 0.34);
+    const part = song[Math.max(0, sect)];
+    // 대금 선율
+    for (const x of part) if (x.at === k && x.n !== null) daegeum(hz(x.n + 12), nextT, x.len * beat * (mood === 'battle' ? 0.9 : 1.05), mood === 'battle' ? 0.16 : 0.2);
+    // 가야금 반주: 박마다 으뜸·5도·8도를 뜯음 (전투는 촘촘하게)
+    if (k % (mood === 'battle' ? 3 : 6) === 0) { const root = (part.find((x) => x.at <= k && x.at + x.len > k)?.n ?? 0) % 12; pluck(hz(root - 12), nextT, 1.2, 0.16); if (Math.random() < 0.6) pluck(hz(root - 5), nextT + beat, 0.9, 0.11); }
+    // 장구 장단
+    janggu(JANGDAN[mood][step % 12], nextT, mood === 'calm' ? 0.18 : mood === 'tension' ? 0.24 : 0.28);
     nextT += beat;
     step++;
   }
 }
-const BEAT = { calm: 0.36, tension: 0.32, battle: 0.24 };
 function startBgm() {
   nextT = ctx.currentTime + 0.1;
   if (timer) clearInterval(timer);

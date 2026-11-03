@@ -738,6 +738,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
       sfx: (k) => sfx(k),
+      mood: (m) => { setMood(m); setMood(m); },
       grid: () => grid,
       // 자동 시험용: 화면 버튼과 같은 명령을 함수로 (fn(s, grid, api))
       act: (fn) => { const s = clone(gameRef.current); const r = fn(s, grid, { sortie, order, draft14, draftMax14, sendTroops, startFort, castleFortCheck, propose, gift, renewPact, adoptPolicy, buildSiege, commandCap, enemy, powerOf, relOf, pactOf, acceptChance, startBuild, canBuild, unitStats, nearestCastle, askProtection, demandVassal, urgeSurrender, trade, recruit, rewardAll, autoJobs }); if (!(r && r.ok === false)) { gameRef.current = s; setGame(s); } return JSON.parse(JSON.stringify(r ?? null, (k, v) => (k === 'unit' ? v?.id : v))); },
