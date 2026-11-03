@@ -95,6 +95,15 @@ export function chooseStrategy(s, grid, nid) {
   return k;
 }
 
+
+// 싸움터에 보낼 장수: 무력·통솔 위주로 고르고, 성에는 정치 가장 높은 장수 한 명을 남겨 내정을 맡김
+export function fighters(s, c) {
+  const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active');
+  if (gs.length <= 1) return gs;
+  const keeper = gs.slice().sort((a, b) => b.pol - a.pol)[0];
+  return gs.filter((g) => g !== keeper || g.war + g.lead >= 170).sort((a, b) => b.war * 1.2 + b.lead - b.pol * 0.3 - (a.war * 1.2 + a.lead - a.pol * 0.3));
+}
+
 // 성 주변 위협: 6칸 안 적 부대 병력 합
 function threatNear(s, grid, c) {
   let t = 0;
@@ -178,7 +187,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (u.order?.kind === 'castle' && enemy(s, nid, s.castles[u.order.id].owner)) {
       const c = s.castles[u.order.id];
       const ours = s.units.filter((x) => x.nation === nid && x.order?.kind === 'castle' && x.order.id === c.id).reduce((a, x) => a + x.troops, 0);
-      if (u.troops < 1500 || c.troops * (c.dur > 0 ? 1.4 : 1) > ours * 1.6) {
+      if (u.troops < 1500 || (!u.harass && c.troops * (c.dur > 0 ? 1.4 : 1) > ours * 1.6)) {
         const t = u.troops >= 1500 ? tgt(u.tile, u.troops) : null;
         if (t && t.id !== c.id) order(s, grid, u, 'castle', t.id);
         else if (home) order(s, grid, u, 'castle', home.id);
@@ -205,7 +214,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   for (const c of mine) {
     const foe = s.units.filter((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 4 * grid.k).sort((a, b) => a.troops * (a.siege ? 0.7 : 1) - b.troops * (b.siege ? 0.7 : 1))[0];
     if (!foe) continue;
-    const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+    const gs = fighters(s, c);
     if (!gs.length || c.troops < foe.troops * (foe.siege ? 0.9 : 1.3) + 2000) continue;
     const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
@@ -216,7 +225,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (!sieger || s.units.some((u) => u.nation === nid && u.order?.kind === 'unit' && u.order.id === sieger.id)) continue;
     const from = mine.filter((d) => d !== c && threatNear(s, grid, d) === 0 && grid.dist(d.tile, c.tile) <= 14 * grid.k && Object.values(s.generals).some((g) => g.castle === d.id && g.status === 'active')).sort((a, b) => b.troops - a.troops)[0];
     if (!from) continue;
-    const gs = Object.values(s.generals).filter((g) => g.castle === from.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war)).slice(0, 3).map((g) => g.id);
+    const gs = fighters(s, from).slice(0, 3).map((g) => g.id);
     const amt = Math.floor(Math.min(commandCap(s, gs), from.troops - 3000) / 1000) * 1000;
     if (amt < sieger.troops * 1.2) continue;
     const r = sortie(s, grid, from.id, gs, amt);
@@ -244,7 +253,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const reserve = Math.max(2500, c.troops * P.reserve, foeCastle * 0.5) + threatNear(s, grid, c) * 0.8;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
-    const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+    const gs = fighters(s, c);
     if (!gs.length) continue;
     // 속공은 장수를 셋까지 몰아 넣고, 나머지는 둘 (군단은 무력 높은 장수부터)
     if (scope) gs.sort((a, b) => b.war - a.war);
@@ -262,7 +271,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const ready = [];
     for (const c of mine) {
       if (threatNear(s, grid, c) > 0) continue;
-      const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
+      const gs = fighters(s, c);
       if (!gs.length) continue;
       const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
       const spare = Math.floor((c.troops - Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.4)) / 1000) * 1000;
@@ -284,6 +293,20 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
         for (const r of near) { const o = sortie(s, grid, r.c.id, r.gids, r.troops); if (o.ok) order(s, grid, mark(o.unit), 'castle', x.id); }
         break;
       }
+    }
+  }
+  // 3.6) 갉아먹기: 노리는 나라보다 1.8배 넘게 세면, 한 번에 못 빼앗더라도 그 나라 국경 성 두 곳을 동시에 포위해 수비병을 깎음
+  //      (병력을 쌓아 두기만 하지 않고 압박 — 공성병기는 성 앞에서 만들고, 병력이 30% 아래로 떨어지면 돌아옴)
+  if (!scope && focus !== null && focus !== undefined && s.nations[focus]?.alive && powerOf(s, nid) >= powerOf(s, focus) * 1.8 && nUnits() < maxUnits * 1.5) {
+    const targets = s.castles.filter((x) => x.owner === focus && frontier(s, grid, nid, x) <= 12 * grid.k && !s.units.some((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === x.id)).sort((a, b) => a.troops - b.troops).slice(0, 2);
+    for (const x of targets) {
+      const from = mine.filter((c) => threatNear(s, grid, c) === 0 && fighters(s, c).length && grid.dist(c.tile, x.tile) <= 12 * grid.k).sort((a, b) => b.troops - a.troops)[0];
+      if (!from) continue;
+      const gids = fighters(s, from).slice(0, 2).map((g) => g.id);
+      const amt = Math.floor(Math.min(commandCap(s, gids), from.troops - Math.max(3000, from.troops * 0.3)) / 1000) * 1000;
+      if (amt < Math.max(6000, x.troops * 0.8)) continue;
+      const r = sortie(s, grid, from.id, gids, amt);
+      if (r.ok) { r.unit.harass = true; order(s, grid, mark(r.unit), 'castle', x.id); }
     }
   }
   if (daily) return;

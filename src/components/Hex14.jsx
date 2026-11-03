@@ -289,6 +289,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const withSiege = false; // 공성병기는 들판에서 부대로 만듦
   const [autoRet, setAutoRet] = useState(true); // 출진 부대: 약해지면 자동 귀환
   const [autoTower, setAutoTower] = useState(true); // 출진 부대: 2칸 안 적 망루를 먼저 부숨
+  const [stopIdle, setStopIdle] = useState(() => { try { return localStorage.getItem('h14.stopIdle') === '1'; } catch { return false; } }); // 순 끝까지 중 내 부대가 도착하면 멈춤 (기본 끔)
   const [callAmt, setCallAmt] = useState(1000); // 장수 부를 때 데려올 병력
   const [showAllCall, setShowAllCall] = useState(false);
   const [sendGen, setSendGen] = useState(null);
@@ -637,6 +638,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.fillStyle = '#3a220d'; for (const dx of [-0.38, 0.38]) { ctx.beginPath(); ctx.arc(bx + dx * r, by + r * 0.45, r * 0.17, 0, 7); ctx.fill(); }
         ctx.restore();
       }
+      // 쉬고 있는 내 부대 (명령 없음): 💤
+      if (u.nation === pid && !u.path.length && !u.queue?.length && !(u.order?.kind === 'castle' && s.castles[u.order.id]?.owner !== pid && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1)) { ctx.font = `${sz * 0.8}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('💤', cx + pr * 1.05, cy - sz * 0.55 - pr * 0.7); }
       if (u.gens.length > 1) { ctx.font = `bold ${sz * 0.6}px sans-serif`; ctx.fillStyle = '#ffe066'; ctx.strokeStyle = '#111'; ctx.lineWidth = sz * 0.12; const t = `+${u.gens.length - 1}`; ctx.strokeText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); ctx.fillText(t, cx + pr * 0.95, cy - sz * 0.55 + pr * 0.9); }
       // 병력·사기 막대
       const bw = sz * 2;
@@ -965,7 +968,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const snap = clone(s);
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
-      if (toEnd && !endOfTurn && idleNow.length) {
+      if (stopIdle && toEnd && !endOfTurn && idleNow.length) {
         setTimeout(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
         return;
       }
@@ -1558,6 +1561,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         <div className="tb-btns">
           <button className="icon" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
           <button className="icon" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
+          <button className="icon" title={stopIdle ? "순 끝까지 넘길 때 내 부대가 도착하면 멈춤 (켬)" : "순 끝까지 넘길 때 부대가 도착해도 멈추지 않음 (끔)"} style={{ opacity: stopIdle ? 1 : 0.45 }} onClick={() => setStopIdle((v) => { try { localStorage.setItem('h14.stopIdle', v ? '0' : '1'); } catch {} return !v; })}>⏸️</button>
           <button className="icon" title="진행 속도" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶' : '⏩'}</button>
           <button className="icon" title="나가기" onClick={onExit}>🚪</button>
         </div>
