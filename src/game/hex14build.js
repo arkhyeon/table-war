@@ -134,16 +134,36 @@ export const FORTS = {
 };
 export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;
 
+// 시설 수 제한: 한 도시 관할 안에 나라마다 3개(망루는 2개)까지
+export function fortLimit(s, tile, nid, kind) {
+  const d = s.district?.[tile];
+  const mine = (s.forts || []).filter((f) => f.owner === nid && s.district?.[f.tile] === d);
+  if (mine.length >= 3) return '이 지역에는 시설을 3개까지만 지을 수 있습니다.';
+  if (kind === 'tower' && mine.filter((f) => f.kind === 'tower').length >= 2) return '이 지역에는 망루를 2개까지만 지을 수 있습니다.';
+  return null;
+}
+// 성 수비대가 짓는 시설: 내 성에서 4칸 안의 내 땅
+export function castleFortCheck(s, grid, c, tile, kind) {
+  const f = FORTS[kind];
+  if (!f || tile < 0) return '지을 수 없는 곳입니다.';
+  if (!grid.passable(tile) && !(kind === 'palisade' && grid.sea?.[tile])) return '지을 수 없는 곳입니다.';
+  if (grid.dist(c.tile, tile) > 4) return `${c.name}에서 4칸 안에만 지을 수 있습니다.`;
+  if (grid.passable(tile) && s.owner[tile] !== c.owner) return '내 땅에만 지을 수 있습니다.';
+  if (s.castles.some((x) => grid.dist(x.tile, tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';
+  if (fortAt(s, tile) || s.units.some((u) => u.tile === tile)) return '이미 무언가 있는 칸입니다.';
+  if (s.nations[c.owner].gold < f.cost) return `금이 모자랍니다 (${fmtGold(f.cost)}).`;
+  return fortLimit(s, tile, c.owner, kind);
+}
 export function fortCheck(s, grid, u, kind) {
   const f = FORTS[kind];
   if (!f) return '없는 시설입니다.';
   if (u.path?.length && kind !== 'palisade') return '멈춰 있는 부대만 지을 수 있습니다.';
-  if (grid.water?.[u.tile] && kind !== 'palisade') return '물 위에는 목책만 세울 수 있습니다.';
+  if (grid.sea?.[u.tile] && kind !== 'palisade') return '물 위에는 목책만 세울 수 있습니다.';
   if (s.castles.some((c) => c.tile === u.tile)) return '성 칸에는 지을 수 없습니다.';
   if (fortAt(s, u.tile)) return '이미 시설이 있는 칸입니다.';
   if (s.castles.some((c) => grid.dist(c.tile, u.tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';
   if (s.nations[u.nation].gold < f.cost) return `금이 모자랍니다 (${fmtGold(f.cost)}).`;
-  return null;
+  return fortLimit(s, u.tile, u.nation, kind);
 }
 
 // 부대(u)가 지금 선 칸에 공사 시작. 부대가 그 칸을 떠나면 공사가 멈춤 (builder가 null이면 성 수비대가 지음)
@@ -173,7 +193,7 @@ export function fortsDay(s, grid) {
     if (f.kind === 'tower') {
       for (const u of s.units) {
         if (!enemy(s, f.owner, u.nation) || grid.dist(u.tile, f.tile) > 2) continue;
-        const dmg = Math.round(250 + u.troops * 0.01);
+        const dmg = Math.round(120 + u.troops * 0.005); // 너무 세지 않게
         u.troops -= dmg;
         u.morale -= 2;
         s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
@@ -198,7 +218,7 @@ export function aiForts(s, grid, nid, threat) {
   let ring = [c.tile];
   for (let r = 1; r <= 3; r++) {
     const next = [];
-    for (const t of ring) for (const nx of grid.nb[t]) if (!seen.has(nx) && grid.passable(nx)) { seen.add(nx); next.push(nx); if (r >= 2 && s.owner[nx] === nid && !fortAt(s, nx) && !s.units.some((u) => u.tile === nx)) { const d = grid.dist(nx, foe.tile); if (d < bd) { bd = d; best = nx; } } }
+    for (const t of ring) for (const nx of grid.nb[t]) if (!seen.has(nx) && grid.passable(nx)) { seen.add(nx); next.push(nx); if (r >= 2 && s.owner[nx] === nid && !fortAt(s, nx) && !s.units.some((u) => u.tile === nx) && !fortLimit(s, nx, nid, 'tower')) { const d = grid.dist(nx, foe.tile); if (d < bd) { bd = d; best = nx; } } }
     ring = next;
   }
   if (best === null) return;

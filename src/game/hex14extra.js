@@ -21,7 +21,7 @@ export const weatherText = (s) => { const w = s.weather || { kind: 'clear' }; re
 // 날씨에 따른 이동 비용: 눈 오는 겨울 북쪽(지도 위쪽 55%)은 1.6배, 비 오면 강 칸 +1·전체 +15%
 export function weatherCost(s, grid, to, cost) {
   const w = s.weather;
-  if (!w || grid.water?.[to]) return cost;
+  if (!w || grid.sea?.[to]) return cost;
   if (w.kind === 'snow' && grid.center(to)[1] < grid.H * 0.55) return cost * 1.6;
   if (w.kind === 'rain') return cost * 1.15 + (grid.river[to] ? 1 : 0);
   return cost;
@@ -77,24 +77,29 @@ export function maybeDuel(s, u, t, rng) {
   let ha = 100, hb = 100;
   const rounds = [];
   for (let r = 0; r < 5 && ha > 0 && hb > 0; r++) {
-    const da = Math.round(Math.max(4, (a.war - b.war) * 0.8 + 18 + rng() * 22));
-    const db = Math.round(Math.max(4, (b.war - a.war) * 0.8 + 18 + rng() * 22));
+    // 무력 차이는 반영하되 운도 커서 아래 무력도 이길 수 있음 (차이 10이면 약 30%, 20이면 약 13%)
+    const da = Math.round(Math.max(4, (a.war - b.war) * 0.16 + 14 + rng() * 28));
+    const db = Math.round(Math.max(4, (b.war - a.war) * 0.16 + 14 + rng() * 28));
     hb = Math.max(0, hb - da);
     ha = Math.max(0, ha - db);
     rounds.push([ha, hb]);
   }
   const winA = ha === hb ? a.war >= b.war : ha > hb;
   const [W, Lo, wu, lu] = winA ? [a, b, u, t] : [b, a, t, u];
+  // 이긴 쪽: 사기 크게 오르고 진 쪽 병사가 겁먹고 흩어짐, 이긴 장수는 무력이 자라기도 함
   lu.morale -= 30;
-  wu.morale = Math.min(100, wu.morale + 10);
+  wu.morale = Math.min(100, wu.morale + 20);
+  const flee = Math.round(lu.troops * 0.08);
+  lu.troops -= flee;
   const big = Math.abs(ha - hb) > 45;
-  let fate = '';
+  let fate = ` 적 병사 ${flee}명이 달아났습니다.`;
+  if (W.war < 100 && rng() < 0.3) { W.war += 1; fate += ` ${W.name} 무력 +1!`; }
   if (big && rng() < 0.25) {
     // 크게 지면 사로잡힘
     Lo.status = 'prisoner'; Lo.captor = W.nation; Lo.castle = null; Lo.unit = null;
     lu.gens = lu.gens.filter((id) => id !== Lo.id);
     if (!lu.gens.length) lu.morale = 0;
-    fate = ` ${Lo.name}이(가) 사로잡혔습니다!`;
+    fate += ` ${Lo.name}이(가) 사로잡혔습니다!`;
   }
   const d = { a: a.name, b: b.name, an: u.nation, bn: t.nation, rounds, winner: W.name, fate, tile: t.tile };
   s.duels = s.duels || [];
@@ -193,7 +198,7 @@ const HISTORY = [
       if (liu && !s.pacts?.some((p) => (p.a === sun.id && p.b === liu.id) || (p.a === liu.id && p.b === sun.id))) makePact(s, sun.id, liu.id, 'ally');
       // 동남풍: 강·물 위의 조조군이 불탐
       let burnt = 0;
-      for (const u of s.units) if (u.nation === cao.id && (grid.water?.[u.tile] || grid.river[u.tile])) { const x = Math.round(u.troops * 0.4); u.troops -= x; u.morale = Math.max(0, u.morale - 30); burnt += x; }
+      for (const u of s.units) if (u.nation === cao.id && (grid.sea?.[u.tile] || grid.river[u.tile])) { const x = Math.round(u.troops * 0.4); u.troops -= x; u.morale = Math.max(0, u.morale - 30); burnt += x; }
       s.weather = { kind: 'wind', wind: 1, winter: false };
       pushEvent(s, { title: '적벽대전 — 동남풍', text: `제갈량이 동남풍을 빌리고 주유·황개의 화공이 조조의 선단을 불살랐습니다.${burnt ? ` 조조군 ${fmtTroops(burnt)}이(가) 불에 탔습니다.` : ''} 손권과 유비가 손을 잡았습니다.`, faces: ['주유', '제갈량', '조조'], nations: [cao.id, sun.id] });
       return true;

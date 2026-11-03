@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
@@ -11,7 +11,7 @@ import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
 import { weatherText, uniqueOf } from '../game/hex14extra.js';
-import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort } from '../game/hex14build.js';
+import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
 
@@ -268,7 +268,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [autoRet, setAutoRet] = useState(true); // 출진 부대: 약해지면 자동 귀환
   const [callAmt, setCallAmt] = useState(1000); // 장수 부를 때 데려올 병력
   const [showAllCall, setShowAllCall] = useState(false);
-  const [sendGen, setSendGen] = useState(null); // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
+  const [sendGen, setSendGen] = useState(null);
+  const [chain, setChain] = useState(false); // 이어서 명령(경유지) 모드
+  const [sendFrom, setSendFrom] = useState(null); // 병력 수송: 보내는 성
+  const [sendAmt, setSendAmt] = useState(5000);
+  const [placeFort, setPlaceFort] = useState(null); // 성 수비대가 지을 시설 {cid, kind} // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [speed, setSpeed] = useState(420);
   const [toastMsg, setToast] = useState(null);
   const [sheet, setSheet] = useState(false);
@@ -392,6 +396,32 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const [ex, ey] = grid.center(u.path[u.path.length - 1]);
       ctx.fillStyle = on ? '#ffe066' : 'rgba(255,255,255,0.7)';
       ctx.beginPath(); ctx.arc(ex, ey, sz * 0.35, 0, 7); ctx.fill();
+      // 경유지: 다음 목표들을 점선과 번호로
+      if (u.queue?.length) {
+        const tileOf = (q) => (q.kind === 'tile' ? q.id : q.kind === 'castle' ? s.castles[q.id]?.tile : q.kind === 'fort' ? (s.forts || []).find((f) => f.id === q.id)?.tile : s.units.find((x) => x.id === q.id)?.tile);
+        let [px0, py0] = [ex, ey];
+        ctx.strokeStyle = on ? 'rgba(255,224,102,0.8)' : 'rgba(255,255,255,0.45)';
+        ctx.setLineDash([sz * 0.2, sz * 0.3]);
+        u.queue.forEach((q, i) => {
+          const t = tileOf(q);
+          if (t === undefined || t === null) return;
+          const [qx, qy] = grid.center(t);
+          ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(qx, qy); ctx.stroke();
+          ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(qx, qy, sz * 0.55, 0, 7); ctx.fill();
+          ctx.fillStyle = '#222'; ctx.font = `bold ${sz * 0.75}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), qx, qy + sz * 0.03);
+          [px0, py0] = [qx, qy];
+        });
+        ctx.setLineDash([]); ctx.textBaseline = 'alphabetic';
+      }
+    }
+    // 수송 중인 병력: 출발 성에서 도착 성까지 진행만큼 수레
+    for (const v of s.convoys || []) {
+      if (v.nation !== pid) continue;
+      const [ax, ay] = grid.center(s.castles[v.from].tile), [bx, by] = grid.center(s.castles[v.to].tile);
+      const f = Math.max(0, Math.min(1, (absDay(s) - v.start) / Math.max(1, v.arrive - v.start)));
+      ctx.strokeStyle = 'rgba(180,230,140,0.5)'; ctx.lineWidth = Math.max(sz * 0.12, px); ctx.setLineDash([sz * 0.2, sz * 0.25]);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
+      ctx.font = `${sz * 1.2}px sans-serif`; ctx.textAlign = 'center'; ctx.fillText('🚚', ax + (bx - ax) * f, ay + (by - ay) * f);
     }
     // 도시·관문
     const fs = Math.min(Math.max(sz * 0.9, 11 * px), 15 * px);
@@ -532,7 +562,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.strokeText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
       ctx.fillText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
       // 물 위면 배
-      if (grid.water[u.tile]) {
+      if (grid.sea[u.tile]) {
         ctx.fillStyle = '#6b4423';
         ctx.beginPath(); ctx.moveTo(cx - sz * 1.4, cy - sz * 0.1); ctx.lineTo(cx + sz * 1.4, cy - sz * 0.1); ctx.lineTo(cx + sz * 1.0, cy + sz * 0.55); ctx.lineTo(cx - sz * 1.0, cy + sz * 0.55); ctx.closePath(); ctx.fill();
         ctx.strokeStyle = '#3a2412'; ctx.lineWidth = sz * 0.1; ctx.stroke();
@@ -611,7 +641,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   useEffect(() => { draw(); });
   // Esc: 선택·새 도시 자리 고르기 취소
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') { setSel(null); setFounding(false); setSortieOpen(false); setSendGen(null); } };
+    const onKey = (e) => { if (e.key === 'Escape') { setSel(null); setFounding(false); setSortieOpen(false); setSendGen(null); setSendFrom(null); setChain(false); setPlaceFort(null); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -738,6 +768,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
       return;
     }
     const hit = pick(wx, wy);
+    // 성 주변 시설 자리
+    if (placeFort) {
+      const why = castleFortCheck(game, grid, game.castles[placeFort.cid], t, placeFort.kind);
+      if (why) return toast(why);
+      const pf = placeFort;
+      setPlaceFort(null);
+      act((s) => { const r = startFort(s, grid, null, pf.kind, t, pid); r.msg = `${FORTS[pf.kind].icon} ${FORTS[pf.kind].name}: ${s.castles[pf.cid].name} 수비대가 짓습니다 (${FORTS[pf.kind].days}일)`; return r; });
+      return;
+    }
+    // 병력 수송: 내 성을 누르면 그리로
+    if (sendFrom !== null) {
+      const to = hit?.type === 'castle' ? hit.o : null;
+      if (!to || to.owner !== pid || to.id === sendFrom) return toast('받을 곳은 내 다른 성이어야 합니다. 취소하려면 ✕');
+      const from = sendFrom;
+      setSendFrom(null);
+      act((s) => sendTroops(s, grid, from, to.id, sendAmt));
+      return;
+    }
     // 장수 보내기: 내 성을 누르면 그리로 행군
     if (sendGen) {
       const to = hit?.type === 'castle' ? hit.o : null;
@@ -753,7 +801,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 내 부대를 고른 상태에서 적 시설을 누르면 부수러 감
     if (selUnit && selUnit.nation === pid && fo && fo.owner !== pid) {
       if (!enemy(game, pid, fo.owner)) return toast('약조를 맺은 나라의 시설입니다.');
-      act((s) => { const su = s.units.find((x) => x.id === selUnit.id); const r = order(s, grid, su, 'fort', fo.id); if (r.ok) r.msg = `${FORTS[fo.kind].name} 부수러 감`; return r; });
+      act((s) => { const su = s.units.find((x) => x.id === selUnit.id); const r = chain ? queueOrder(s, grid, su, 'fort', fo.id) : orderNew(s, grid, su, 'fort', fo.id); if (r.ok && !r.msg) r.msg = `${FORTS[fo.kind].name} 부수러 감`; return r; });
       return;
     }
     // 내 부대를 고른 상태: 누른 곳으로 명령
@@ -765,8 +813,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (other !== null && other !== undefined && !enemy(game, pid, other)) return toast(`${game.nations[other].name}과(와)는 ${PACT[pactOf(game, pid, other).type]} 중이라 칠 수 없습니다.`);
       act((s) => {
         const su = s.units.find((x) => x.id === selUnit.id);
-        const r = order(s, grid, su, kind, id);
-        if (r.ok) r.msg = kind === 'unit' ? `${gensOf(s, su.gens)[0].name} → 적 부대 공격` : kind === 'castle' ? (c.owner === pid ? `${c.name}에 입성` : `${c.name} 공략`) : '이동';
+        // 「이어서 명령」을 켜면 지금 명령 뒤에 경유지로 붙음
+        const r = chain ? queueOrder(s, grid, su, kind, id) : orderNew(s, grid, su, kind, id);
+        if (r.ok && !r.msg) r.msg = kind === 'unit' ? `${gensOf(s, su.gens)[0].name} → 적 부대 공격` : kind === 'castle' ? (c.owner === pid ? `${c.name}에 입성` : `${c.name} 공략`) : '이동';
         return r;
       });
       return;
@@ -1066,6 +1115,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금)
                   <Slider min={0} max={draftMax14(game, selCastle)} step={1000} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={(v) => setDraftAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
+                  <div style={{ marginTop: 8 }}>🚚 병력만 보내기 {fmtTroops(Math.min(sendAmt, Math.max(0, selCastle.troops - 500)))} <small className="muted">(장수 없이, 내 다른 성으로)</small></div>
+                  <Slider min={1000} max={Math.max(1000, Math.floor((selCastle.troops - 500) / 1000) * 1000)} step={1000} value={Math.min(sendAmt, Math.max(1000, selCastle.troops - 500))} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
+                  <button disabled={selCastle.troops < 1500} onClick={() => { setSendFrom(selCastle.id); setSheet(false); toast('받을 내 성을 지도에서 누르세요'); }}>🚚 보낼 성 고르기</button>
+                  <div style={{ marginTop: 8 }}>🏗️ 주변 야전 시설 <small className="muted">(성 수비대가 4칸 안 내 땅에 지음 · 한 지역 3개, 망루 2개까지)</small></div>
+                  <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                    {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
+                  </div>
+                  {(game.convoys || []).filter((v) => v.from === selCastle.id || v.to === selCastle.id).map((v, i) => <div key={i} className="muted" style={{ fontSize: 11 }}>🚚 {game.castles[v.from].name} → {game.castles[v.to].name} {fmtTroops(v.troops)} · {Math.max(0, v.arrive - absDay(game))}일 남음</div>)}
                   {(() => {
                     const after = selCastle.troops + Math.min(draftAmt, draftMax14(game, selCastle));
                     const out = Math.max(0, Math.min(after - 500, castleGens.length ? commandCap(game, castleGens.slice(0, 3).map((g) => g.id)) : 0));
@@ -1323,6 +1380,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🏗️ 도시 시설은 성벽 증축·조선소(항구)뿐. 수입·수확은 담당관·땅·정책으로 늘립니다.</li>
                 <li>⛺🗼🚧 부대를 고르면 그 자리에 진지(아군 피해 −30%·보급 거점·사기 +6/일)·망루(2칸 안 적 부대 매일 공격)·목책(바로 세움, 1500금, 적 길막이+옆에 오면 멈춤)을 지을 수 있습니다. 적 시설은 부대로 눌러 부숩니다.</li>
                 <li>⚙️ 공성병기(들판 어디서든 부대로 만들기, 금 5천)는 성벽을 5배로 깎지만 느려지고 들판 싸움에 약하며(공격 −20%·받는 피해 +35%) 함락하면 부서집니다. 장수 여럿 부대는 「✂️ 나누기」로 언제든 갈라 협공할 수 있습니다.</li>
+                <li>🌊 얕은 바다(뭍에서 3칸)는 어느 부대나, 깊은 바다는 항구 도시에서 나온 부대만 건넙니다.</li>
+                <li>➕ 부대를 고르고 「이어서 명령」을 켜면 누르는 곳이 차례로 경유지가 됩니다(망루 부수고 → 성 치고 → 이동). 성을 함락해도 경유지가 남으면 수비병만 남기고 계속 갑니다.</li>
+                <li>🚚 도시 패널에서 장수 없이 병력만 내 다른 성으로 보낼 수 있습니다(길 길이만큼 걸림).</li>
+                <li>🏗️ 도시 패널에서 성 수비대가 4칸 안에 망루·진지·목책을 지을 수 있습니다. 한 지역에 3개(망루 2개)까지, 성을 빼앗으면 그 지역 시설도 넘어옵니다. 부대는 옆에 붙은 적 망루를 먼저 부숩니다.</li>
+                <li>⚔️ 일기토는 무력이 높을수록 유리하지만 운도 큽니다(무력 차 10이면 약 30% 역전). 이기면 사기 +20, 적 병사 8% 도주, 무력이 자라기도 합니다. 🧠 지력 높은 장수는 적 전법을 간파해 막습니다.</li>
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
@@ -1379,9 +1441,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.4); }}>－</button>
             <button className="h14-menu" title="세력·외교·인재" onClick={() => { setSel(null); setSheet(true); }}>📋</button>
           </div>
+          {placeFort && <div className="map-hint">{FORTS[placeFort.kind].icon} {game.castles[placeFort.cid]?.name}에서 4칸 안, 내 땅을 누르면 {FORTS[placeFort.kind].name}을(를) 짓습니다 <button className="hint-clear" onClick={() => setPlaceFort(null)}>✕ 취소</button></div>}
+          {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
           {sendGen && <div className="map-hint">➡️ {game.generals[sendGen]?.name}을(를) 보낼 내 성을 누르세요 (병력 {fmtTroops(callAmt)}) <button className="hint-clear" onClick={() => setSendGen(null)}>✕ 취소</button></div>}
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — 지도를 눌러 명령 <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️</button> <button className="hint-clear" onClick={() => setSel(null)}>✕ 선택 해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 지웠습니다' }; })}>경유지 지우기</button> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>

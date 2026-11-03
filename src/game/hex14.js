@@ -71,9 +71,12 @@ export function buildGrid(world) {
       for (const nx of nb[t]) if (dist[nx] < 0 && terrain[nx] === T.SEA) { dist[nx] = dist[t] + 1; water[nx] = 1; q.push(nx); }
     }
   }
+  // 바다 전체 (깊은 바다 포함): 항구에서 나온 부대만 깊은 바다를 건넘, 얕은 바다(water)는 누구나
+  const sea = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (terrain[i] === T.SEA) sea[i] = 1;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, nb, center, passable, castleTile, tilesOf, water, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
+  return { size, cols, rows, N, terrain, region, river, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -299,7 +302,7 @@ export function splitUnit(s, grid, uid, gid) {
   const u = s.units.find((x) => x.id === uid);
   if (!u || u.gens.length < 2 || !u.gens.includes(gid)) return { ok: false, msg: '장수가 둘 이상인 부대만 나눌 수 있습니다.' };
   const occ = unitAt(s);
-  const spot = grid.nb[u.tile].find((t) => (grid.passable(t) || (grid.water[t] && grid.water[u.tile])) && !occ.has(t) && !s.castles.some((c) => c.tile === t) && !fortAt(s, t));
+  const spot = grid.nb[u.tile].find((t) => (grid.passable(t) || (grid.sea[t] && grid.sea[u.tile])) && !occ.has(t) && !s.castles.some((c) => c.tile === t) && !fortAt(s, t));
   if (spot === undefined) return { ok: false, msg: '옆에 빈 칸이 없습니다.' };
   const part = Math.round(u.troops / u.gens.length);
   u.troops -= part;
@@ -317,12 +320,13 @@ export const commandCap = (s, gids) => {
 };
 export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 0.8 : 0.6) * (u.siege ? 0.7 : 1); // 하루에 평지 0.6칸 (기마 0.8칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
-  if (grid.water?.[to]) return 1; // 바다는 평지만큼
+  if (grid.sea?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
   if (u && grid.river[to] && gensOf(s, u.gens).some((g) => has(g, '수군'))) c *= 0.6; // 수군 장수는 강을 따라 빠름
   return s ? weatherCost(s, grid, to, c) : c;
 };
-const canGo = (grid, t, navy) => grid.passable(t) || (navy && grid.water[t]);
+// 땅, 얕은 바다(뭍에서 3칸)는 누구나 · 깊은 바다는 항구에서 나온 부대만
+const canGo = (grid, t, navy) => grid.passable(t) || grid.water[t] || (navy && grid.sea[t]);
 export const dateOf = (s, startYear = 200) => {
   // 한 턴 = 10일: 상순·중순·하순
   const t = s.turn - 1, m = Math.floor(t / 3) % 12, y = startYear + Math.floor(t / 36);
@@ -386,7 +390,7 @@ export function findPath(s, grid, from, to, nation, navy = false) {
       // 남의 진지·망루·목책: 부숴야 지나가므로 아주 비싼 길 (돌아갈 길이 멀면 부수고 감)
       const ef = forts.get(nx);
       // 빠른 길로 가되, 목표 바로 옆(싸울 자리)은 땅을 고름 — 물 위에서 싸우면 약하므로 상륙해서 침
-      const board = grid.water[nx] && nx !== to && grid.dist(nx, to) === 1 ? 4 : grid.water[nx] !== grid.water[cur] ? 0.5 : 0;
+      const board = grid.sea[nx] && nx !== to && grid.dist(nx, to) === 1 ? 4 : grid.sea[nx] !== grid.sea[cur] ? 0.5 : 0;
       const ng = g.get(cur) + moveCost(grid, cur, nx) + board + (occ.get(nx) ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
       if (ng < (g.get(nx) ?? Infinity)) {
         g.set(nx, ng);
@@ -440,6 +444,63 @@ export function order(s, grid, u, kind, id) {
   u.wait = 0;
   return { ok: true };
 }
+// 새 명령은 대기 중인 경유지를 지움
+export function orderNew(s, grid, u, kind, id) {
+  u.queue = [];
+  return order(s, grid, u, kind, id);
+}
+
+// 수송: 장수 없이 병력만 내 다른 성으로 (길 길이만큼 걸려 도착, 도착지를 잃으면 가까운 내 성으로)
+export const absDay = (s) => s.turn * DAYS + s.day;
+export function sendTroops(s, grid, fromId, toId, troops) {
+  const a = s.castles[fromId], b = s.castles[toId];
+  if (!a || !b || a.owner !== b.owner || a === b) return { ok: false, msg: '내 다른 성으로만 보낼 수 있습니다.' };
+  troops = Math.floor(Math.min(troops, a.troops - 500) / 1000) * 1000;
+  if (troops < 1000) return { ok: false, msg: '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
+  const path = findPath(s, grid, a.tile, b.tile, a.owner, !!a.port);
+  if (!path) return { ok: false, msg: '그 성까지 갈 길이 없습니다.' };
+  const days = Math.max(1, Math.ceil(path.length / 0.8));
+  a.troops -= troops;
+  s.convoys = [...(s.convoys || []), { from: a.id, to: b.id, nation: a.owner, troops, start: absDay(s), arrive: absDay(s) + days }];
+  return { ok: true, msg: `🚚 ${a.name} → ${b.name} 병력 ${fmtTroops(troops)} 수송 (${days}일 뒤 도착)` };
+}
+function convoysDay(s, grid) {
+  if (!s.convoys?.length) return;
+  const now = absDay(s);
+  s.convoys = s.convoys.filter((v) => {
+    if (v.arrive > now) return true;
+    let to = s.castles[v.to];
+    if (to.owner !== v.nation) to = nearestCastle(s, grid, to.tile, v.nation);
+    if (to) { to.troops += v.troops; if (v.nation === s.playerId) log(s, `🚚 병력 ${fmtTroops(v.troops)}이(가) ${to.name}에 도착했습니다.`, 'info', [v.nation]); }
+    return false;
+  });
+}
+
+// 연속 명령: 지금 명령을 마치면(도착·함락·격파) 다음 경유지로
+export function orderDone(s, u) {
+  const o = u.order;
+  if (!o) return true;
+  if (o.kind === 'tile') return u.tile === o.id || !u.path.length;
+  if (o.kind === 'unit') return !s.units.some((x) => x.id === o.id && !x.dead);
+  if (o.kind === 'fort') return !(s.forts || []).some((f) => f.id === o.id);
+  if (o.kind === 'castle') return s.castles[o.id]?.owner === u.nation && !u.path.length;
+  return false;
+}
+function advanceQueues(s, grid) {
+  for (const u of s.units) {
+    if (u.dead || !u.queue?.length || !orderDone(s, u)) continue;
+    while (u.queue.length) {
+      const next = u.queue.shift();
+      if (order(s, grid, u, next.kind, next.id).ok) break;
+    }
+  }
+}
+// 명령 더하기: 지금 명령 뒤에 이어서 할 일
+export function queueOrder(s, grid, u, kind, id) {
+  if (!u.order || orderDone(s, u)) return order(s, grid, u, kind, id);
+  u.queue = [...(u.queue || []), { kind, id }].slice(0, 8);
+  return { ok: true, msg: `경유지 추가 (${u.queue.length}개 대기)` };
+}
 
 // ── 하루 진행 ──
 export function stepDay(s, grid) {
@@ -485,8 +546,8 @@ export function stepDay(s, grid) {
       u.path.shift();
       // 칠하기: 적·빈 땅을 지나가면 내 땅이 됨 (성 칸·동맹/정전국 땅 제외)
       if (!c && grid.passable(nx) && s.owner[nx] !== u.nation && enemy(s, u.nation, s.owner[nx])) s.owner[nx] = u.nation;
-      // 내 성에 들어가면 입성 (병력·장수가 성으로)
-      if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { enter(s, u, c); break; }
+      // 내 성에 들어가면 입성 (병력·장수가 성으로) — 경유지면 지나가기만 함
+      if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { if (u.queue?.length) { u.order = null; u.path = []; break; } enter(s, u, c); break; }
       // 통제 구역: 적 부대 옆에 서면 그날은 더 못 감
       if (grid.nb[nx].some((t) => { const o = occ.get(t); if (o && enemy(s, u.nation, o.nation)) return true; const f = fortAt(s, t); return f && f.kind === 'palisade' && !f.left && enemy(s, u.nation, f.owner); })) { u.mp = 0; break; }
     }
@@ -505,12 +566,22 @@ export function stepDay(s, grid) {
     if (!tgt) continue;
     const a = unitStats(s, u), d = unitStats(s, tgt);
     // 물 위에서는 수군 장수가 없으면 약함
-    const sea = (x) => (grid.water[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
+    const sea = (x) => (grid.sea[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
     let dmg = (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
     maybeDuel(s, u, tgt, rng);
     // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
-    const tac = u.cd > 0 ? null : tacticOf(s, u, rng);
+    let tac = u.cd > 0 ? null : tacticOf(s, u, rng);
+    // 간파: 받는 쪽에 지력 높은 장수가 있으면 전법을 꿰뚫어 막기도 함 (지력 차이만큼)
+    if (tac) {
+      const sage = gensOf(s, tgt.gens).reduce((m, g) => (g.intel > (m?.intel ?? 0) ? g : m), null);
+      if (sage && sage.intel >= 75 && rng() < Math.max(0, (sage.intel - (tac.g.intel || 50)) / 100 + 0.1)) {
+        u.cd = 2;
+        s.fx.push({ type: 'tactic', tile: tgt.tile, to: u.tile, text: `${sage.name} 간파!`, nation: tgt.nation });
+        if (u.nation === s.playerId || tgt.nation === s.playerId) log(s, `🧠 ${sage.name}이(가) ${tac.g.name}의 「${tac.name}」을(를) 간파했습니다!`, 'battle', [u.nation, tgt.nation]);
+        tac = null;
+      }
+    }
     if (tac) {
       u.cd = tac.unique ? 4 : 3;
       const fire = tac.kind === 'fire' ? fireMult(s) : 1;
@@ -555,6 +626,8 @@ export function stepDay(s, grid) {
     if (adj.some((t) => { const o = occ.get(t); return o && enemy(s, u.nation, o.nation); })) continue;
     let f = u.order?.kind === 'fort' ? s.forts?.find((x) => x.id === u.order.id && adj.includes(x.tile)) : null;
     if (!f) f = (s.forts || []).find((x) => adj.includes(x.tile) && enemy(s, u.nation, x.owner) && (u.path[0] === x.tile || u.order?.kind === 'fort'));
+    // 옆에 적 망루가 있으면 (공성 중이 아니면) 먼저 부숨: 화살 맞으며 지나가지 않게
+    if (!f && !(u.order?.kind === 'castle' && adj.includes(s.castles[u.order.id]?.tile))) f = (s.forts || []).find((x) => adj.includes(x.tile) && x.kind === 'tower' && enemy(s, u.nation, x.owner));
     if (!f || !enemy(s, u.nation, f.owner)) continue;
     const dmg = Math.round(u.troops * 0.012 * (unitStats(s, u).atk / 100));
     f.hp -= dmg;
@@ -568,7 +641,7 @@ export function stepDay(s, grid) {
     // 성벽이 남아 있으면 수비병 피해가 크게 줄고 반격이 셈. 성벽부터 깎아야 함
     const walled = c.dur > 0;
     // 물 위에서 치면 약함 (수군 장수·조선소·수군 육성이 있으면 괜찮음)
-    const sea = grid.water[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
+    const sea = grid.sea[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
     a.atk *= sea;
     // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
     const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1);
@@ -586,7 +659,7 @@ export function stepDay(s, grid) {
   const supplied = {};
   for (const u of s.units) {
     if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
-    if (!grid.water[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.99; u.morale -= 2; u.cut = true; continue; }
+    if (!grid.sea[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.99; u.morale -= 2; u.cut = true; continue; }
     u.cut = false;
     // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
     const rest = !hits.has(u) && ![...hits.values()].some((l) => l.some((x) => x.u === u)) && !sieges.some(([x]) => x === u);
@@ -608,6 +681,8 @@ export function stepDay(s, grid) {
     log(s, `💥 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 무너졌습니다.`, 'battle', [u.nation]);
   }
   s.units = s.units.filter((u) => !u.dead);
+  advanceQueues(s, grid);
+  convoysDay(s, grid);
   for (const u of s.units) { u.troops = Math.round(u.troops); u.morale = Math.max(0, Math.min(100, u.morale)); }
   for (const c of s.castles) c.troops = Math.max(0, Math.round(c.troops));
 }
@@ -664,6 +739,8 @@ function capture(s, grid, c, u) {
   s.owner[c.tile] = u.nation;
   s.fx.push({ type: 'capture', tile: c.tile, text: `${c.name} 함락` });
   for (const x of s.units) if (x.siege && x.nation === u.nation && grid.dist(x.tile, c.tile) <= 1) x.siege = undefined; // 공성병기는 함락하면 부서짐
+  // 그 성 관할 안의 옛 주인 시설(망루·진지·목책)은 새 주인 것이 됨
+  for (const f of s.forts || []) if (f.owner === old && s.district?.[f.tile] === c.id) { f.owner = u.nation; f.builder = null; }
   addRel(s, u.nation, old, -15);
   // 성에 있던 장수: 절반은 가까운 자기 성으로, 절반은 포로
   const rng = makeRng(`cap:${s.seed}:${s.turn}:${s.day}:${c.id}`);
@@ -674,7 +751,14 @@ function capture(s, grid, c, u) {
     else { g.status = 'prisoner'; g.castle = null; g.captor = u.nation; }
   }
   log(s, `🏯 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name}이(가) ${c.name}${old !== null && old !== -1 ? `(${s.nations[old].name})` : ''}을(를) 함락했습니다!`, 'capture', [u.nation, old]);
-  enter(s, u, c);
+  // 이어서 갈 곳(경유지)이 남은 부대는 수비병만 조금 남기고 계속 진군
+  if (u.queue?.length && u.troops > 3000) {
+    const keep = Math.max(1000, Math.round(u.troops * 0.2 / 1000) * 1000);
+    u.troops -= keep;
+    c.troops += keep;
+    u.order = null;
+    u.path = [];
+  } else enter(s, u, c);
   checkFall(s, old);
 }
 
