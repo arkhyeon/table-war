@@ -3,7 +3,7 @@ import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitS
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
-import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
@@ -325,6 +325,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const view = useRef(null); // {x, y, k}
   const drag = useRef(null);
   const pointers = useRef(new Map());
+  const shiftRef = useRef(false);
   const gameRef = useRef(game);
   gameRef.current = game;
   const selRef = useRef(sel);
@@ -783,6 +784,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     draw();
   };
   const onUp = (e) => {
+    shiftRef.current = !!e.shiftKey; // PC: Shift+클릭은 경유지 추가
     pointers.current.delete(e.pointerId);
     const d = drag.current;
     drag.current = null;
@@ -878,7 +880,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 내 부대를 고른 상태에서 적 시설을 누르면 부수러 감
     if (selUnit && selUnit.nation === pid && fo && fo.owner !== pid) {
       if (!enemy(game, pid, fo.owner)) return toast('약조를 맺은 나라의 시설입니다.');
-      act((s) => { const su = s.units.find((x) => x.id === selUnit.id); const r = chain ? queueOrder(s, grid, su, 'fort', fo.id) : orderNew(s, grid, su, 'fort', fo.id); if (r.ok && !r.msg) r.msg = `${FORTS[fo.kind].name} 부수러 감`; return r; });
+      act((s) => { const su = s.units.find((x) => x.id === selUnit.id); const r = (chain || shiftRef.current) ? queueOrder(s, grid, su, 'fort', fo.id) : orderNew(s, grid, su, 'fort', fo.id); if (r.ok && !r.msg) r.msg = `${FORTS[fo.kind].name} 부수러 감`; return r; });
       return;
     }
     // 내 부대를 고른 상태: 누른 곳으로 명령
@@ -891,7 +893,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       act((s) => {
         const su = s.units.find((x) => x.id === selUnit.id);
         // 「이어서 명령」을 켜면 지금 명령 뒤에 경유지로 붙음
-        const r = chain ? queueOrder(s, grid, su, kind, id) : orderNew(s, grid, su, kind, id);
+        const r = (chain || shiftRef.current) ? queueOrder(s, grid, su, kind, id) : orderNew(s, grid, su, kind, id);
         if (r.ok && !r.msg) r.msg = kind === 'unit' ? `${gensOf(s, su.gens)[0].name} → 적 부대 공격` : kind === 'castle' ? (c.owner === pid ? `${c.name}에 입성` : `${c.name} 공략`) : '이동';
         return r;
       });
@@ -1272,6 +1274,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <span>전법</span><span>{gs.map(tacticName).filter(Boolean).join(', ') || '없음'}</span>
               <span>보급</span><span style={{ color: selUnit.cut ? 'var(--danger)' : undefined }}>{selUnit.cut ? '끊김 (병력·사기 감소)' : '이어짐'}</span>
               <span>목표</span><span>{tgt}{days ? ` (약 ${days}일)` : ''}</span>
+              {selUnit.queue?.length > 0 && <><span>경유지</span><span>{selUnit.queue.map((q, i) => `${i + 1}. ${q.kind === 'castle' ? (game.castles[q.id]?.owner === selUnit.nation ? `${game.castles[q.id]?.name} 입성` : `${game.castles[q.id]?.name} 공략`) : q.kind === 'unit' ? `${gensOf(game, game.units.find((x) => x.id === q.id)?.gens || [])[0]?.name || '적'} 부대 공격` : q.kind === 'fort' ? '시설 파괴' : '이동'}`).join(' → ')} <small className="muted">(최대 8개 · 목표가 사라지면 다음으로)</small></span></>}
               <span>지형</span><span>{TERRAIN_NAME[grid.terrain[selUnit.tile]] || '-'}</span>
             </div>
             {selUnit.nation === pid && !playing && (
@@ -1433,6 +1436,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       <small>우호 {r}{STRATS[n.strat] ? <span title={STRATS[n.strat].desc}> · 전략 {STRATS[n.strat].name}{n.focus !== null && n.focus !== undefined && game.nations[n.focus] ? `(${n.focus === pid ? '우리' : game.nations[n.focus].name} 노림)` : ''}</span> : null}</small>
                       <span style={{ marginLeft: 'auto' }} />
                       {giftSizes(game, pid, n.id).map((amt, i) => <button key={i} className="sm" disabled={playing || me.gold < amt} title={`우호 +${giftGain(game, pid, n.id, amt)}`} onClick={() => act((s) => gift(s, pid, n.id, amt))}>🎁 {fmtGold(amt)} (+{giftGain(game, pid, n.id, amt)})</button>)}
+                      {p && p.type !== 'vassal' && p.until - game.turn <= RENEW_WINDOW && <button className="sm primary" disabled={playing || me.lastAsk?.[n.id] === game.turn} title="끝나기 전에 같은 약조를 이어 감" onClick={() => act((s) => renewPact(s, pid, n.id))}>🔁 연장 요청 {Math.round(renewChance(game, pid, n.id) * 100)}% ({p.until - game.turn}순 남음)</button>}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
                       {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
                       {(() => {
@@ -1578,7 +1582,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
           {sendGen && <div className="map-hint">➡️ {game.generals[sendGen]?.name}을(를) 보낼 내 성을 누르세요 (병력 {fmtTroops(callAmt)}) <button className="hint-clear" onClick={() => setSendGen(null)}>✕ 취소</button></div>}
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 지웠습니다' }; })}>경유지 지우기</button> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '지도를 눌러 명령 (PC: Shift+클릭은 경유지 추가)'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <><button className="sm" title="마지막에 넣은 경유지 하나만 취소" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️ 하나 취소</button><button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 모두 지웠습니다' }; })}>모두 지우기</button></> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>

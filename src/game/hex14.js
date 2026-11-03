@@ -490,7 +490,7 @@ export function orderDone(s, u) {
   if (o.kind === 'tile') return u.tile === o.id || !u.path.length;
   if (o.kind === 'unit') return !s.units.some((x) => x.id === o.id && !x.dead);
   if (o.kind === 'fort') return !(s.forts || []).some((f) => f.id === o.id);
-  if (o.kind === 'castle') return s.castles[o.id]?.owner === u.nation && !u.path.length;
+  if (o.kind === 'castle') { const c = s.castles[o.id]; return !c || (c.owner === u.nation && !u.path.length) || (c.owner !== u.nation && !enemy(s, u.nation, c.owner)); } // 남이 먼저 빼앗아 동맹국 성이 되면 다음으로
   return false;
 }
 function advanceQueues(s, grid) {

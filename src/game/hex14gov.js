@@ -131,6 +131,24 @@ export function gift(s, a, b, amt) {
   return { ok: true, msg: `친선: ${s.nations[b].name} 우호 +${up}` };
 }
 
+// 약조 연장: 6순 이하로 남았을 때 같은 약조를 더 이어 감 (새로 맺는 것보다 조금 쉬움)
+export const RENEW_WINDOW = 6;
+export const renewChance = (s, a, b) => { const p = pactOf(s, a, b); return p && p.type !== 'vassal' ? Math.min(0.95, acceptChance(s, a, b, p.type) + 0.15) : 0; };
+export function renewPact(s, a, b, rng = Math.random) {
+  const p = pactOf(s, a, b);
+  if (!p || p.type === 'vassal') return { ok: false, msg: '연장할 약조가 없습니다.' };
+  if (p.until - s.turn > RENEW_WINDOW) return { ok: false, msg: `아직 ${p.until - s.turn}순 남았습니다 (${RENEW_WINDOW}순 이하일 때 연장).` };
+  const n = s.nations[a];
+  if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
+  n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
+  if (rng() < renewChance(s, a, b)) {
+    p.until += p.type === 'ally' ? 36 : 18;
+    log(s, `🔁 ${s.nations[a].name}과(와) ${s.nations[b].name}이(가) ${PACT[p.type]}을 연장했습니다 (${p.until - s.turn}순 남음).`, 'diplo', [a, b]);
+    return { ok: true, msg: `${PACT[p.type]} 연장! (${p.until - s.turn}순 남음)` };
+  }
+  addRel(s, a, b, -3);
+  return { ok: true, msg: `${s.nations[b].name}이(가) 연장을 거절했습니다.` };
+}
 export function propose(s, a, b, type, rng = Math.random) {
   if (pactOf(s, a, b)) return { ok: false, msg: '이미 맺은 약조가 있습니다.' };
   const n = s.nations[a];
@@ -344,7 +362,7 @@ function diplomacyTurn(s, rng) {
   for (const p of s.pacts) {
     if (p.type === 'vassal') continue;
     // 플레이어 약조는 끝나기 3순 전에 미리, 끝날 때 한 번 더 크게 알림
-    if (me !== null && (p.a === me || p.b === me) && p.until === s.turn + 4) s.eventsQ.push({ title: '약조 만료 임박', text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 3순 뒤 끝납니다. 외교 탭에서 다시 맺을 수 있습니다.`, nations: [other(p)] });
+    if (me !== null && (p.a === me || p.b === me) && p.until === s.turn + 4) s.eventsQ.push({ title: '약조 만료 임박', text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 3순 뒤 끝납니다. 외교 탭의 「🔁 연장 요청」으로 이어 갈 수 있습니다.`, nations: [other(p)] });
     if (p.until === s.turn + 1) {
       log(s, `📜 ${s.nations[p.a].name}과(와) ${s.nations[p.b].name}의 ${PACT[p.type]}이 끝납니다.`, 'diplo', [p.a, p.b]);
       if (me !== null && (p.a === me || p.b === me)) s.eventsQ.push({ title: `${PACT[p.type]} 종료`, text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 끝났습니다. 이제 서로 칠 수 있습니다!`, nations: [other(p)] });

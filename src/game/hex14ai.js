@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, powerOf, trade, pactOf, propose, acceptChance } from './hex14gov.js';
+import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -120,7 +120,7 @@ function strategyDiplomacy(s, grid, nid, rng) {
     if (o === n.focus || o === s.playerId && !s.spectator || p.renewAsked === s.turn) continue;
     if (powerOf(s, o) < powerOf(s, nid) * 0.8) continue;
     p.renewAsked = s.turn;
-    if (rng() < acceptChance(s, nid, o, p.type)) p.until += p.type === 'ally' ? 36 : 18;
+    renewPact(s, nid, o, rng);
   }
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const avgC = alive.reduce((a, m) => a + citiesOf(s, m.id), 0) / Math.max(1, alive.length);
