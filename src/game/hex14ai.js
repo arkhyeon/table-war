@@ -119,6 +119,8 @@ function strategyDiplomacy(s, grid, nid, rng) {
     const o = p.a === nid ? p.b : p.a;
     if (o === n.focus || o === s.playerId && !s.spectator || p.renewAsked === s.turn) continue;
     if (powerOf(s, o) < powerOf(s, nid) * 0.8) continue;
+    // 크게 앞선 1등(도시 35% 이상)은 연장하지 않음 — 정전을 이어 가기만 하다 칠 상대가 없어지면 맞수에게 뒤집힘 (직접 플레이에서 확인)
+    if (citiesOf(s, nid) >= s.castles.filter((c) => c.kind !== 'pass').length * 0.35) continue;
     p.renewAsked = s.turn;
     renewPact(s, nid, o, rng);
   }
