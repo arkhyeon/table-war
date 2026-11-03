@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf } from '../game/hex14.js';
-import { aiTurn14, STRATS } from '../game/hex14ai.js';
+import { aiTurn14, aiIdle, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
@@ -934,6 +934,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     };
     const tick = () => {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
+      if (s.day > 0) aiIdle(s, grid);
       stepDay(s, grid);
       spawnFx(s);
       // 효과음: 내 부대·성이 낀 일만

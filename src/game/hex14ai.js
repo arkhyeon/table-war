@@ -183,7 +183,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     }
     if (u.order?.kind === 'castle' && !u.siege) {
       const c = s.castles[u.order.id];
-      if (c && enemy(s, nid, c.owner) && c.dur > 800 && grid.dist(u.tile, c.tile) <= 3 && n.gold > SIEGE_COST * 1.5) buildSiege(s, u.id);
+      if (c && enemy(s, nid, c.owner) && c.dur > 800 && grid.dist(u.tile, c.tile) <= 2 && n.gold > SIEGE_COST * 1.5) buildSiege(s, u.id);
     }
   }
   // 2) 성에 다가온 적 부대를 요격 (공성병기 낀 부대는 들판에서 약하니 더 적극적으로)
@@ -224,7 +224,7 @@ export function aiTurn14(s, grid, nid, scope = null) {
     const t = tgt(c.tile, troops);
     if (!t) continue;
     // 성벽이 두꺼운 성을 칠 때는 금이 넉넉하면 공성병기를 끌고 감 (속공은 더 쉽게)
-    const r = sortie(s, grid, c.id, gids, troops, t.dur > (n.strat === 'blitz' ? 800 : 1000) && n.gold > SIEGE_COST * 2 + 5000);
+    const r = sortie(s, grid, c.id, gids, troops); // 공성병기는 끌고 가지 않고 성 앞에서 만듦 (느려지지 않게)
     if (r.ok) order(s, grid, mark(r.unit), 'castle', t.id);
   }
   // 4) 시장: 병량이 3년 치 넘게 쌓이고 금이 모자라면 팔고, 금이 넘치는데 병량이 모자라면 삼
@@ -304,6 +304,23 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     if (v < bv) { bv = v; best = c; }
   }
   return best;
+}
+
+// 매일: 컴퓨터 나라의 쉬는 부대에게 바로 다음 명령 (순 첫날까지 멍하니 기다리지 않게)
+export function aiIdle(s, grid) {
+  for (const u of s.units) {
+    if (u.dead || u.path.length || u.order?.kind === 'fort') continue;
+    const n = s.nations[u.nation];
+    if (!n?.alive || (u.nation === s.playerId && !s.spectator)) continue; // 플레이어 부대(군단 제외)는 건드리지 않음
+    if (u.order?.kind === 'castle' && enemy(s, u.nation, s.castles[u.order.id]?.owner) && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1) continue; // 공성 중
+    const home = nearestCastle(s, grid, u.tile, u.nation);
+    if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }
+    const wars = new Set();
+    for (const x of s.units) if (x.nation === u.nation && x.order?.kind === 'castle') { const o = s.castles[x.order.id]?.owner; if (o !== null && o !== undefined && o >= 0 && o !== u.nation) wars.add(o); }
+    const t = pickTarget(s, grid, u.nation, u.tile, u.troops, STRATS[n.strat || 'expand'], n.focus ?? null, wars, null);
+    if (t) order(s, grid, u, 'castle', t.id);
+    else if (home) order(s, grid, u, 'castle', home.id);
+  }
 }
 
 export { gensOf };

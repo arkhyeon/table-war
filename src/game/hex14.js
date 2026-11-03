@@ -454,9 +454,12 @@ export function orderNew(s, grid, u, kind, id) {
 
 // 수송: 장수 없이 병력만 내 다른 성으로 (길 길이만큼 걸려 도착, 도착지를 잃으면 가까운 내 성으로)
 export const absDay = (s) => s.turn * DAYS + s.day;
+// 포위: 적 부대가 성 바로 옆에 있음
+export const besieged = (s, grid, c) => s.units.some((u) => enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 1);
 export function sendTroops(s, grid, fromId, toId, troops) {
   const a = s.castles[fromId], b = s.castles[toId];
   if (!a || !b || a.owner !== b.owner || a === b) return { ok: false, msg: '내 다른 성으로만 보낼 수 있습니다.' };
+  if (besieged(s, grid, b)) return { ok: false, msg: `${b.name}은(는) 포위당해 수송대가 들어갈 수 없습니다. 장수가 부대로 데리고 가야 합니다.` };
   troops = Math.floor(Math.min(troops, a.troops - 500) / 1000) * 1000;
   if (troops < 1000) return { ok: false, msg: '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
   const path = findPath(s, grid, a.tile, b.tile, a.owner, !!a.port);
@@ -473,6 +476,8 @@ function convoysDay(s, grid) {
     if (v.arrive > now) return true;
     let to = s.castles[v.to];
     if (to.owner !== v.nation) to = nearestCastle(s, grid, to.tile, v.nation);
+    // 도착할 성이 포위당했으면 들어가지 못하고 가까운 다른 내 성으로
+    if (to && besieged(s, grid, to)) { const alt = s.castles.filter((c) => c.owner === v.nation && c !== to && !besieged(s, grid, c)).sort((a, b) => grid.dist(a.tile, to.tile) - grid.dist(b.tile, to.tile))[0]; if (v.nation === s.playerId) log(s, `🚚 ${to.name}이(가) 포위당해 수송대가 ${alt ? alt.name + '(으)로 돌아갔습니다' : '흩어졌습니다'}.`, 'bad', [v.nation]); to = alt || null; }
     if (to) { to.troops += v.troops; if (v.nation === s.playerId) log(s, `🚚 병력 ${fmtTroops(v.troops)}이(가) ${to.name}에 도착했습니다.`, 'info', [v.nation]); }
     return false;
   });
