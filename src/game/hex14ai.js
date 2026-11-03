@@ -23,12 +23,22 @@ export const STRATS = {
 };
 
 // 이웃 나라: 내 성에서 가까운 성을 가진 나라들 (가까운 순)
+// 맞닿은 성: 그 성에서 가장 가까운 남의 성(그 나라 것 말고)이 우리 성이거나 거의 같은 거리 — 다른 나라 땅 너머가 아님
+export function frontier(s, grid, nid, c) {
+  let mineD = Infinity, otherD = Infinity;
+  for (const x of s.castles) {
+    if (x === c || x.owner === c.owner) continue;
+    const d = grid.dist(x.tile, c.tile);
+    if (x.owner === nid) mineD = Math.min(mineD, d);
+    else if (x.owner !== null && x.owner >= 0 && s.nations[x.owner]?.alive) otherD = Math.min(otherD, d);
+  }
+  return mineD <= otherD + 2 * grid.k ? mineD : Infinity;
+}
 function neighbors(s, grid, nid) {
-  const mine = s.castles.filter((c) => c.owner === nid);
   const d = new Map();
   for (const c of s.castles) {
     if (c.owner === null || c.owner === nid || !s.nations[c.owner]?.alive) continue;
-    const m = Math.min(...mine.map((x) => grid.dist(x.tile, c.tile)));
+    const m = frontier(s, grid, nid, c);
     if (m <= 14 * grid.k && (!d.has(c.owner) || m < d.get(c.owner))) d.set(c.owner, m);
   }
   return [...d.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
@@ -46,8 +56,8 @@ export function chooseStrategy(s, grid, nid) {
   const topShare = citiesOf(s, top.id) / total;
   // 노릴 나라: 이미 둘 넘게 노리는 나라는 피함 (모두가 한 나라만 물어뜯지 않게)
   const hunted = (x) => s.nations.filter((m) => m.alive && m.id !== nid && m.focus === x).length;
-  const free = nb.filter((x) => hunted(x) < 2 && !(x === s.playerId && !s.spectator && s.turn <= graceOf(s)));
-  const pool = free.length ? free : nb;
+  const free = nb.filter((x) => hunted(x) < 2 && !pactOf(s, nid, x) && !(x === s.playerId && !s.spectator && s.turn <= graceOf(s)));
+  const pool = free.length ? free : nb.filter((x) => !pactOf(s, nid, x)).length ? nb.filter((x) => !pactOf(s, nid, x)) : nb;
   const weakest = pool.slice().sort((a, b) => powerOf(s, a) - powerOf(s, b))[0];
   // 맞수: 힘이 비슷한 이웃 (먹잇감 대신 고르기도 함)
   const mp = powerOf(s, nid);
@@ -89,11 +99,12 @@ function threatNear(s, grid, c) {
 // 전략에 맞는 외교: 수성·사방 방어는 노리지 않는 이웃과 정전, 반패권은 다른 나라와 동맹
 function strategyDiplomacy(s, grid, nid, rng) {
   const n = s.nations[nid];
-  if (rng() > 0.15) return;
+  const small = citiesOf(s, nid) <= 3;
+  if (rng() > (small ? 0.5 : 0.15)) return; // 작은 나라는 외교로 버팀: 훨씬 자주 사신을 보냄
   const nb = neighbors(s, grid, nid);
-  if (n.strat === 'hold' || n.strat === 'center' || n.strat === 'build') {
+  if (n.strat === 'hold' || n.strat === 'center' || n.strat === 'build' || (small && nb.some((x) => x !== n.focus && powerOf(s, x) > powerOf(s, nid) * 1.5 && !pactOf(s, nid, x)))) {
     const m = nb.filter((x) => x !== n.focus && !pactOf(s, nid, x)).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
-    if (m !== undefined) propose(s, nid, m, 'truce', rng);
+    if (m !== undefined && (m !== s.playerId || s.spectator || rng() < 0.3)) propose(s, nid, m, 'truce', rng); // 플레이어에게는 덜 자주 (사신 창이 쏟아지지 않게)
   } else if (n.strat === 'ride') {
     // 가장 강한 이웃(노리는 나라 말고)에게 동맹을 청함
     const m = nb.filter((x) => x !== n.focus && !pactOf(s, nid, x)).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
@@ -180,7 +191,8 @@ export function aiTurn14(s, grid, nid, scope = null) {
   const maxUnits = Math.max(2, Math.ceil(mine.length * 1.2 * P.units));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
     if (nUnits() >= maxUnits) break;
-    const reserve = Math.max(2500, c.troops * P.reserve) + threatNear(s, grid, c) * 0.8;
+    const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
+    const reserve = Math.max(2500, c.troops * P.reserve, foeCastle * 0.5) + threatNear(s, grid, c) * 0.8;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
     const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').sort((a, b) => b.lead + b.war - (a.lead + a.war));
@@ -258,11 +270,12 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     // 이미 두 나라와 싸우는 중이면 새 나라에는 싸움을 걸지 않음 (빈 땅·싸우던 상대만)
     if (!neutral && wars && wars.size >= 2 && !wars.has(c.owner) && c.owner !== focus) continue;
     const d = grid.dist(c.tile, from);
-    if (d > 25 * grid.k) continue;
+    if (d > 20 * grid.k) continue;
+    if (!neutral && frontier(s, grid, nid, c) === Infinity) continue; // 남의 나라 땅 너머 성은 노리지 않음
     const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
     // 이미 그 성으로 가는 우리 부대와 힘을 합침
     const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
-    if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) > (troops + ours) * P.bold) continue;
+    if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * 1.25 > (troops + ours) * P.bold) continue; // 수비의 1.25배 넘게 모였을 때만
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
     if (!neutral && c.owner === focus) v -= 8;
     if (!neutral && (busy.get(c.owner) || 0) > powerOf(s, c.owner) * 0.4) v -= 3;

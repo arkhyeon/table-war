@@ -129,7 +129,7 @@ export function aiBuild(s, grid, nid, threat, minGold = 40000) {
 // 진지: 들어간 아군이 받는 피해 30% 줄고 보급 거점이 됨 · 망루: 2칸 안 적 부대를 매일 화살로 공격 · 목책: 적이 지나갈 수 없는 길막이
 export const FORTS = {
   camp: { name: '진지', icon: '⛺', cost: 8000, days: 5, hp: 2500, desc: '안의 아군 피해 −30%, 보급 거점' },
-  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1800, desc: '2칸 안 적 부대를 매일 공격 (원군·출격 견제)' },
+  tower: { name: '망루', icon: '🗼', cost: 6000, days: 4, hp: 1400, desc: '2칸 안 가장 가까운 적 부대 하나를 매일 공격 (원군·출격 견제)' },
   palisade: { name: '목책', icon: '🚧', cost: 1500, days: 0, hp: 2000, desc: '바로 세움. 적이 못 지나가고, 옆에 온 적은 그날 멈춤 (여러 개로 길을 막기)' },
 };
 export const fortAt = (s, tile) => (s.forts || []).find((f) => f.tile === tile) || null;
@@ -191,11 +191,12 @@ export function fortsDay(s, grid) {
       continue;
     }
     if (f.kind === 'tower') {
-      for (const u of s.units) {
-        if (!enemy(s, f.owner, u.nation) || grid.dist(u.tile, f.tile) > 2) continue;
-        const dmg = Math.round(120 + u.troops * 0.005); // 너무 세지 않게
+      // 2칸 안에서 가장 가까운 적 부대 하나만 쏨 (여러 부대를 한꺼번에 녹이지 않게)
+      const u = s.units.filter((x) => enemy(s, f.owner, x.nation) && grid.dist(x.tile, f.tile) <= 2).sort((a, b) => grid.dist(a.tile, f.tile) - grid.dist(b.tile, f.tile))[0];
+      if (u) {
+        const dmg = Math.round(70 + u.troops * 0.003);
         u.troops -= dmg;
-        u.morale -= 2;
+        u.morale -= 1;
         s.fx.push({ type: 'hit', tile: u.tile, amt: dmg }, { type: 'arrow', a: f.tile, b: u.tile });
       }
     }
@@ -207,7 +208,7 @@ export function fortsDay(s, grid) {
 // 컴퓨터: 위협받는 국경 도시 앞(적 쪽 2~3칸)에 망루나 진지를 성 수비대가 지음
 export function aiForts(s, grid, nid, threat) {
   const n = s.nations[nid];
-  if (n.gold < 30000 || (s.forts || []).filter((f) => f.owner === nid).length >= s.castles.filter((c) => c.owner === nid).length) return;
+  if (n.gold < 30000 || (s.forts || []).filter((f) => f.owner === nid).length >= Math.ceil(s.castles.filter((c) => c.owner === nid).length * 0.5)) return; // 시설은 도시 2곳당 1개까지
   const c = s.castles.filter((x) => x.owner === nid && threat(x) > 0).sort((a, b) => threat(b) - threat(a))[0];
   if (!c) return;
   const foe = s.units.filter((u) => enemy(s, nid, u.nation)).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];

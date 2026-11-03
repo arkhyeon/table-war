@@ -297,7 +297,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [aud, setAud] = useState(audioOpt());
   // 처음 누를 때 소리를 켬 (브라우저 규칙)
   useEffect(() => { const on = () => unlockAudio(); window.addEventListener('pointerdown', on, { once: true }); return () => window.removeEventListener('pointerdown', on); }, []);
-  const [placeFort, setPlaceFort] = useState(null); // 성 수비대가 지을 시설 {cid, kind} // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [speed, setSpeed] = useState(420);
   const [toastMsg, setToast] = useState(null);
   const [sheet, setSheet] = useState(false);
@@ -306,8 +305,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [duel, setDuel] = useState(null);
   const [cutin, setCutin] = useState(null);
   const [corpsForm, setCorpsForm] = useState(null); // {cities: [], leader}
+  const [placeFort, setPlaceFort] = useState(null); // 성 수비대가 지을 시설 {cid, kind} // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
   const [founding, setFounding] = useState(false); // 새 도시 자리 고르는 중
-  const spots = useMemo(() => (founding ? foundSpots(game, grid, pid) : null), [founding, game, grid, pid]);
+  const spots = useMemo(() => {
+    if (founding) return foundSpots(game, grid, pid);
+    if (placeFort) { // 시설 지을 수 있는 칸 (성에서 4칸 안 내 땅)
+      const c = game.castles[placeFort.cid], out = [];
+      for (let t = 0; t < grid.N; t++) if (grid.dist(t, c.tile) <= 4 && !castleFortCheck(game, grid, c, t, placeFort.kind)) out.push(t);
+      return out;
+    }
+    return null;
+  }, [founding, placeFort, game, grid, pid]);
   const spotsRef = useRef(null);
   spotsRef.current = spots;
   const canvas = useRef(null);
@@ -699,6 +707,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
+      grid: () => grid,
+      // 자동 시험용: 화면 버튼과 같은 명령을 함수로 (fn(s, grid, api))
+      act: (fn) => { const s = clone(gameRef.current); const r = fn(s, grid, { sortie, order, draft14, draftMax14, sendTroops, startFort, castleFortCheck, propose, gift, adoptPolicy, buildSiege, commandCap, enemy, powerOf, relOf, pactOf, acceptChance, startBuild, canBuild, unitStats, nearestCastle, askProtection, demandVassal, urgeSurrender, trade, recruit, rewardAll, autoJobs }); if (!(r && r.ok === false)) { gameRef.current = s; setGame(s); } return JSON.parse(JSON.stringify(r ?? null, (k, v) => (k === 'unit' ? v?.id : v))); },
       gensAt: (cid) => Object.values(gameRef.current.generals).filter((g) => g.castle === cid && g.status === 'active').length,
     };
   });
@@ -1124,6 +1135,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
               })}
             </div>
           )}
+          {selCastle.owner === pid && !playing && selCastle.kind !== 'pass' && (
+            <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}><b>🏗️ 야전 시설 짓기</b> <small className="muted">장수 없이 성 수비대가 지음 · 성에서 4칸 안 내 땅(초록 칸) · 한 지역 3개, 망루 2개까지</small>
+                  <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                    {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
+                  </div>
+                  </div>
+          )}
           {selCastle.owner === pid && !playing && (
             <div className="col" style={{ marginTop: 8 }}>
               {!sortieOpen ? (
@@ -1174,10 +1192,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div style={{ marginTop: 8 }}>🚚 병력만 보내기 {fmtTroops(Math.min(sendAmt, Math.max(0, selCastle.troops - 500)))} <small className="muted">(장수 없이, 내 다른 성으로)</small></div>
                   <Slider min={1000} max={Math.max(1000, Math.floor((selCastle.troops - 500) / 1000) * 1000)} step={1000} value={Math.min(sendAmt, Math.max(1000, selCastle.troops - 500))} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={selCastle.troops < 1500} onClick={() => { setSendFrom(selCastle.id); setSheet(false); toast('받을 내 성을 지도에서 누르세요'); }}>🚚 보낼 성 고르기</button>
-                  <div style={{ marginTop: 8 }}>🏗️ 주변 야전 시설 <small className="muted">(성 수비대가 4칸 안 내 땅에 지음 · 한 지역 3개, 망루 2개까지)</small></div>
-                  <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                    {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
-                  </div>
                   {(game.convoys || []).filter((v) => v.from === selCastle.id || v.to === selCastle.id).map((v, i) => <div key={i} className="muted" style={{ fontSize: 11 }}>🚚 {game.castles[v.from].name} → {game.castles[v.to].name} {fmtTroops(v.troops)} · {Math.max(0, v.arrive - absDay(game))}일 남음</div>)}
                   {(() => {
                     const after = selCastle.troops + Math.min(draftAmt, draftMax14(game, selCastle));
