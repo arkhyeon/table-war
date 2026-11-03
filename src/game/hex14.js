@@ -280,7 +280,7 @@ export function buildSiege(s, uid) {
   if (s.nations[u.nation].gold < SIEGE_COST) return { ok: false, msg: `금이 모자랍니다 (${fmtGold(SIEGE_COST)}).` };
   s.nations[u.nation].gold -= SIEGE_COST;
   u.siege = true;
-  return { ok: true, msg: '🪨 공성병기를 만들었습니다 (성벽 5배로 깎음 · 느려지고 들판 싸움에 약함 · 함락하면 부서짐)' };
+  return { ok: true, msg: '⚙️ 공성병기를 만들었습니다 (성벽 5배로 깎음 · 느려지고 들판 싸움에 약함 · 함락하면 부서짐)' };
 }
 // 모두 나누기: 장수마다 한 부대씩, 병력은 똑같이
 export function splitAll(s, grid, uid) {
@@ -404,16 +404,16 @@ export function findPath(s, grid, from, to, nation, navy = false) {
 
 // ── 출진: 성에서 장수와 병력을 뽑아 부대를 만듦 ──
 export const SIEGE_COST = 5000; // 공성병기(충차·투석기) 동반 비용
-// 출진 비용: 병사 1명당 0.5금(군비 확장 정책이면 0) + 공성병기
-export const sortieCost = (s, nid, troops, siege = false) => (hasPolicy(s, nid, 'military') ? 0 : Math.round(troops * SORTIE_COST)) + (siege ? SIEGE_COST : 0);
+// 출진 비용: 병사 1명당 0.5금(군비 확장 정책이면 절반) + 공성병기
+export const sortieCost = (s, nid, troops, siege = false) => Math.round(troops * SORTIE_COST * (hasPolicy(s, nid, 'military') ? 0.5 : 1)) + (siege ? SIEGE_COST : 0);
 // 금으로 감당할 수 있는 출진 병력
-export const sortieAfford = (s, nid, siege = false) => (hasPolicy(s, nid, 'military') ? Infinity : Math.max(0, Math.floor((s.nations[nid].gold - (siege ? SIEGE_COST : 0)) / SORTIE_COST / 100) * 100));
+export const sortieAfford = (s, nid, siege = false) => Math.max(0, Math.floor((s.nations[nid].gold - (siege ? SIEGE_COST : 0)) / (SORTIE_COST * (hasPolicy(s, nid, 'military') ? 0.5 : 1)) / 1000) * 1000);
 export function sortie(s, grid, castleId, gids, troops, siege = false) {
   const c = s.castles[castleId];
   const gs = gids.map((id) => s.generals[id]);
   if (!gs.length || gs.some((g) => !g || g.castle !== castleId || g.nation !== c.owner)) return { ok: false, msg: '성에 있는 장수를 골라야 합니다.' };
   const cap = commandCap(s, gids);
-  troops = Math.min(Math.floor(troops / 100) * 100, cap, c.troops - 500);
+  troops = Math.floor(Math.min(troops, cap, c.troops - 500) / 1000) * 1000; // 병력은 천 단위
   if (troops < 1000) return { ok: false, msg: '병력이 모자랍니다 (성에 500은 남겨야 함).' };
   const cost = sortieCost(s, c.owner, troops, siege);
   if (s.nations[c.owner].gold < cost) return { ok: false, msg: `출진 비용(군량 수송) 금 ${fmtGold(cost)}이 모자랍니다.` };
@@ -447,6 +447,12 @@ export function stepDay(s, grid) {
   s.fx = [];
   s.duels = [];
   dropLeaderless(s, grid);
+  // 「약해지면 알아서 돌아오기」를 켠 부대: 병력 30%·사기 25 아래면 가까운 내 성으로
+  for (const u of s.units) {
+    if (!u.autoRet || (u.troops >= u.max * 0.3 && u.morale >= 25) || u.order?.kind === 'castle' && s.castles[u.order.id]?.owner === u.nation) continue;
+    const home = nearestCastle(s, grid, u.tile, u.nation);
+    if (home && order(s, grid, u, 'castle', home.id).ok) log(s, `🏠 ${gensOf(s, u.gens)[0]?.name} 부대가 약해져 ${home.name}(으)로 돌아갑니다.`, 'info', [u.nation]);
+  }
   const rng = makeRng(`hex:${s.seed}:${s.turn}:${s.day}`);
   const cas = castleAt(s);
   // 1) 이동 (느린 부대부터 섞어서): 하루 이동력만큼, 적 부대 옆 칸에 들어서면 멈춤(통제 구역)
@@ -740,7 +746,7 @@ export function endTurn14(s, grid) {
 
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
 export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
-export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 100) * 100, Math.floor((c.pop * 1000 * 0.2) / 100) * 100));
+export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];

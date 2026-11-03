@@ -50,8 +50,8 @@ export function cancelBuild(s, cid) {
   return { ok: true, msg: `공사를 멈췄습니다 (금 ${fmtGold(back)} 돌려받음).` };
 }
 
-// 새 도시 자리: 내 땅, 지나갈 수 있는 칸, 다른 성과 4칸 이상 떨어짐
-export const FOUND_GAP = 4;
+// 새 도시 자리: 내 땅, 지나갈 수 있는 칸, 다른 성과 6칸 이상 떨어짐
+export const FOUND_GAP = 6; // 성끼리 겹쳐 보이지 않게 띄엄띄엄
 export function foundCheck(s, grid, tile, nid) {
   if (tile < 0 || !grid.passable(tile)) return '도시를 세울 수 없는 땅입니다.';
   if (s.owner[tile] !== nid) return '내 땅에만 세울 수 있습니다.';

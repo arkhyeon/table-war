@@ -5,10 +5,10 @@ import { log } from './hex14.js';
 export const POLICIES = {
   farming: { name: '둔전', icon: '🌾', desc: '가을 수확 +30%, 금 수입 −10%' },
   commerce: { name: '상업 장려', icon: '🏪', desc: '금 수입 +25%' },
-  conscript: { name: '징병령', icon: '📯', desc: '자원병 +50%, 징병 1명당 8금' },
+  conscript: { name: '징병령', icon: '📯', desc: '자원병 +50%, 징병 1명당 8금, 성 수비 사기 유지' },
   fortify: { name: '축성 장려', icon: '🧱', desc: '성벽 수리 2배, 성 시설 비용 −30%' },
   talent: { name: '인재 등용', icon: '🎓', desc: '등용 확률 +15%, 재야가 더 자주 나타남' },
-  military: { name: '군비 확장', icon: '⚔️', desc: '출진 비용 없음, 부대 공격 +5%' },
+  military: { name: '군비 확장', icon: '⚔️', desc: '출진 비용 절반, 부대 공격 +5%' },
   navy: { name: '수군 육성', icon: '⛵', desc: '모든 부대가 물 위에서 약해지지 않음' },
 };
 export const POLICY_COST = 20000; // 처음 펼칠 때

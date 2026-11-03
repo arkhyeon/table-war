@@ -82,7 +82,7 @@ const key = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 export const relOf = (s, a, b) => s.rel?.[key(a, b)] ?? 30;
 export const addRel = (s, a, b, d) => { if (a === b || a === null || b === null || a < 0 || b < 0) return; s.rel[key(a, b)] = Math.max(0, Math.min(100, relOf(s, a, b) + d)); };
 export const pactOf = (s, a, b) => (s.pacts || []).find((p) => ((p.a === a && p.b === b) || (p.a === b && p.b === a)) && p.until > s.turn) || null;
-export const PACT = { ally: '동맹', truce: '정전' };
+export const PACT = { ally: '동맹', truce: '정전', vassal: '속국' };
 
 export const powerOf = (s, nid) => s.castles.filter((c) => c.owner === nid).reduce((a, c) => a + c.troops, 0) + s.units.filter((u) => u.nation === nid).reduce((a, u) => a + u.troops, 0);
 
@@ -95,9 +95,10 @@ export function envoyOf(s, nid) {
 // 한 순 금 수입 (도시 세금 합)
 export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === nid ? goldOf(s, c) : 0), 0);
 // 친선 금액: 주는 나라와 받는 나라 수입(2순 치)의 기하평균 — 내가 커질수록, 상대가 클수록 같은 우호에 돈이 더 듦
-const giftBase = (s, a, b) => Math.max(5000, Math.sqrt(Math.max(5000, incomeOf(s, a) * 2) * Math.max(5000, incomeOf(s, b) * 2)));
-export const giftSizes = (s, a, b) => { const small = Math.round(giftBase(s, a, b) / 1000) * 1000; return [small, small * 3]; };
-export const giftGain = (s, a, b, amt) => Math.min(30, Math.round((amt / giftBase(s, a, b)) * 8 * envoyOf(s, a).mult));
+// 친선: 금 1만·3만 두 가지. 큰 나라일수록 같은 돈으로 덜 오름 (도시 4곳까지는 1만에 +10, 크면 최대 1/3)
+const sizeF = (s, b) => Math.max(1, Math.min(3, Math.sqrt(s.castles.filter((c) => c.owner === b && c.kind !== 'pass').length / 4)));
+export const giftSizes = () => [10000, 30000];
+export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round(((amt / 10000) * 10 * envoyOf(s, a).mult) / sizeF(s, b))));
 // 약소국 결속: 도시 4개 이하면 자원병 +50%·징병비 −25%·재야 등용 +10%p·성 수비 피해 −15%
 export const isSmall = (s, nid) => nid !== null && nid !== undefined && nid >= 0 && s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length <= 4;
 
@@ -212,9 +213,18 @@ export function recruit(s, gid, nid, rng = Math.random) {
 export function release(s, gid, by = s.playerId) {
   const g = s.generals[gid];
   const home = s.nations[g.nation]?.alive ? s.castles.find((c) => c.owner === g.nation) : null;
+  // 군주(였던 사람)는 신하가 되지 않음: 나라가 살아 있으면 몸값을 받고 돌려보내고, 망했으면 은거
+  let extra = '';
+  if (home && isRuler(g)) {
+    const pay = Math.min(30000, Math.round(s.nations[g.nation].gold * 0.3));
+    s.nations[g.nation].gold -= pay;
+    if (s.nations[by]) s.nations[by].gold += pay;
+    extra = pay > 0 ? ` 몸값 금 ${fmtGold(pay)}을(를) 받았습니다.` : '';
+  }
   if (home) { Object.assign(g, { status: 'active', castle: home.id, held: 0, captor: null }); addRel(s, by, g.nation, 8); }
+  else if (isRuler(g)) { Object.assign(g, { status: 'gone', castle: null, captor: null }); return { ok: true, msg: `${g.name}은(는) 풀려나 은거했습니다.` }; }
   else Object.assign(g, { status: 'free', nation: null, castle: s.castles.find((c) => c.owner === by && c.kind !== 'pass')?.id ?? s.castles.find((c) => c.kind !== 'pass').id, captor: null });
-  return { ok: true, msg: `${g.name}을(를) 풀어 주었습니다.` };
+  return { ok: true, msg: `${g.name}을(를) 풀어 주었습니다.${extra}` };
 }
 
 export function execute(s, gid) {
@@ -311,7 +321,8 @@ function spreadLand(s, grid) {
     let n = 4 + Math.round((s.generals[c.jobs?.farm]?.pol || 40) / 20);
     for (const t of dt[c.id]) {
       if (n <= 0) break;
-      if (s.owner[t] === c.owner || near.has(t)) continue;
+      // 삼국지14처럼: 남이 칠해 둔 땅은 저절로 되찾지 않음 (부대가 직접 칠해야 함) — 빈 땅만 넓힘
+      if (s.owner[t] !== -1 || near.has(t)) continue;
       if (!grid.nb[t].some((x) => s.owner[x] === c.owner)) continue;
       s.owner[t] = c.owner;
       n -= 1;
@@ -321,8 +332,19 @@ function spreadLand(s, grid) {
 
 // 외교: 약조가 끝나면 알림, 우호는 조금씩 30으로, 컴퓨터끼리 동맹·정전
 function diplomacyTurn(s, rng) {
-  for (const p of s.pacts) if (p.until === s.turn + 1) log(s, `📜 ${s.nations[p.a].name}과(와) ${s.nations[p.b].name}의 ${PACT[p.type]}이 끝납니다.`, 'diplo', [p.a, p.b]);
-  s.pacts = s.pacts.filter((p) => p.until > s.turn + 1 && s.nations[p.a].alive && s.nations[p.b].alive);
+  const me = s.spectator ? null : s.playerId;
+  const other = (p) => (p.a === me ? p.b : p.a);
+  s.eventsQ = s.eventsQ || [];
+  for (const p of s.pacts) {
+    if (p.type === 'vassal') continue;
+    // 플레이어 약조는 끝나기 3순 전에 미리, 끝날 때 한 번 더 크게 알림
+    if (me !== null && (p.a === me || p.b === me) && p.until === s.turn + 4) s.eventsQ.push({ title: '약조 만료 임박', text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 3순 뒤 끝납니다. 외교 탭에서 다시 맺을 수 있습니다.`, nations: [other(p)] });
+    if (p.until === s.turn + 1) {
+      log(s, `📜 ${s.nations[p.a].name}과(와) ${s.nations[p.b].name}의 ${PACT[p.type]}이 끝납니다.`, 'diplo', [p.a, p.b]);
+      if (me !== null && (p.a === me || p.b === me)) s.eventsQ.push({ title: `${PACT[p.type]} 종료`, text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 끝났습니다. 이제 서로 칠 수 있습니다!`, nations: [other(p)] });
+    }
+  }
+  s.pacts = s.pacts.filter((p) => (p.type === 'vassal' || p.until > s.turn + 1) && s.nations[p.a].alive && s.nations[p.b].alive);
   for (const k of Object.keys(s.rel)) s.rel[k] += s.rel[k] > 30 ? -0.5 : 0.5;
   const alive = s.nations.filter((n) => n.alive && !n.horde);
   const ranked = alive.slice().sort((a, b) => powerOf(s, b.id) - powerOf(s, a.id));
@@ -335,14 +357,29 @@ function diplomacyTurn(s, rng) {
       const m = cand.length ? rng.pick(cand) : null;
       if (m) propose(s, n.id, m.id, 'ally', rng);
     }
-    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id)); const amt = m && giftSizes(s, n.id, m.id)[0]; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
+    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id)); const amt = 10000; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
     const foe = ranked.find((m) => m.id !== n.id && !pactOf(s, n.id, m.id) && powerOf(s, m.id) > powerOf(s, n.id) * 1.8);
     if (foe && rng() < 0.4) propose(s, n.id, foe.id, 'truce', rng);
+  }
+  // 약한 나라는 훨씬 센 플레이어에게 먼저 조공(금)을 바치고 약조를 청함
+  if (me !== null && s.nations[me]?.alive) {
+    const pp = powerOf(s, me);
+    for (const n of alive) {
+      if (n.id === me || pactOf(s, n.id, me) || powerOf(s, n.id) * 2 > pp || rng() > 0.05) continue;
+      const pay = Math.min(20000, Math.round(n.gold * 0.15 / 1000) * 1000);
+      if (pay >= 2000) {
+        n.gold -= pay; s.nations[me].gold += pay; addRel(s, n.id, me, 6);
+        log(s, `🎁 ${n.name}이(가) 우리에게 금 ${fmtGold(pay)}을(를) 바쳤습니다.`, 'diplo', [n.id, me]);
+      }
+      propose(s, n.id, me, rng() < 0.5 ? 'truce' : 'ally', rng);
+    }
   }
 }
 
 // 인재: 재야가 가끔 나타남, 컴퓨터는 자기 도시 재야를 등용, 포로는 등용하거나 몇 턴 뒤 돌려보냄
 function people(s, rng) {
+  // 재야로 떠돌던 옛 군주는 은거
+  for (const g of Object.values(s.generals)) if (g.status === 'free' && isRuler(g)) { g.status = 'gone'; g.castle = null; }
   const used = new Set(Object.values(s.generals).map((g) => g.name));
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   if (rng() < 0.25) {

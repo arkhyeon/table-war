@@ -272,7 +272,8 @@ function revolts(s, grid, rng) {
     if (mine.length < 15 || share < 0.18 || rng() > Math.min(0.1, (mine.length - 12) * 0.003 + (share - 0.12) * 0.25)) continue;
     const cap = s.castles.find((c) => c.owner === n.id && c.capital) || mine[0];
     const guard = (c) => Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').reduce((a, g) => Math.max(a, g.loyal ?? 70), 0);
-    const c = mine.filter((x) => x !== cap && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2))
+    // 장수가 지키는 성은 반란이 안 일어남 (귀찮지 않게: 장수 없는 변방만)
+    const c = mine.filter((x) => x !== cap && !Object.values(s.generals).some((g) => g.castle === x.id && g.status === 'active') && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2))
       .map((x) => [x, grid.dist(x.tile, cap.tile) / (1 + x.troops / 15000) / (1 + guard(x) / 100)]).sort((a, b) => b[1] - a[1])[0]?.[0];
     if (!c || c.troops > 20000) continue; // 수비가 두터우면 반란이 못 일어남
     // 장수는 도읍으로 피신, 성은 반란군(중립)이 차지
