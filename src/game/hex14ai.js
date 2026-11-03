@@ -144,6 +144,17 @@ export function aiTurn14(s, grid, nid, scope = null) {
   for (const u of myUnits) {
     const home = nearestCastle(s, grid, u.tile, nid);
     if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }
+    // 가망 없는 공성은 포기: 그 성으로 가는 우리 부대를 다 합쳐도 수비가 훨씬 세거나, 잔병(1.5천 미만)뿐이면 다른 목표·귀환
+    if (u.order?.kind === 'castle' && enemy(s, nid, s.castles[u.order.id].owner)) {
+      const c = s.castles[u.order.id];
+      const ours = s.units.filter((x) => x.nation === nid && x.order?.kind === 'castle' && x.order.id === c.id).reduce((a, x) => a + x.troops, 0);
+      if (u.troops < 1500 || c.troops * (c.dur > 0 ? 1.4 : 1) > ours * 1.6) {
+        const t = u.troops >= 1500 ? tgt(u.tile, u.troops) : null;
+        if (t && t.id !== c.id) order(s, grid, u, 'castle', t.id);
+        else if (home) order(s, grid, u, 'castle', home.id);
+        continue;
+      }
+    }
     const o = u.order;
     const bad = !o || (o.kind === 'castle' && !enemy(s, nid, s.castles[o.id].owner) && o.id !== home?.id) || (o.kind === 'unit' && !s.units.some((x) => x.id === o.id)) || (o.kind === 'tile' && !u.path.length);
     if (bad || !u.path.length) {

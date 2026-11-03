@@ -136,13 +136,16 @@ export function vassalTurn(s, grid, rng) {
   }
   // 강한 이웃 사이에 끼인 컴퓨터 약소국: 가장 센 이웃에게 속국을 청함
   for (const n of s.nations) {
-    if (!n.alive || n.horde || (n.id === s.playerId && !s.spectator) || lordOf(s, n.id) !== null || vassalsOf(s, n.id).length || rng() > 0.04) continue;
+    if (!n.alive || n.horde || (n.id === s.playerId && !s.spectator) || lordOf(s, n.id) !== null || vassalsOf(s, n.id).length) continue;
     const mine = s.castles.filter((c) => c.owner === n.id);
     if (!mine.length || mine.length > 3) continue;
+    // 적 부대가 우리 성 앞까지 왔으면 훨씬 자주 (멸망 직전에 강국에 기댐)
+    const pressed = s.units.some((u) => u.nation !== n.id && enemy(s, n.id, u.nation) && mine.some((m) => grid.dist(m.tile, u.tile) <= 4 * grid.k));
+    if (rng() > (pressed ? 0.2 : 0.05)) continue;
     const near = new Set();
     for (const c of s.castles) if (c.owner !== null && c.owner !== n.id && s.nations[c.owner]?.alive && mine.some((m) => grid.dist(m.tile, c.tile) <= 10 * grid.k)) near.add(c.owner);
-    const strong = [...near].filter((x) => powerOf(s, x) > powerOf(s, n.id) * 3).sort((a, b) => powerOf(s, b) - powerOf(s, a));
-    if (strong.length >= 1 && (strong.length >= 2 || rng() < 0.4)) askProtection(s, n.id, strong[0], rng);
+    const strong = [...near].filter((x) => powerOf(s, x) > powerOf(s, n.id) * 2.5).sort((a, b) => powerOf(s, b) - powerOf(s, a));
+    if (strong.length >= 1 && (strong.length >= 2 || pressed || rng() < 0.4)) askProtection(s, n.id, strong[0], rng);
   }
 }
 

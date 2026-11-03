@@ -698,6 +698,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       nb: (t) => grid.nb[t].filter((x) => grid.passable(x)),
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
+      game: () => gameRef.current,
       gensAt: (cid) => Object.values(gameRef.current.generals).filter((g) => g.castle === cid && g.status === 'active').length,
     };
   });
