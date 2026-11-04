@@ -110,7 +110,15 @@ export function hegemonOf(s) {
   const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
   const ranked = s.nations.filter((n) => n.alive && !n.horde).map((n) => [n.id, cc(n.id)]).sort((x, y) => y[1] - x[1]);
   if (!ranked.length || ranked[0][1] < total * 0.3 || (ranked[1] && ranked[0][1] < ranked[1][1] * 1.5)) return null;
+  // 대세가 기운 나라(45% 이상)나 300순이 지난 판은 견제하지 않음 — 견제만 하다 끝없이 균형이 이어지지 않게
+  if (ranked[0][1] >= total * 0.45 || s.turn > 300) return null;
   return ranked[0][0];
+}
+// 대세: 전체 도시의 45%를 넘은 나라 (작은 나라들이 속국으로 잘 들어감)
+export function dominantOf(s) {
+  const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
+  const ranked = s.nations.filter((n) => n.alive && !n.horde).map((n) => [n.id, s.castles.filter((c) => c.owner === n.id && c.kind !== 'pass').length]).sort((x, y) => y[1] - x[1]);
+  return ranked.length && ranked[0][1] >= total * 0.45 ? ranked[0][0] : null;
 }
 export function acceptChance(s, a, b, type) {
   const rel = relOf(s, a, b);
@@ -332,6 +340,10 @@ export function govTurn(s, grid) {
     n.food = Math.round(n.food + food - foodUse(s, n.id));
     if (harvest && n.id === s.playerId) log(s, `🌾 가을 수확! 병량 +${fmtTroops(food)}`, 'info', [n.id]);
     if (n.gold < 0) n.gold = 0;
+    {
+      const capG = 100000 + s.castles.filter((c) => c.owner === n.id && c.kind !== 'pass').length * 10000;
+      if (n.gold > capG) { const loss = Math.round((n.gold - capG) * 0.05); n.gold -= loss; if (n.id === s.playerId && loss >= 5000 && s.turn % 6 === 0) log(s, `💸 국고가 넘쳐(${fmtGold(capG)} 넘음) 금 ${fmtGold(loss)}이 새어 나갔습니다. 징병·용병·시설에 쓰세요.`, 'info', [n.id]); }
+    }
     if (n.food < 0) {
       // 병량이 떨어지면 병사가 흩어지고 사기가 꺾임
       for (const c of s.castles) if (c.owner === n.id) c.troops = Math.round(c.troops * 0.93);

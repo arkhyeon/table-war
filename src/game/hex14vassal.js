@@ -3,7 +3,7 @@
 // 항복 권유: 아주 약한 나라(또는 오래된 속국)를 통째로 흡수 — 도시·장수·부대가 넘어옴
 import { fmtGold } from './format.js';
 import { log, enemy } from './hex14.js';
-import { powerOf, pactOf, relOf, addRel, incomeOf, PACT } from './hex14gov.js';
+import { powerOf, pactOf, relOf, addRel, incomeOf, PACT, dominantOf } from './hex14gov.js';
 
 const cities = (s, nid) => s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length;
 export const lordOf = (s, nid) => (s.pacts || []).find((p) => p.type === 'vassal' && p.b === nid)?.a ?? null;
@@ -28,7 +28,8 @@ export function vassalChance(s, a, b) {
   if (pactOf(s, a, b)?.type === 'vassal' || lordOf(s, b) !== null) return 0;
   const r = ratio(s, a, b);
   if (r > 0.5) return 0;
-  return Math.max(0, Math.min(0.9, (0.5 - r) * 1.6 + (relOf(s, a, b) - 40) / 100));
+  const tide = dominantOf(s) === a ? 0.25 : 0; // 대세가 기운 나라의 요구는 잘 받아들임
+  return Math.max(0, Math.min(0.9, (0.5 - r) * 1.6 + (relOf(s, a, b) - 40) / 100 + tide));
 }
 // a가 b(더 센 나라)에게 속국으로 받아 달라고 청할 때
 export function protectChance(s, a, b) {
