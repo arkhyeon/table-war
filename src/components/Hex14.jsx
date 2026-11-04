@@ -1106,8 +1106,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <span>장수</span><div className="gen-list">{castleGens.length ? castleGens.map((g) => (
               <div key={g.id} className="gen-row">
                 <Face g={g} size={24} col={ownerColor(game, selCastle.owner)} />
-                <div className="gen-main"><b>{g.name}</b><Stats g={g} /></div>
-                <div className="gen-tags">{selCastle.owner === pid && <Loyal g={g} />}<Job g={g} /></div>
+                <div className="gen-main"><div className="gen-top"><b>{g.name}</b>{selCastle.owner === pid && <Loyal g={g} />}<Job g={g} /></div><Stats g={g} /></div>
                 {selCastle.owner === pid && !playing ? <button className="xs" title="다른 내 성으로 보내기 (지도에서 성을 누름)" onClick={() => { setSendGen(g.id); setSheet(false); toast(`${g.name}: 보낼 내 성을 지도에서 누르세요 (병력 ${fmtTroops(callAmt)} 데려감)`); }}>➡️</button> : <span />}
               </div>)) : <span className="muted">없음</span>}</div>
           </div>
@@ -1229,7 +1228,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
           )}
           {selCastle.owner === pid && !playing && selCastle.kind !== 'pass' && (
-            <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}><b>🏗️ 야전 시설 짓기</b> <small className="muted">장수 없이 성 수비대가 지음 · 성에서 4칸 안 내 땅(초록 칸) · 한 지역 3개, 망루 2개까지</small>
+            <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}><b>🏗️ 야전 시설 짓기</b> <small className="muted">장수 없이 성 수비대가 지음 · 이 성 관할의 내 땅(초록 칸) · 성마다 시설 3개, 망루 2개까지 · 공격받는 중엔 못 지음</small>
                   <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                     {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
                   </div>

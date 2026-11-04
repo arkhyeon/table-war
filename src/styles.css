@@ -503,3 +503,8 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .help-search { width: 100%; margin-bottom: 8px; font-size: 14px; padding: 8px 10px; }
 .help-none { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .help-hit { color: var(--text); }
+.gen-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
+.gen-main { display: grid; gap: 0; }
+.gen-top { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
+.gen-top b { overflow: hidden; text-overflow: ellipsis; }
+.gen-top .job-badge { margin-left: auto; }
