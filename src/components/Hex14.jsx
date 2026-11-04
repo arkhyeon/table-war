@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, hireMerc, mercMax, MERC_COST, MERC_CAP } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, hireMerc, mercMax, MERC_COST, MERC_CAP, capOf } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -1079,7 +1079,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <small className="muted">{selCastle.owner !== null && selCastle.owner >= 0 ? game.nations[selCastle.owner].name : selCastle.bandit || '중립'}</small>
           </h3>
           <div className="kv">
-            <span>수비병</span><span>{fmtTroops(selCastle.troops)}</span>
+            <span>수비병</span><span>{fmtTroops(selCastle.troops)}<small className="muted"> / 수용 {fmtTroops(capOf(selCastle))}</small></span>
             <span>성벽</span><span>{Math.round(selCastle.dur)} / {selCastle.maxDur}</span>
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
             {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))} <small className="muted">지도에 흰색=내 관할, 빨강=아직 남의 것(채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)</small></span></>}

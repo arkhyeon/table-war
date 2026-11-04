@@ -454,14 +454,18 @@ export function orderNew(s, grid, u, kind, id) {
 
 // 수송: 장수 없이 병력만 내 다른 성으로 (길 길이만큼 걸려 도착, 도착지를 잃으면 가까운 내 성으로)
 export const absDay = (s) => s.turn * DAYS + s.day;
+// 성 수용 한도: 한 성에 무한정 쌓이지 않게 (넘는 병력은 순마다 15%씩 흩어짐 — 남는 병력은 부대로 내보내야 함)
+export const capOf = (c) => (c.kind === 'pass' ? 30000 : Math.max(40000, Math.round((c.pop || 0) * 600)) + lv(c, 'wall') * 10000);
+export const roomOf = (c) => Math.max(0, capOf(c) - c.troops);
 // 포위: 적 부대가 성 바로 옆에 있음
 export const besieged = (s, grid, c) => s.units.some((u) => enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 1);
 export function sendTroops(s, grid, fromId, toId, troops) {
   const a = s.castles[fromId], b = s.castles[toId];
   if (!a || !b || a.owner !== b.owner || a === b) return { ok: false, msg: '내 다른 성으로만 보낼 수 있습니다.' };
   if (besieged(s, grid, b)) return { ok: false, msg: `${b.name}은(는) 포위당해 수송대가 들어갈 수 없습니다. 장수가 부대로 데리고 가야 합니다.` };
-  troops = Math.floor(Math.min(troops, a.troops - 500) / 1000) * 1000;
-  if (troops < 1000) return { ok: false, msg: '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
+  const inbound = (s.convoys || []).filter((v) => v.to === b.id).reduce((x, v) => x + v.troops, 0);
+  troops = Math.floor(Math.min(troops, a.troops - 500, roomOf(b) - inbound) / 1000) * 1000;
+  if (troops < 1000) return { ok: false, msg: roomOf(b) - inbound < 1000 ? `${b.name}은(는) 수용 한도(${fmtTroops(capOf(b))})가 찼습니다.` : '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
   const path = findPath(s, grid, a.tile, b.tile, a.owner, !!a.port);
   if (!path) return { ok: false, msg: '그 성까지 갈 길이 없습니다.' };
   const days = Math.max(1, Math.ceil(path.length / 0.8));
@@ -834,6 +838,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  for (const c of s.castles) { const over = c.troops - capOf(c); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
   checkRulers(s);
   buildTurn(s, grid, redistrict);
   s.duelDone = null;
@@ -856,7 +861,7 @@ export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.
 // 용병: 인구 한도와 상관없이 금으로 병력을 삼 (1명당 20금, 성마다 한 순에 5천까지) — 금은 많은데 징병이 막힌 작은 나라용
 export const MERC_COST = 20, MERC_CAP = 5000;
 export const mercLeft = (s, c) => (c.mercTurn === s.turn ? Math.max(0, MERC_CAP - (c.mercN || 0)) : MERC_CAP);
-export const mercMax = (s, c) => Math.max(0, Math.min(mercLeft(s, c), Math.floor(s.nations[c.owner].gold / MERC_COST / 1000) * 1000));
+export const mercMax = (s, c) => Math.max(0, Math.min(mercLeft(s, c), Math.floor(roomOf(c) / 1000) * 1000, Math.floor(s.nations[c.owner].gold / MERC_COST / 1000) * 1000));
 export function hireMerc(s, castleId, amt) {
   const c = s.castles[castleId];
   amt = Math.min(Math.floor(amt / 1000) * 1000, mercMax(s, c));

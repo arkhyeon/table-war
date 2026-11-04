@@ -5,7 +5,7 @@ import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, hireMerc, mercMax } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, hireMerc, mercMax, roomOf } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -323,7 +323,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     else if (n.gold > 150000 && n.food < use * 40) trade(s, nid, 'buy', Math.round((n.gold - 100000) / 2 / 1000) * 1000);
   }
   // 4.5) 용병: 금이 8만 넘게 쌓였는데 징병이 막힌(인구 한도) 위협받는 성·장수 있는 성에 용병
-  if (!scope && n.gold > 80000) for (const c of mine.filter((c) => draftMax14(s, c) < 1000 && (threatNear(s, grid, c) > 0 || Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'))).slice(0, 2)) { if (n.gold <= 60000) break; hireMerc(s, c.id, Math.min(mercMax(s, c), Math.floor((n.gold - 60000) / 20 / 1000) * 1000)); }
+  if (!scope && n.gold > 80000) for (const c of mine.filter((c) => (draftMax14(s, c) < 1000 || n.gold > 120000) && (threatNear(s, grid, c) > 0 || Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'))).slice(0, 3)) { if (n.gold <= 60000) break; hireMerc(s, c.id, Math.min(mercMax(s, c), Math.floor((n.gold - 60000) / 20 / 1000) * 1000)); }
   // 5) 징병: 금이 남으면 장수 있는 성부터 (내실·속공은 더 일찍 뽑음)
   const floor = scope ? 200000 : n.strat === 'build' || n.strat === 'blitz' ? 30000 : 50000;
   if (n.gold > floor && n.food > foodUse(s, nid) * 30) {
@@ -341,8 +341,10 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (extra < 1000) continue;
     const to = hubs.map((h) => [h, grid.dist(h.tile, c.tile)]).filter(([, d]) => d <= 12 * grid.k).sort((a, b) => a[1] - b[1])[0];
     if (!to) continue;
-    c.troops -= extra;
-    to[0].troops += Math.round(extra * 0.95);
+    const mv = Math.min(extra, roomOf(to[0]));
+    if (mv < 1000) continue;
+    c.troops -= mv;
+    to[0].troops += Math.round(mv * 0.95);
   }
   // 시설·외교 (군단이 아닐 때만)
   if (!scope) {
