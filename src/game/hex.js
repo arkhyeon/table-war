@@ -48,3 +48,19 @@ export function hexDistance(cols, a, b) {
   const dx = ax - bx, dz = ar - br, dy = -dx - dz;
   return Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
 }
+
+// 동서로 이어진(둥근) 세계 지도: 열을 감아서 이웃·거리 계산
+export function neighborIndexWrap(cols, rows, idx, d) {
+  const c = idx % cols, r = (idx / cols) | 0;
+  const dd = (r & 1 ? DIRS_ODD : DIRS_EVEN)[d];
+  const nc = (c + dd[0] + cols) % cols, nr = r + dd[1];
+  if (nr < 0 || nr >= rows) return -1;
+  return nr * cols + nc;
+}
+export function hexDistanceWrap(cols, a, b) {
+  const ac = a % cols, ar = (a / cols) | 0, bc = b % cols, br = (b / cols) | 0;
+  const ax = ac - (ar - (ar & 1)) / 2, bx0 = bc - (br - (br & 1)) / 2, dz = ar - br;
+  let best = Infinity;
+  for (const sh of [-cols, 0, cols]) { const dx = ax - (bx0 + sh), dy = -dx - dz; const d = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)); if (d < best) best = d; }
+  return best;
+}

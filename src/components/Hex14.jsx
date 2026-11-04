@@ -25,8 +25,22 @@ const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o
 // 칸마다 같은 값이 나오는 작은 난수
 const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
 const mapScale = (grid) => Math.min(3, 4096 / Math.max(grid.W, grid.H));
-const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(grid.W * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
+const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(Math.max(grid.W, grid.wrap ? grid.period + grid.size * 2 : 0) * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
 const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) => Math.max(0, Math.min(255, Math.round(v * f))); return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`; };
+
+// 둥근 세계 지도: 홀수 줄 맨 왼쪽 반 칸 틈을, 같은 줄 맨 오른쪽 칸이 넘쳐 그려진 부분으로 채움 (이음매가 점선처럼 보이지 않게)
+function seamFix(grid, cv, sc) {
+  if (!grid.wrap) return;
+  const ctx = cv.getContext('2d'), hw = grid.size * Math.sqrt(3), P = grid.period;
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (let r = 1; r < grid.rows; r += 2) {
+    const cy = grid.size * 1.5 * r + grid.size, y0 = (cy - grid.size * 0.75) * sc, h = grid.size * 1.5 * sc;
+    const sx = P * sc, w = (hw / 2) * sc;
+    if (sx + w > cv.width) continue;
+    ctx.drawImage(cv, sx, y0, w, h, 0, y0, w, h);
+  }
+  ctx.restore();
+}
 
 // ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
 function paintTerrain(grid, world) {
@@ -42,6 +56,8 @@ function paintTerrain(grid, world) {
   // 바다: 깊은 곳은 짙게, 뭍 가까운 곳은 옅게
   ctx.fillStyle = '#3f7598';
   ctx.fillRect(0, 0, grid.W, grid.H);
+  // 둥근 세계 지도: 북극 얼음 띠 바탕을 먼저 깔아 칸 사이 틈(지그재그)이 바다색 점선으로 보이지 않게
+  if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 4); }
   const isLand = (i) => i !== undefined && grid.terrain[i] !== 0;
   for (let i = 0; i < grid.N; i++) {
     if (grid.terrain[i] !== 0) continue;
@@ -65,12 +81,12 @@ function paintTerrain(grid, world) {
   if (bb && bb[2] - bb[0] >= 359) {
     for (let i = 0; i < grid.N; i++) {
       if (grid.terrain[i] !== 0) continue;
-      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c, getScenario(world.scenarioId)?.worldScale || 1);
+      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c, getScenario(world.scenarioId)?.worldScale || 1, grid.wrap ? grid.cols : 0);
       if (r > lim + 1) continue;
-      hexPath(i, 1.06);
-      // 가장자리 한 줄만 깨진 얼음(옅게), 안쪽은 두꺼운 얼음
+      // 가장자리 한 줄만 깨진 얼음(옅게), 안쪽은 두꺼운 얼음 — 둥근 지도는 이음매 쪽 칸을 반대편에도 한 번 더 (틈이 안 보이게)
       ctx.fillStyle = r >= lim ? `rgba(226,238,244,${0.6 + hash(i, 78) * 0.25})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
-      ctx.fill();
+      hexPath(i, 1.06); ctx.fill();
+      if (grid.wrap && (c === 0 || c === grid.cols - 1)) { ctx.save(); ctx.translate(c === 0 ? grid.period : -grid.period, 0); hexPath(i, 1.06); ctx.fill(); ctx.restore(); }
       if (r <= lim && hash(i, 80) < 0.25) { ctx.strokeStyle = 'rgba(150,180,200,0.6)'; ctx.lineWidth = sz * 0.06; const [cx, cy] = grid.center(i); ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + (hash(i, 81) - 0.5) * sz); ctx.lineTo(cx + sz * 0.1, cy); ctx.lineTo(cx + sz * 0.5, cy + (hash(i, 82) - 0.5) * sz); ctx.stroke(); }
     }
   }
@@ -184,6 +200,7 @@ function paintTerrain(grid, world) {
     ctx.fillStyle = 'rgba(110,110,120,0.55)';
     for (let i = 0; i < grid.N; i++) if (grid.outside[i]) { hexPath(i, 1.02); ctx.fill(); }
   }
+  seamFix(grid, cv, sc); seamFix(grid, rcv, sc);
   return { cv, rcv, sc };
 }
 
@@ -243,6 +260,7 @@ function paintOwners(grid, s, sc) {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+  seamFix(grid, cv, sc);
   return cv;
 }
 
@@ -388,16 +406,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (land.current.key !== key) { land.current.key = key; land.current.over = paintOwners(grid, s, land.current.base.sc); }
       land.current.ref = s.owner;
     }
-    const { k, x: vx, y: vy } = view.current;
+    // 둥근 세계 지도: 화면 x를 한 바퀴 안으로 감고, 화면 오른쪽이 지도 끝을 넘으면 지도를 한 번 더 이어 그림
+    if (grid.wrap) view.current.x = ((view.current.x % grid.period) + grid.period) % grid.period;
+    const { k, y: vy } = view.current;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#3f7598';
     ctx.fillRect(0, 0, cw, ch);
+    const passes = [view.current.x];
+    if (grid.wrap) for (let n = 1; view.current.x + cw / k > n * grid.period; n++) passes.push(view.current.x - n * grid.period);
+    // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (화면 폭 전체, 한 번만)
+    if (polar) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, cw, Math.max(0, (grid.size * 4 - vy) * k)); }
+    let f = 1;
+    for (const vx of passes) f = scene(vx);
+    function scene(vx) {
     ctx.setTransform(dpr * k, 0, 0, dpr * k, -vx * k * dpr, -vy * k * dpr);
     ctx.imageSmoothingEnabled = true;
     const B = land.current.base;
     // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (잘린 끝처럼 안 보이게)
-    if (polar) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(-grid.W, -grid.H * 2, grid.W * 3, grid.H * 2 + grid.size * 4); }
     ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
@@ -440,12 +466,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 부대 위치 (하루 사이를 미끄러지듯)
     const a = anim.current;
     const f = Math.min(1, (now - a.t0) / a.dur);
+    // 둥근 지도: 이음매 건너편 점은 가까운 쪽으로 펴서 그림 (선이 지도를 가로지르지 않게)
+    const ux = (x, ref) => (grid.wrap ? x + Math.round((ref - x) / grid.period) * grid.period : x);
     const ease = f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
     const posOf = (u) => {
       const [tx, ty] = grid.center(u.tile);
       const p = a.prev.get(u.id);
       if (p === undefined || p === u.tile) return [tx, ty];
-      const [fx0, fy0] = grid.center(p);
+      const [fx1, fy0] = grid.center(p), fx0 = ux(fx1, tx);
       return [fx0 + (tx - fx0) * ease, fy0 + (ty - fy0) * ease];
     };
     // 새 도시 세울 수 있는 칸
@@ -467,10 +495,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.beginPath();
       const [sx, sy] = posOf(u);
       ctx.moveTo(sx, sy);
-      for (const t of u.path) { const [qx, qy] = grid.center(t); ctx.lineTo(qx, qy); }
+      let lx = sx;
+      for (const t of u.path) { const [qx0, qy] = grid.center(t), qx = ux(qx0, lx); ctx.lineTo(qx, qy); lx = qx; }
       ctx.stroke();
       ctx.setLineDash([]);
-      const [ex, ey] = grid.center(u.path[u.path.length - 1]);
+      const ex = lx, ey = grid.center(u.path[u.path.length - 1])[1];
       ctx.fillStyle = on ? '#ffe066' : 'rgba(255,255,255,0.7)';
       ctx.beginPath(); ctx.arc(ex, ey, sz * 0.35, 0, 7); ctx.fill();
       // 경유지: 다음 목표들을 점선과 번호로
@@ -482,7 +511,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         u.queue.forEach((q, i) => {
           const t = tileOf(q);
           if (t === undefined || t === null) return;
-          const [qx, qy] = grid.center(t);
+          const [qx0, qy] = grid.center(t), qx = ux(qx0, px0);
           ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(qx, qy); ctx.stroke();
           ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(qx, qy, sz * 0.55, 0, 7); ctx.fill();
           ctx.fillStyle = '#222'; ctx.font = `bold ${sz * 0.75}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), qx, qy + sz * 0.03);
@@ -494,7 +523,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 수송 중인 병력: 출발 성에서 도착 성까지 진행만큼 수레
     for (const v of s.convoys || []) {
       if (v.nation !== pid) continue;
-      const [ax, ay] = grid.center(s.castles[v.from].tile), [bx, by] = grid.center(s.castles[v.to].tile);
+      const [ax, ay] = grid.center(s.castles[v.from].tile), [bx0, by] = grid.center(s.castles[v.to].tile), bx = ux(bx0, ax);
       const f = Math.max(0, Math.min(1, (absDay(s) - v.start) / Math.max(1, v.arrive - v.start)));
       ctx.strokeStyle = 'rgba(180,230,140,0.5)'; ctx.lineWidth = Math.max(sz * 0.12, px); ctx.setLineDash([sz * 0.2, sz * 0.25]);
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
@@ -585,7 +614,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 망루 화살
     for (const e of s.fx || []) {
       if (e.type !== 'arrow') continue;
-      const [ax, ay] = grid.center(e.a), [bx, by] = grid.center(e.b);
+      const [ax, ay] = grid.center(e.a), [bx0, by] = grid.center(e.b), bx = ux(bx0, ax);
       ctx.strokeStyle = 'rgba(255,240,200,0.8)'; ctx.lineWidth = Math.max(sz * 0.08, px); ctx.setLineDash([sz * 0.25, sz * 0.2]);
       ctx.beginPath(); ctx.moveTo(ax, ay - sz * 1.5); ctx.quadraticCurveTo((ax + bx) / 2, Math.min(ay, by) - sz * 3, bx, by); ctx.stroke(); ctx.setLineDash([]);
     }
@@ -720,6 +749,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillText(e.text, e.x, y);
       ctx.globalAlpha = 1;
     }
+    return f;
+    }
     // 날씨 효과 (화면 기준): 비 줄기·눈송이·바람
     const wk = s.weather?.kind;
     if (wk === 'rain' || wk === 'snow' || wk === 'wind') {
@@ -747,7 +778,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
-      screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x, y] = grid.center(tile); return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
+      screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],
       castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops, kind: c.kind, dur: c.dur, building: !!c.build, founding: !!c.founding })),
       units: () => gameRef.current.units.map((u) => ({ id: u.id, tile: u.tile, nation: u.nation, name: gensOf(gameRef.current, u.gens)[0]?.name, troops: u.troops, order: u.order?.kind || null, target: u.order?.id ?? null, moving: u.path.length > 0, dest: u.path[u.path.length - 1] ?? null })),
@@ -787,7 +818,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // ── 화면 이동·확대·누르기 ──
   const toWorld = (px, py) => {
     const r = wrap.current.getBoundingClientRect(), v = view.current;
-    return [v.x + (px - r.left) / v.k, v.y + (py - r.top) / v.k];
+    const x = v.x + (px - r.left) / v.k;
+    return [grid.wrap ? ((x % grid.period) + grid.period) % grid.period : x, v.y + (py - r.top) / v.k];
   };
   const onDown = (e) => {
     if (e.target !== canvas.current) return; // 지도 위 버튼은 지도 누르기로 치지 않음

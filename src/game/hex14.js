@@ -1,7 +1,7 @@
 // ───────── 삼국지14식 모드: 육각형 칸 위에서 부대가 움직이며 땅을 칠하고, 성을 빼앗는 전쟁 ─────────
 // 지도는 기존 세계(world)의 촘촘한 격자를 굵은 육각 칸으로 다시 뽑아 씀 (칸 = 약 2.5천 개)
 // 한 턴 = 10일. 모든 부대가 하루씩 동시에 움직이고(통제 구역·칠하기), 붙어 있으면 싸우고(협공), 성을 공격함
-import { SQRT3, cellCenter, pixelToCell, hexDistance, neighborIndex } from './hex.js';
+import { SQRT3, cellCenter, pixelToCell, hexDistance, neighborIndex, neighborIndexWrap, hexDistanceWrap } from './hex.js';
 import { T } from './rules.js';
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
@@ -22,11 +22,18 @@ export const TERRAIN_NAME = { [T.PLAINS]: '평지', [T.DESERT]: '사막', [T.TUN
 // 칸 하나의 '게임 거리' (지역사는 km, 세계 지도는 기본 30을 칸이 촘촘해진 만큼 나눔) — 지명 찾는 거리·이동 빠르기에 씀
 const kmOf = (scn) => scn?.kmPerHex || 30 / (scn?.worldScale || 1);
 // 세계 지도 북극 얼음 경계: 이 줄보다 위는 땅이든 바다든 모두 얼음 (들쭉날쭉한 한 줄 경계 — 땅·얼음이 얼룩덜룩 섞이지 않게)
-export const iceRow = (c, k = 1) => k * (7 + Math.sin((c / k) * 0.21) * 1.6 + Math.sin((c / k) * 0.07 + 1.3) * 2.2 + Math.sin((c / k) * 0.53 + 0.7) * 0.6);
+// 둥근 지도에서 이음매가 맞게, 물결 주기를 열 수(cols)로 나누어떨어지게 맞춤
+export const iceRow = (c, k = 1, cols = 0) => {
+  const w = (f) => (cols ? (2 * Math.PI * Math.max(1, Math.round((f * cols) / k / (2 * Math.PI)))) / cols : f / k);
+  return k * (7 + Math.sin(c * w(0.21)) * 1.6 + Math.sin(c * w(0.07) + 1.3) * 2.2 + Math.sin(c * w(0.53) + 0.7) * 0.6);
+};
 // ── 칸 지도 (저장하지 않고 world에서 매번 만듦) ──
 export function buildGrid(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
-  const cols = Math.ceil(world.W / (size * SQRT3)), rows = Math.ceil((world.H - size) / (1.5 * size)) + 1;
+  // 세계 지도(경도 360도)는 동서가 이어진 둥근 지도: 열을 감고, 한 바퀴 폭(period)이 지도 폭을 넘지 않게 열 수를 내림
+  const bb0 = getScenario(world.scenarioId)?.bbox;
+  const wrapX = !!bb0 && bb0[2] - bb0[0] >= 359;
+  const cols = wrapX ? Math.floor(world.W / (size * SQRT3)) : Math.ceil(world.W / (size * SQRT3)), rows = Math.ceil((world.H - size) / (1.5 * size)) + 1;
   const N = cols * rows;
   const terrain = new Uint8Array(N), region = new Int16Array(N).fill(-1), river = new Uint8Array(N), outside = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
@@ -43,16 +50,15 @@ export function buildGrid(world) {
   const bb = getScenario(world.scenarioId)?.bbox;
   if (bb && bb[2] - bb[0] >= 359) {
     const ws = getScenario(world.scenarioId)?.worldScale || 1;
-    const wob = (v, a) => 1.6 + Math.sin(v * 0.37 + a) * 1.1 + Math.sin(v * 0.11 + a * 2) * 1.3;
     for (let i = 0; i < N; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      if (r < iceRow(c, ws) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
+      if (r < iceRow(c, ws, wrapX ? cols : 0)) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
     }
   }
   const nb = [];
   for (let i = 0; i < N; i++) {
     const list = [];
-    for (let d = 0; d < 6; d++) { const j = neighborIndex(cols, rows, i, d); if (j >= 0) list.push(j); }
+    for (let d = 0; d < 6; d++) { const j = wrapX ? neighborIndexWrap(cols, rows, i, d) : neighborIndex(cols, rows, i, d); if (j >= 0) list.push(j); }
     nb.push(list);
   }
   const center = (i) => cellCenter(size, cols, i);
@@ -83,7 +89,7 @@ export function buildGrid(world) {
   for (let i = 0; i < N; i++) if (terrain[i] === T.SEA) sea[i] = 1;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
+  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
