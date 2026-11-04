@@ -171,6 +171,21 @@ function pickCities(world, grid, base) {
         if (done.has(c) || c.capitalOf !== undefined) continue;
         if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
       }
+      // 지명 사전에 없는 지어낸 지역 이름(예: '국벌')이 남은 성은 가장 가까운 실제 지명 + 방위로
+      // 남겨도 되는 이름: 그 시대에 있던 실제 고을·부족 이름 (강·초원 같은 넓은 땅 이름이나 후대 이름은 바꿈)
+      const known = new Set(pts.map((p) => p.name));
+      const DIRS8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
+      for (const c of out) {
+        if (done.has(c) || c.capitalOf !== undefined) continue;
+        const baseNm = c.name.replace(/ (동|남동|남|남서|서|북서|북|북동)부$/, '');
+        if (known.has(baseNm)) continue;
+        let best = null, bd = Infinity;
+        for (const p of pts) { const d = grid.dist(c.tile, p.t); if (d < bd) { bd = d; best = p; } }
+        if (!best) continue;
+        const [x0, y0] = grid.center(best.t), [x1, y1] = grid.center(c.tile);
+        const k = ((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8; // 화면 좌표: y가 아래로
+        c.name = `${best.name} ${DIRS8[k]}`;
+      }
       // 같은 이름이 둘이면(지역 이름이 다른 성의 지명과 겹침) 뒤의 것은 '외곽'을 붙여 구별
       const seen = new Set();
       for (const c of out) { if (seen.has(c.name)) c.name = `${c.name} 외곽`; seen.add(c.name); }
