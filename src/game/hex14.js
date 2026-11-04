@@ -132,7 +132,9 @@ function pickCities(world, grid, base) {
     const groups = new Map();
     for (const r of land) { const o = base.regions[r.id].owner ?? -1; if (!groups.has(o)) groups.set(o, []); groups.get(o).push(r); }
     for (const [o, regs] of groups) {
-      const want = o === -1 ? Math.round(regs.length / 4) : Math.max(2, Math.round(regs.length / 4));
+      // 칸이 촘촘한 좁은 무대(한반도·일본 등, 한 칸 20km 이하)는 성을 더 많이 둠
+      const per = (getScenario(base.scenarioId)?.kmPerHex || 30) <= 20 ? 2.5 : 4;
+      const want = o === -1 ? Math.round(regs.length / per) : Math.max(2, Math.round(regs.length / per));
       let have = out.filter((c) => (base.regions[grid.region[c.tile]]?.owner ?? -1) === o).length;
       const order = regs.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
       for (const g of [gap, Math.max(2, Math.round(gap / 2)), 2]) for (const r of order) {
@@ -148,16 +150,17 @@ function pickCities(world, grid, base) {
       const year = getScenario(base.scenarioId)?.startYear ?? 1;
       const used = new Set(out.filter((c) => c.capitalOf !== undefined).map((c) => c.name));
       const pts = PLACES.filter((p) => placeExists(p, year) && !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: placeName(p, year), t: pixelToCell(grid.size, grid.cols, grid.rows, x, y), ok: x >= 0 && y >= 0 && x <= world.W && y <= world.H }; }).filter((p) => p.ok && p.t >= 0);
-      const R = Math.max(3, Math.round(90 / (getScenario(base.scenarioId)?.kmPerHex || 30))); // 약 90km 안
+      // 찾는 거리는 km로: 가까운 곳 100km, 나라 성은 170km·빈 땅 성은 130km까지 (더 멀면 엉뚱한 고을 이름이 붙음)
+      const km = getScenario(base.scenarioId)?.kmPerHex || 30;
+      const R = Math.max(2, Math.round(100 / km)), Rown = Math.max(R, Math.round(170 / km)), Rfree = Math.max(R, Math.round(130 / km));
       // 수도 자리에 있는 지명은 수도가 이미 그곳이므로 다른 성에 붙이지 않음 (완산주 옆에 '전주'가 또 생기지 않게)
       const caps = out.filter((c) => c.capitalOf !== undefined);
       const free = pts.filter((p) => !caps.some((c) => grid.dist(c.tile, p.t) <= 1));
       const pairs = [];
-      // 나라 성은 조금 더 멀리(2배)까지 찾아 '○○ 북동부' 같은 이름이 남지 않게
       for (const c of out) {
         if (c.capitalOf !== undefined) continue;
         const own = (base.regions[grid.region[c.tile]]?.owner ?? null) !== null;
-        for (const p of free) { const d = grid.dist(c.tile, p.t); if (d <= R || d <= R * (own ? 2 : 1.5)) pairs.push([d + (d > R ? 100 : 0), c, p.name]); }
+        for (const p of free) { const d = grid.dist(c.tile, p.t); if (d <= (own ? Rown : Rfree)) pairs.push([d + (d > R ? 100 : 0), c, p.name]); }
       }
       pairs.sort((a, b) => a[0] - b[0]);
       const done = new Set();
@@ -167,8 +170,10 @@ function pickCities(world, grid, base) {
         const c = out[k];
         if (done.has(c) || c.capitalOf !== undefined) continue;
         if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
-        else used.add(c.name);
       }
+      // 같은 이름이 둘이면(지역 이름이 다른 성의 지명과 겹침) 뒤의 것은 '외곽'을 붙여 구별
+      const seen = new Set();
+      for (const c of out) { if (seen.has(c.name)) c.name = `${c.name} 외곽`; seen.add(c.name); }
     }
   }
   return out;
