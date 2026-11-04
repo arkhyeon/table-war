@@ -1136,6 +1136,31 @@ const ERA = {
 // 역사 강역 붙이기 (areas.js) — 지역사 나라와 시대별 세계 나라 모두
 for (const scn of SCENARIOS) for (const n of scn.nations || []) if (AREAS[scn.id]?.[n.name]) n.area = AREAS[scn.id][n.name];
 for (const [k, list] of Object.entries(ERA)) for (const n of list) if (AREAS[`era${k}`]?.[n.name]) n.area = AREAS[`era${k}`][n.name];
+
+// ── 지역사 무대 모양: 네모 지도 끝까지가 아니라 나라들이 있는 곳 둘레만 무대로 (나머지 땅은 외지) ──
+// 나라마다 수도에서 영토 크기만큼 + 여유, 강역 상자는 조금 넓혀서. 가장자리는 들쭉날쭉하게.
+const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
+for (const scn of SCENARIOS) {
+  if (scn.group !== 'region' || !scn.bbox || scn.id.startsWith('threekingdoms') || !scn.nations?.length) continue;
+  const cell = scn.kmPerHex * 1.667; // 기본 격자 한 칸 km
+  const regKm2 = scn.regionSize * cell * cell * 0.87;
+  const reach = scn.nations.map((n) => ({ lon: n.lon, lat: n.lat, r: Math.sqrt((Math.max(1, n.size) * regKm2) / Math.PI) * 1.5 + Math.sqrt(regKm2) * 1.6, area: n.area }));
+  const pad = Math.sqrt(regKm2) / KM; // 강역 상자 여유 (도)
+  const prev = scn.keepLand;
+  scn.keepLand = (lon, lat) => {
+    if (prev && !prev(lon, lat)) return false;
+    const w = 1 + 0.22 * wob(lon, lat);
+    const c = Math.cos((lat * Math.PI) / 180);
+    for (const n of reach) {
+      if (Math.hypot((lon - n.lon) * c, lat - n.lat) * KM < n.r * w) return true;
+      if (n.area) for (const [a, b, e, f] of n.area) {
+        const dx = Math.max(a - lon, 0, lon - e) * c, dy = Math.max(b - lat, 0, lat - f);
+        if (Math.hypot(dx, dy) < pad * w) return true;
+      }
+    }
+    return false;
+  };
+}
 // 시대마다 쓸 세계 나라 목록 (BC는 BC220 세계사, 1805는 1800 세계사)
 const eraFor = (year) => {
   if (year < 0) return SCENARIOS.find((x) => x.id === 'world_bc220').nations;

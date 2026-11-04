@@ -203,6 +203,23 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
         continue;
       }
     }
+    // 훨씬 센 적 부대가 우리 부대를 노리고 다가오면(공성 중이 아니면) 들판에서 지지 않게 가까운 우리 성으로 물러남
+    const besieging = u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1;
+    if (!besieging && home) {
+      const hunter = s.units.find((x) => enemy(s, nid, x.nation) && x.order?.kind === 'unit' && x.order.id === u.id && x.troops > u.troops * 1.6 && grid.dist(x.tile, u.tile) <= 4 * grid.k);
+      if (hunter && grid.dist(home.tile, u.tile) < grid.dist(hunter.tile, u.tile) * 2.5) { order(s, grid, u, 'castle', home.id); continue; }
+    }
+    // 가는 길에 목표 성 수비가 크게 불어나면(원군·수송) 무리하지 않고 다른 목표로 (성 앞에서 이미 포위 중이면 끝까지)
+    if (!besieging && home && u.order?.kind === 'castle' && enemy(s, nid, s.castles[u.order.id].owner) && !u.harass) {
+      const c = s.castles[u.order.id];
+      const guard = c.troops + s.units.filter((x) => x.nation === c.owner && grid.dist(x.tile, c.tile) <= 3 * grid.k).reduce((a, x) => a + x.troops, 0);
+      const ours = s.units.filter((x) => x.nation === nid && x.order?.kind === 'castle' && x.order.id === c.id).reduce((a, x) => a + x.troops, 0);
+      if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) > ours * 2.2) {
+        const t = tgt(u.tile, u.troops);
+        if (t && t.id !== c.id) { order(s, grid, u, 'castle', t.id); continue; }
+        if (grid.dist(u.tile, c.tile) > 3 * grid.k) { order(s, grid, u, 'castle', home.id); continue; }
+      }
+    }
     // 2칸 안 적 망루(완공)에 맞고 있으면 성 바로 앞에서 공성 중이 아닌 한 먼저 부숨
     const tw = (s.forts || []).find((f) => f.kind === 'tower' && !f.left && enemy(s, nid, f.owner) && grid.dist(f.tile, u.tile) <= 2);
     if (tw && u.order?.kind !== 'fort' && !(u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1)) { order(s, grid, u, 'fort', tw.id); continue; }
@@ -227,6 +244,21 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (!gs.length || c.troops < foe.troops * (foe.siege ? 0.9 : 1.3) + 2000) continue;
     const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
+  }
+  // 2.1) 증원: 적 부대가 우리 성을 노리고 오는데 수비가 모자라면, 포위되기 전에 가까운 안전한 성에서 병력을 미리 보냄
+  for (const c of mine) {
+    const coming = s.units.filter((u) => enemy(s, nid, u.nation) && u.order?.kind === 'castle' && u.order.id === c.id && grid.dist(u.tile, c.tile) <= 8 * grid.k).reduce((a, u) => a + u.troops, 0);
+    if (!coming) continue;
+    const inbound = (s.convoys || []).filter((v) => v.to === c.id).reduce((a, v) => a + v.troops, 0);
+    const lack = coming * 0.7 - (c.troops + inbound) * (c.dur > c.maxDur * 0.3 ? 1.5 : 1);
+    if (lack <= 0 || s.units.some((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 1)) continue;
+    let need = Math.ceil(lack / 1000) * 1000;
+    const donors = mine.filter((d) => d !== c && threatNear(s, grid, d) === 0 && grid.dist(d.tile, c.tile) <= 10 * grid.k).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile));
+    for (const d of donors) {
+      if (need < 1000) break;
+      const give = Math.floor(Math.min(need, d.troops - Math.max(4000, d.troops * 0.55)) / 1000) * 1000;
+      if (give >= 1000 && sendTroops(s, grid, d.id, c.id, give).ok) need -= give;
+    }
   }
   // 2.2) 구원: 포위된 성(적 부대가 바로 옆)은 수송대가 못 들어가니, 가까운 우리 성 중 병력 많은 곳에서 장수가 부대를 이끌고 포위군을 침
   for (const c of mine) {
@@ -399,6 +431,8 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * need > (troops + ours) * P.bold) continue; // 수비보다 넉넉히 모였을 때만
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
     if (!neutral && c.owner === focus) v -= 8;
+    if (!neutral && c.capitalOf === c.owner) v -= 3; // 수도: 빼앗으면 그 나라가 흔들림
+    if (c.kind === 'pass') v += 3; // 관문은 성보다 덜 중요
     if (!neutral && (busy.get(c.owner) || 0) > powerOf(s, c.owner) * 0.4) v -= 3;
     if (v < bv) { bv = v; best = c; }
   }

@@ -682,9 +682,12 @@ const ERA = [
   ['오사카', { old: [[1496, '나니와'], [1583, '이시야마']] }],
   ['타슈켄트', { old: [[1100, '샤시']] }],
 ];
+// 이름은 시대마다 바꾸지 않음 (같은 곳은 어느 지역사든 같은 이름 — 기억하기 쉽게). 생기고 없어진 해·넓은 땅 표시만 씀
 for (const [nm, patch] of ERA) {
   const p = PLACES.find((x) => x.name === nm);
-  if (p) Object.assign(p, patch);
+  if (!p) continue;
+  const { name: _n, old: _o, ...rest } = patch;
+  Object.assign(p, rest);
 }
 // 유럽·서아시아의 지방 이름은 성 이름으로 쓰지 않음 (그 지방의 도시 이름을 씀)
 for (const n of ['부르고뉴', '노르망디', '가스코뉴', '웨일스', '슈바벤', '얼스터', '알자스', '로렌', '갈리시아', '랑그도크', '푸아투', '프로방스', '하일랜드', '콘월', '헤센', '바이에른', '작센', '포메른', '스코네', '플랑드르', '트란실바니아', '슐레지엔', '크로아티아', '케른텐', '윌란', '쿠를란트', '롬바르디아', '동프로이센', '메클렌부르크', '스몰란드', '갈리치아', '불가리아', '왈라키아', '마케도니아', '펠로폰네소스', '쿠반', '크림', '포돌리아', '메소포타미아', '에피루스', '시칠리아', '브르타뉴', '튀링겐', '베스트팔렌', '하노버', '브란덴부르크', '보헤미아', '모라비아', '볼히니아', '몰다비아', '도브루자', '트라키아', '보스니아', '달마티아', '알바니아', '테살리아', '사르데냐', '코르시카', '칼라브리아', '아풀리아', '토스카나', '오베르뉴', '고틀란드', '달라르나', '노를란드', '라플란드', '사보', '카렐리야', '에스토니아', '티롤', '스티리아', '슬로바키아', '판노니아', '리투아니아', '벨라루스', '세베리아', '아스투리아스', '나바라', '카탈루냐', '안달루시아', '에스트레마두라', '라만차', '알가르브', '코노트', '먼스터', '아나톨리아', '카파도키아', '킬리키아', '아르메니아', '조지아', '쿠르디스탄']) {
@@ -777,13 +780,27 @@ PLACES.push(
 for (const [nm, patch] of ERA) for (const p of PLACES) if (p.name === nm && patch.area) p.area = true;
 for (const n of ['송막', '마그레브', '누비아', '사헬', '푸타잘론', '소말릴란드', '스와질란드', '카탕가', '말와', '스와힐리', '오만', '시리아 사막', '나지드', '헤자즈', '룹알할리', '아라비아', '시나이', '리비아 사막', '페잔', '티베스티', '아하가르', '서사하라']) for (const p of PLACES) if (p.name === n) p.area = true;
 
+// 거의 같은 자리(약 25km 안)에 이름이 둘 이상이면 먼저 나온(대표) 이름 하나만 — 시대마다 다른 이름이 번갈아 나오지 않게
+{
+  const keep = [];
+  for (const p of PLACES) {
+    if (p.area) { keep.push(p); continue; }
+    const q = keep.find((k) => !k.area && Math.abs(k.lon - p.lon) < 0.25 && Math.abs(k.lat - p.lat) < 0.25);
+    if (!q) { keep.push(p); continue; }
+    // 대표 이름이 있던 기간을 넓혀 둘을 합침
+    q.from = q.from == null || p.from == null ? null : Math.min(q.from, p.from);
+    q.until = q.until == null || p.until == null ? null : Math.max(q.until, p.until);
+  }
+  PLACES.length = 0;
+  PLACES.push(...keep);
+}
+
 // 그 해에 있던 곳인지 (건설 전·소멸 후 제외)
 export const placeExists = (p, year) => (p.from == null || year >= p.from) && (p.until == null || year < p.until);
 
 // 그 시대의 이름
-export function placeName(p, year) {
-  if (p.old) for (const [until, nm] of [...p.old].sort((a, b) => a[0] - b[0])) if (year < until) return nm;
-  return p.name;
+export function placeName(p) {
+  return p.name; // 시대와 상관없이 같은 이름
 }
 
 // 지역마다 실제 지명 붙이기: ① 그 지명이 들어 있는 지역 ② 남은 지역은 가까운 미사용 지명
