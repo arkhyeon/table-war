@@ -374,7 +374,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (extra < 1000) continue;
     const to = hubs.map((h) => [h, grid.dist(h.tile, c.tile)]).filter(([, d]) => d <= 12 * grid.k).sort((a, b) => a[1] - b[1])[0];
     if (!to) continue;
-    const mv = Math.min(extra, roomOf(to[0]));
+    const mv = Math.min(extra, roomOf(to[0], s));
     if (mv < 1000) continue;
     c.troops -= mv;
     to[0].troops += Math.round(mv * 0.95);

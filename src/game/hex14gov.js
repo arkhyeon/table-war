@@ -58,7 +58,7 @@ export function initGov(s, rng) {
       const m = open.reduce((a, b) => (b.got / b.mine.length < a.got / a.mine.length ? b : a));
       used.add(d.name);
       const id = `x_${m.n.id}_${m.k}`;
-      s.generals[id] = { id, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };
+      s.generals[id] = { id, pool: d.pool, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };
       m.k += 1;
       m.got += 1;
     }
@@ -75,7 +75,7 @@ export function initGov(s, rng) {
 }
 
 function addFree(s, d, c, id) {
-  s.generals[id] = { id, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: null, castle: c.id, unit: null, status: 'free' };
+  s.generals[id] = { id, pool: d.pool, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: null, castle: c.id, unit: null, status: 'free' };
 }
 
 // ── 외교 ──
@@ -502,7 +502,7 @@ function people(s, rng) {
     // 장수가 너무 모자라면 지방 무관이 나섬
     if (gens.length < Math.ceil(mine.length / 3) + 1 && rng() < 0.3 && mine.length) {
       const at = rng.pick(mine), id = `h${s.turn}_${n.id}_${Math.floor(rng() * 1e6)}`;
-      s.generals[id] = { id, name: `${at.name} 교위`, war: rng.int(45, 70), lead: rng.int(45, 70), intel: rng.int(35, 65), pol: rng.int(35, 65), traits: [], nation: n.id, castle: at.id, unit: null, status: 'active' };
+      s.generals[id] = { id, pool: n.pools?.[0], name: `${at.name} 교위`, war: rng.int(45, 70), lead: rng.int(45, 70), intel: rng.int(35, 65), pol: rng.int(35, 65), traits: [], nation: n.id, castle: at.id, unit: null, status: 'active' };
       if (!ai) log(s, `⭐ ${at.name} 교위가 벼슬길에 나섰습니다.`, 'info', [n.id]);
     }
   }

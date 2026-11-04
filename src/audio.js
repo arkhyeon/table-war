@@ -71,97 +71,128 @@ function drum(t, vol = 0.5, out = bgmGain) {
   o.connect(g); g.connect(out); o.start(t); o.stop(t + 0.45);
 }
 
-// ── 배경음: 대금 선율 + 가야금 반주 + 장구 장단 (전통 음악 분위기, 곡은 그때그때 새로 지음 — 기존 곡을 옮기지 않음) ──
-// 선율은 한 동기(4마디)를 만들어 A·A·A′·B로 되풀이하며 변형 → 흘러가기만 하지 않고 노래처럼 들리게
-const SCALES = {
-  calm: [0, 2, 4, 7, 9, 12, 14, 16, 19], // 평조: 밝은 오음계
-  tension: [0, 3, 5, 7, 10, 12, 15, 17, 19], // 계면조 느낌: 어두운 오음계
-  battle: [0, 3, 5, 7, 10, 12, 15, 17, 19],
-};
-let SCALE = SCALES.calm;
-const ROOT = 196; // G3
+// ── 배경음: 영화 음악 느낌의 웅장한 합주 (곡은 그때그때 새로 지음 — 기존 곡을 옮기지 않음) ──
+// 귀가 아프지 않게: 높은 쇳소리·찰칵거리는 고음 없이, 모든 악기를 저역 필터로 둥글게 + 잔향으로 공간감
+// 평온: 따뜻한 현악 화음 + 하프 분산화음 + 부드러운 플루트 선율 / 긴장: 낮은 현 반복음 + 큰북 / 전투: 큰북 몰아치기 + 현 스타카토 + 금관 선율
+const ROOT = 146.83; // D3
 const hz = (n) => ROOT * Math.pow(2, n / 12);
-// 장단 (12칸 한 장단): 덩=양손, 쿵=북편, 덕=채편, 기=채편 작게
-const JANGDAN = {
-  calm: ['덩', '', '덕', '기', '쿵', '덕', '', '덕', '기', '쿵', '덕', '기'], // 굿거리처럼 흥겹게
-  tension: ['덩', '', '', '덕', '', '', '쿵', '', '덕', '덕', '', ''], // 무겁게 조여 오는
-  battle: ['덩', '', '덕', '쿵', '', '덕', '덩', '', '덕', '쿵', '덕', '덕'], // 자진모리처럼 몰아치게
+const PROG = {
+  calm: [[0, 4, 7], [7, 11, 14], [9, 12, 16], [5, 9, 12]], // 밝고 당당하게 (I-V-vi-IV)
+  tension: [[0, 3, 7], [8, 12, 15], [10, 14, 17], [7, 10, 14]], // 어둡게 조여 오는 (i-VI-VII-v)
+  battle: [[0, 3, 7], [8, 12, 15], [3, 7, 10], [10, 14, 17]], // 몰아치는 (i-VI-III-VII)
 };
-const BEAT = { calm: 0.19, tension: 0.24, battle: 0.13 }; // 12칸 한 칸 길이(초) — 처지지 않게 경쾌하게
-let step = 0, nextT = 0, song = null, sect = -1;
+const SCALE_OF = { calm: [0, 2, 4, 5, 7, 9, 11], tension: [0, 2, 3, 5, 7, 8, 10], battle: [0, 2, 3, 5, 7, 8, 10] };
+const STEP = { calm: 0.17, tension: 0.15, battle: 0.115 }; // 16분음표 길이(초)
+// 큰북 (16칸 한 마디): 2=큰 소리, 1=작은 소리
+const TAIKO = {
+  calm: [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+  tension: [2, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 1, 1],
+  battle: [2, 0, 1, 0, 2, 0, 1, 1, 2, 0, 1, 0, 2, 1, 2, 1],
+};
+let step = 0, nextT = 0, song = null, bus = null;
 
-// 대금: 숨소리 섞인 부드러운 소리, 길게 끌면 떨림
-function daegeum(freq, t, dur, vol = 0.22) {
-  const o = ctx.createOscillator(), g = ctx.createGain(), f = ctx.createBiquadFilter();
-  o.type = 'sine'; o.frequency.value = freq;
-  const o2 = ctx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = freq * 2; const g2 = ctx.createGain(); g2.gain.value = 0.12;
-  const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 5.2; lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(dur > 0.6 ? freq * 0.012 : 0, t + Math.min(dur, 0.5));
-  lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
-  f.type = 'lowpass'; f.frequency.value = freq * 5;
-  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.08); g.gain.setValueAtTime(vol * 0.85, t + dur * 0.7); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-  o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g); g.connect(bgmGain);
-  [o, o2, lfo].forEach((x) => { x.start(t); x.stop(t + dur + 0.05); });
-  noise(t, Math.min(0.25, dur), vol * 0.25, freq * 3, bgmGain); // 숨소리
+function makeBus() {
+  // 잔향: 짧게 사라지는 잡음으로 만든 공간 울림
+  bus = ctx.createGain();
+  const dry = ctx.createGain(); dry.gain.value = 0.8;
+  const verb = ctx.createConvolver();
+  const len = Math.floor(ctx.sampleRate * 2.4), ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3); }
+  verb.buffer = ir;
+  const wet = ctx.createGain(); wet.gain.value = 0.35;
+  const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = 4500; // 전체 고음 깎기
+  bus.connect(dry); dry.connect(tone); bus.connect(verb); verb.connect(wet); wet.connect(tone); tone.connect(bgmGain);
 }
-// 장구: 쿵(낮은 북편), 덕(채편 따닥), 덩(둘 다)
-function janggu(kind, t, vol) {
-  if (!kind) return;
-  if (kind === '쿵' || kind === '덩') drum(t, vol, bgmGain);
-  if (kind === '덕' || kind === '덩') noise(t, 0.05, vol * 0.9, 3200, bgmGain);
-  if (kind === '기') noise(t, 0.03, vol * 0.5, 4200, bgmGain);
-}
-
-// 동기 하나(4마디×12칸): 음과 길이. 디딤음(으뜸·5도)에 오래 머물고 이웃 음으로 움직임
-function motif() {
-  const out = [];
-  let i = 4;
-  for (let b = 0; b < 4; b++) {
-    let k = 0;
-    while (k < 12) {
-      const len = [2, 2, 3, 1, 1, 3, 2, 4][Math.floor(Math.random() * 8)]; // 짧은 음 위주로 경쾌하게
-      const l = Math.min(len, 12 - k);
-      i = Math.max(0, Math.min(SCALE.length - 1, i + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
-      out.push({ at: b * 12 + k, len: l, n: Math.random() < 0.15 && k > 0 ? null : SCALE[i] });
-      k += l;
-    }
+const env = (g, t, a, peak, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.linearRampToValueAtTime(0.0001, t + d); };
+// 현악 화음: 살짝 어긋난 톱니파 둘을 저역 필터로 감싸 따뜻하게
+function strings(freqs, t, dur, vol) {
+  for (const f of freqs) for (const det of [-6, 6]) {
+    const o = ctx.createOscillator(), g = ctx.createGain(), fl = ctx.createBiquadFilter();
+    o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det;
+    fl.type = 'lowpass'; fl.frequency.value = 900; fl.Q.value = 0.5;
+    env(g, t, dur * 0.35, vol / freqs.length, dur);
+    o.connect(fl); fl.connect(g); g.connect(bus); o.start(t); o.stop(t + dur + 0.05);
   }
-  // 마지막 마디는 으뜸음으로 길게 맺음
-  const last = out.filter((x) => x.at >= 36);
-  if (last.length) { last[last.length - 1].n = SCALE[0] + 12; }
+}
+function bass(f, t, dur, vol) {
+  const o = ctx.createOscillator(), s = ctx.createOscillator(), g = ctx.createGain(), fl = ctx.createBiquadFilter();
+  o.type = 'triangle'; o.frequency.value = f; s.type = 'sine'; s.frequency.value = f / 2;
+  fl.type = 'lowpass'; fl.frequency.value = 380;
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(fl); s.connect(fl); fl.connect(g); g.connect(bus); o.start(t); s.start(t); o.stop(t + dur + 0.05); s.stop(t + dur + 0.05);
+}
+// 하프: 둥근 뜯는 소리
+function harp(f, t, vol) {
+  const o = ctx.createOscillator(), g = ctx.createGain(), fl = ctx.createBiquadFilter();
+  o.type = 'triangle'; o.frequency.value = f;
+  fl.type = 'lowpass'; fl.frequency.setValueAtTime(Math.min(2400, f * 4), t); fl.frequency.exponentialRampToValueAtTime(f * 1.2, t + 1.2);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+  o.connect(fl); fl.connect(g); g.connect(bus); o.start(t); o.stop(t + 1.65);
+}
+// 선율: 평온·긴장은 부드러운 플루트, 전투는 금관(소리가 열리며 커지는 톱니파)
+function lead(f, t, dur, vol, brass) {
+  const o = ctx.createOscillator(), g = ctx.createGain(), fl = ctx.createBiquadFilter();
+  const lfo = ctx.createOscillator(), lg = ctx.createGain(); lfo.frequency.value = 5; lg.gain.setValueAtTime(0, t); lg.gain.linearRampToValueAtTime(dur > 0.4 ? f * 0.008 : 0, t + Math.min(dur, 0.4));
+  lfo.connect(lg); lg.connect(o.frequency);
+  if (brass) { o.type = 'sawtooth'; fl.type = 'lowpass'; fl.frequency.setValueAtTime(400, t); fl.frequency.linearRampToValueAtTime(1500, t + 0.12); fl.frequency.linearRampToValueAtTime(900, t + dur); }
+  else { o.type = 'triangle'; fl.type = 'lowpass'; fl.frequency.value = 1800; }
+  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + (brass ? 0.05 : 0.09)); g.gain.setValueAtTime(vol * 0.85, t + dur * 0.75); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+  o.connect(fl); fl.connect(g); g.connect(bus); o.start(t); lfo.start(t); o.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
+}
+// 큰북: 낮게 쿵 울리는 소리 (높은 찰칵 소리 없음)
+function taiko(t, vol) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(85, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.35);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+  o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.65);
+  noise(t, 0.08, vol * 0.5, 260, bus, 'lowpass');
+}
+// 선율 한 소절(16칸): 화음 음을 디딤으로 음계를 따라 움직임
+function phrase(m, chordIdx) {
+  const sc = SCALE_OF[m], ch = PROG[m][chordIdx];
+  const out = [];
+  let k = 0;
+  let deg = sc.indexOf(ch[0] % 12) >= 0 ? sc.indexOf(ch[0] % 12) : 0;
+  while (k < 16) {
+    const len = m === 'battle' ? [2, 2, 4, 1, 1, 2, 6][Math.floor(Math.random() * 7)] : [4, 2, 6, 2, 8, 3][Math.floor(Math.random() * 6)];
+    const l = Math.min(len, 16 - k);
+    deg = Math.max(-2, Math.min(9, deg + [-2, -1, -1, 1, 1, 2, 0][Math.floor(Math.random() * 7)]));
+    const n = sc[((deg % 7) + 7) % 7] + 12 * Math.floor(deg / 7);
+    out.push({ at: k, len: l, n: k === 0 ? ch[Math.floor(Math.random() * 3)] : Math.random() < 0.12 ? null : n });
+    k += l;
+  }
   return out;
 }
-// 곡: A·A·A′(끝만 다르게)·B(높은 데서) — 16마디마다 새 곡
-function newSong() {
-  const A = motif(), B = motif().map((x) => ({ ...x, n: x.n === null ? null : Math.min(x.n + 5, SCALE[SCALE.length - 1]) }));
-  const A2 = A.map((x) => ({ ...x }));
-  for (const x of A2) if (x.at >= 36 && x.n !== null) x.n = SCALE[3];
-  return [A, A, A2, B];
+// 곡: 4마디 화성 진행 × 4 (A A B A) — 같은 선율이 되풀이되어 기억에 남게
+function newSong(m) {
+  const A = [0, 1, 2, 3].map((c) => phrase(m, c)), B = [0, 1, 2, 3].map((c) => phrase(m, c).map((x) => ({ ...x, n: x.n === null ? null : x.n + 5 })));
+  return { m, parts: [A, A, B, A] };
 }
-
 function tick() {
   if (!ctx) return;
+  if (!bus) makeBus();
   while (nextT < ctx.currentTime + 0.4) {
-    const k = step % 48; // 4마디(=동기 하나) 안의 칸
-    if (step % 12 === 0) {
-      // 마디 첫 박: 분위기 바꿈(이틀 넘게 이어진 분위기로) — 바뀌면 그 분위기의 새 곡
-      if (want !== mood && wantDays >= 2) { mood = want; SCALE = SCALES[mood]; song = null; }
-      // 낮은 지속음 (가야금 저음현 울림)
-      drone(hz(-12), nextT, BEAT[mood] * 12, mood === 'calm' ? 0.05 : 0.08);
+    const k = step % 16, bar = Math.floor(step / 16) % 16;
+    if (k === 0 && want !== mood && wantDays >= 2) { mood = want; song = null; }
+    if (!song || (k === 0 && bar === 0 && step > 0)) song = newSong(mood);
+    const m = song.m, dt = STEP[m];
+    const ci = bar % 4, ch = PROG[m][ci].map(hz);
+    const part = song.parts[Math.floor(bar / 4)][ci];
+    if (k === 0) {
+      strings(ch, nextT, dt * 16 * 1.05, m === 'battle' ? 0.1 : 0.12);
+      if (m === 'calm') bass(ch[0] / 2, nextT, dt * 14, 0.22);
     }
-    // 4마디마다 다음 동기 (A·A·A′·B), 한 바퀴 돌면 새 곡
-    if (k === 0) { sect = (sect + 1) % 4; if (sect === 0 || !song) song = newSong(); }
-    if (!song) song = newSong();
-    const beat = BEAT[mood];
-    const part = song[Math.max(0, sect)];
-    // 대금 선율
-    for (const x of part) if (x.at === k && x.n !== null) daegeum(hz(x.n + 12), nextT, x.len * beat * (mood === 'battle' ? 0.9 : 1.05), mood === 'battle' ? 0.16 : 0.2);
-    // 가야금 반주: 박마다 으뜸·5도·8도를 뜯음 (전투는 촘촘하게)
-    if (k % (mood === 'battle' ? 3 : 6) === 0) { const root = (part.find((x) => x.at <= k && x.at + x.len > k)?.n ?? 0) % 12; pluck(hz(root - 12), nextT, 1.2, 0.16); if (Math.random() < 0.6) pluck(hz(root - 5), nextT + beat, 0.9, 0.11); }
-    // 가야금 장식음: 대금 선율 사이사이 짧게 (흥을 돋움)
-    if (k % 2 === 1 && Math.random() < (mood === 'calm' ? 0.45 : 0.3)) { const cur = part.find((x) => x.at <= k && x.at + x.len > k)?.n; if (cur !== null && cur !== undefined) pluck(hz(cur + (Math.random() < 0.5 ? 2 : 5)), nextT, 0.35, 0.12); }
-    // 장구 장단
-    janggu(JANGDAN[mood][step % 12], nextT, mood === 'calm' ? 0.18 : mood === 'tension' ? 0.24 : 0.28);
-    nextT += beat;
+    // 저음: 긴장은 8분음표 반복, 전투는 16분음표 스타카토
+    if (m === 'tension' && k % 2 === 0) bass(ch[0] / 2, nextT, dt * 1.6, 0.18);
+    if (m === 'battle') bass(ch[0] / 2 * (k % 8 === 6 ? 2 : 1), nextT, dt * 0.9, k % 4 === 0 ? 0.24 : 0.15);
+    // 하프 분산화음 (평온)
+    if (m === 'calm' && k % 2 === 0) harp(ch[[0, 1, 2, 1, 0, 2, 1, 2][(k / 2) % 8]] * 2, nextT, 0.09);
+    // 선율
+    for (const x of part) if (x.at === k && x.n !== null) lead(hz(x.n + 12), nextT, x.len * dt * 0.95, m === 'battle' ? 0.08 : 0.1, m === 'battle');
+    // 큰북
+    const tk = TAIKO[m][k];
+    if (tk) taiko(nextT, (tk === 2 ? 0.5 : 0.28) * (m === 'calm' ? 0.6 : 1));
+    nextT += dt;
     step++;
   }
 }

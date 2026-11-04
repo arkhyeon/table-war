@@ -1,6 +1,7 @@
 // 시나리오: bbox = [서경, 남위, 동경, 북위]
 // 국가: [이름, 문명, 경도, 위도, 초기 지역 수, 수도명, 군주(이름|무|통|지|정|특성), 장수 풀(선택)]
 import { AREAS } from './areas.js';
+import { isLand } from './landtest.js';
 const N = (name, civ, lon, lat, size, capital, ruler, pools, power) => ({ name, civ, lon, lat, size, capital, ruler, pools, power });
 
 export const SCENARIOS = [
@@ -25,7 +26,7 @@ export const SCENARIOS = [
     name: '세계사 1200년',
     era: '몽골 제국 직전',
     desc: '테무진이 초원을 통일하기 직전의 세계. 송·금·호라즘·십자군 국가들이 공존합니다.',
-    bbox: [-180, -56, 180, 83],
+    bbox: [-26, -56, 334, 83],
     cols: 144,
     rows: 74,
     regionSize: 6,
@@ -279,7 +280,7 @@ export const SCENARIOS = [
     name: '세계사 BC 220년',
     era: '고대 제국의 시대',
     desc: '진시황의 통일, 한니발 전쟁 직전의 로마와 카르타고, 헬레니즘 왕국들과 흉노·마우리아가 공존하는 세계.',
-    bbox: [-180, -56, 180, 83],
+    bbox: [-26, -56, 334, 83],
     cols: 144,
     rows: 74,
     regionSize: 6,
@@ -329,7 +330,7 @@ export const SCENARIOS = [
     name: '세계사 1000년',
     era: '천년의 세계',
     desc: '송과 요의 대치, 고려 거란 전쟁 전야, 바실리오스 2세의 비잔틴, 가즈니의 마흐무드와 촐라의 라자라자.',
-    bbox: [-180, -56, 180, 83],
+    bbox: [-26, -56, 334, 83],
     cols: 144,
     rows: 74,
     regionSize: 6,
@@ -381,7 +382,7 @@ export const SCENARIOS = [
     name: '세계사 1500년',
     era: '대항해 시대',
     desc: '콜럼버스 이후의 세계. 명과 조선, 오스만과 사파비, 아즈텍과 잉카, 대양으로 나서는 이베리아.',
-    bbox: [-180, -56, 180, 83],
+    bbox: [-26, -56, 334, 83],
     cols: 144,
     rows: 74,
     regionSize: 6,
@@ -437,7 +438,7 @@ export const SCENARIOS = [
     name: '세계사 1800년',
     era: '혁명과 제국',
     desc: '제1통령 나폴레옹, 최전성기 끝자락의 청, 인도로 뻗는 영국 동인도회사, 막 독립한 미국.',
-    bbox: [-180, -56, 180, 83],
+    bbox: [-26, -56, 334, 83],
     cols: 144,
     rows: 74,
     regionSize: 6,
@@ -630,6 +631,10 @@ export const SCENARIOS = [
       N('시마즈', 'japan', 130.55, 31.6, 3, '가고시마', '시마즈 다카히사|80|85|80|80|명장'),
       N('조소카베', 'japan', 133.57, 33.56, 2, '오코', '조소카베 모토치카|88|88|80|75|명장'),
       N('다테', 'japan', 140.1, 37.9, 3, '요네자와', '다테 하루무네|60|70|70|70|정치'),
+      N('모가미', 'japan', 140.34, 38.25, 2, '야마가타', '모가미 요시아키|70|75|85|75|책략'),
+      N('안도', 'japan', 140.1, 39.72, 2, '아키타', '안도 지카스에|70|72|65|60|수군'),
+      N('난부', 'japan', 141.26, 40.38, 3, '산노헤', '난부 하루마사|65|70|60|65|기마'),
+      N('가키자키', 'japan', 140.1, 41.43, 1, '마쓰마에', '가키자키 스에히로|55|60|60|65|수성'),
     ],
     chronicle: [
       [1560, '오케하자마 전투 — 오다 노부나가가 이마가와 요시모토를 기습해 죽였습니다.', '이마가와'],
@@ -1009,23 +1014,80 @@ for (const scn of SCENARIOS) if (scn.id === 'later_three900') scn.keepLand = NOT
 const NAT_POOL = { 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
 for (const scn of SCENARIOS) for (const n of scn.nations || []) if (NAT_POOL[n.name] && !n.pools) n.pools = [NAT_POOL[n.name]];
 
-// ── 지역사 지도: 실제 거리 비율로 칸 수를 맞춤 ──
-// 기본 격자 한 칸 = 가로 약 50km·세로 약 43km (삼국지14식 육각 칸으로는 약 30km). 위도에 따라 경도 1도의 길이가 줄어드는 것(cos)까지 반영해
-// 지도가 옆으로 늘어나지 않게 함. 너무 넓은 무대(아프리카 등)는 계산이 무거워 칸을 키움(가장 큰 지도도 6,500칸 안).
-// 지역 수는 그대로 두려고 지역 크기(regionSize)도 같은 비율로 조정.
-const KM = 111.32, COL_KM = 50, ROW_KM = 43.3, MAX_CELLS = 6500, MIN_CELLS = 2600;
+// ── 지역사 지도: 무대 범위·모양·칸 크기 ──
+// 1) 무대 = 나라들의 강역(상자) + 강역이 없으면 수도 둘레(영토 크기만큼) — 네모 지도 끝에 나라가 잘리지 않게 범위를 그만큼 넓히고,
+//    무대 밖 땅은 외지(회색: 보이지만 지나갈 수 없고 성도 없음)로. 가장자리는 들쭉날쭉하게
+// 2) 칸 크기: 무대 안 뭍의 넓이로 정함 — 땅이 좁으면(일본·한반도) 칸을 잘게(최소 약 10km), 넓으면 크게 (계산 한도 안)
+// 3) 지역 하나의 실제 넓이(km²)는 원래대로 → 나라 크기는 그대로
+const KM = 111.32, COL_KM = 50, ROW_KM = 43.3, MAX_CELLS = 8500, LAND_CELLS = 2200;
+const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
+// 일본 무대: 홋카이도까지 열도 전체
+const LAND_SHARE = {"eastasia650":0.459,"europe1400":0.446,"africa1400":0.353,"warring_bc260":0.527,"korea400":0.304,"punic_bc218":0.321,"sengoku1560":0.095,"imjin1592":0.354,"napoleon1805":0.417,"later_three900":0.161,"genghis1206":0.377,"hundred1340":0.252,"thirty1618":0.312,"sui612":0.326,"goryeo1010":0.339,"genpei1180":0.112,"yuanend1360":0.327,"constantinople1453":0.278}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
+const STAGE = { sengoku1560: [[129.3, 30.8, 146, 45.6]], genpei1180: [[129.3, 30.8, 146, 45.6]] };
 for (const scn of SCENARIOS) {
   if (scn.group !== 'region' || !scn.bbox) continue;
+  const [w0, s0, e0, n0] = scn.bbox;
+  const lonKm0 = (e0 - w0) * KM * Math.cos((((s0 + n0) / 2) * Math.PI) / 180), latKm0 = (n0 - s0) * KM;
+  const regionKm2 = scn.regionSize * (lonKm0 / scn.cols) * (latKm0 / scn.rows);
+  const tk = scn.id.startsWith('threekingdoms');
+  if (!tk && scn.nations?.length) {
+    // 나라마다 무대 범위: 강역 상자들, 없으면 수도에서 영토 크기만큼의 원
+    const reach = scn.nations.map((n) => {
+      const area = AREAS[scn.id]?.[n.name];
+      return { lon: n.lon, lat: n.lat, r: Math.sqrt((Math.max(1, n.size) * regionKm2) / Math.PI) * 1.5 + Math.sqrt(regionKm2) * 1.4, area };
+    });
+    const pad = Math.max(0.8, Math.sqrt(regionKm2) / KM * 1.2); // 강역 상자 둘레 여유(도)
+    const stage = STAGE[scn.id] || [];
+    const prev = scn.keepLand;
+    scn.keepLand = (lon, lat) => {
+      if (prev && !prev(lon, lat)) return false;
+      if (stage.some(([a, b, e, f]) => lon >= a && lon <= e && lat >= b && lat <= f)) return true;
+      const wv = 1 + 0.22 * wob(lon, lat);
+      const c = Math.cos((lat * Math.PI) / 180);
+      for (const n of reach) {
+        if (Math.hypot((lon - n.lon) * c, lat - n.lat) * KM < n.r * wv) return true;
+        if (n.area) for (const [a, b, e, f] of n.area) {
+          const dx = Math.max(a - lon, 0, lon - e) * c, dy = Math.max(b - lat, 0, lat - f);
+          if (Math.hypot(dx, dy) < pad * wv) return true;
+        }
+      }
+      return false;
+    };
+    // 지도 범위: 무대 전체 + 여백
+    let W = Infinity, S = Infinity, E = -Infinity, Nn = -Infinity;
+    const add = (a, b, e, f) => { W = Math.min(W, a); S = Math.min(S, b); E = Math.max(E, e); Nn = Math.max(Nn, f); };
+    for (const n of reach) {
+      const dl = (n.r * 1.25) / KM, dlo = dl / Math.max(0.2, Math.cos((n.lat * Math.PI) / 180));
+      add(n.lon - dlo, n.lat - dl, n.lon + dlo, n.lat + dl);
+      if (n.area) for (const [a, b, e, f] of n.area) add(a - pad * 1.3, b - pad * 1.3, e + pad * 1.3, f + pad * 1.3);
+    }
+    for (const [a, b, e, f] of stage) add(a, b, e, f);
+    const m = 1.0;
+    scn.bbox = [Math.max(-179, W - m), Math.max(-56, S - m), Math.min(179, E + m), Math.min(80, Nn + m)].map((v) => Math.round(v * 10) / 10);
+  }
   const [w, so, e, n] = scn.bbox;
   const lonKm = (e - w) * KM * Math.cos((((so + n) / 2) * Math.PI) / 180), latKm = (n - so) * KM;
-  let cols = lonKm / COL_KM, rows = latKm / ROW_KM;
-  // 큰 무대는 계산 한도에 맞게 칸을 키우고, 작은 무대(한반도·일본)는 최소 15km까지 촘촘히
-  const area = cols * rows;
-  const f = area > MAX_CELLS ? Math.sqrt(area / MAX_CELLS) : area < MIN_CELLS ? Math.max(0.5, Math.sqrt(area / MIN_CELLS)) : 1;
-  cols = Math.max(24, Math.round(cols / f));
-  rows = Math.max(24, Math.round(rows / f));
-  scn.regionSize = Math.max(4, Math.round((scn.regionSize * cols * rows) / (scn.cols * scn.rows)));
-  scn.kmPerHex = Math.round((COL_KM * f) / 1.667); // 삼국지14식 칸 하나의 대략 거리 (도움말용)
+  // 무대 안 뭍 넓이 (표본 점으로 어림)
+  let landShare = LAND_SHARE[scn.id] ?? 1;
+  if (!tk && LAND_SHARE[scn.id] === undefined) {
+    let hit = 0, all = 0;
+    for (let i = 0; i < 48; i++) for (let j = 0; j < 48; j++) {
+      const lon = w + ((i + 0.5) / 48) * (e - w), lat = so + ((j + 0.5) / 48) * (n - so);
+      all++;
+      if ((!scn.keepLand || scn.keepLand(lon, lat)) && isLand(lon, lat)) hit++;
+    }
+    landShare = Math.max(0.05, hit / all);
+    if (globalThis.__landShare) globalThis.__landShare[scn.id] = Math.round(landShare * 1000) / 1000;
+  }
+  const cells1 = (lonKm / COL_KM) * (latKm / ROW_KM); // 기본 칸(약 30km 육각)일 때 칸 수
+  // 뭍 칸이 LAND_CELLS쯤 되게, 전체 칸은 MAX_CELLS 안, 칸은 약 10km보다 작지 않게
+  let f = Math.sqrt((cells1 * landShare) / LAND_CELLS);
+  f = Math.max(f, Math.sqrt(cells1 / MAX_CELLS), 0.33);
+  if (tk) f = Math.max(1, Math.sqrt(cells1 / MAX_CELLS));
+  const cols = Math.max(24, Math.round(lonKm / COL_KM / f));
+  const rows = Math.max(24, Math.round(latKm / ROW_KM / f));
+  scn.regionSize = Math.max(4, Math.round(regionKm2 / ((lonKm / cols) * (latKm / rows))));
+  scn.kmPerHex = Math.round((COL_KM * f) / 1.667); // 삼국지14식 칸 하나의 대략 거리
   scn.cols = cols;
   scn.rows = rows;
 }
@@ -1137,30 +1199,6 @@ const ERA = {
 for (const scn of SCENARIOS) for (const n of scn.nations || []) if (AREAS[scn.id]?.[n.name]) n.area = AREAS[scn.id][n.name];
 for (const [k, list] of Object.entries(ERA)) for (const n of list) if (AREAS[`era${k}`]?.[n.name]) n.area = AREAS[`era${k}`][n.name];
 
-// ── 지역사 무대 모양: 네모 지도 끝까지가 아니라 나라들이 있는 곳 둘레만 무대로 (나머지 땅은 외지) ──
-// 나라마다 수도에서 영토 크기만큼 + 여유, 강역 상자는 조금 넓혀서. 가장자리는 들쭉날쭉하게.
-const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
-for (const scn of SCENARIOS) {
-  if (scn.group !== 'region' || !scn.bbox || scn.id.startsWith('threekingdoms') || !scn.nations?.length) continue;
-  const cell = scn.kmPerHex * 1.667; // 기본 격자 한 칸 km
-  const regKm2 = scn.regionSize * cell * cell * 0.87;
-  const reach = scn.nations.map((n) => ({ lon: n.lon, lat: n.lat, r: Math.sqrt((Math.max(1, n.size) * regKm2) / Math.PI) * 1.5 + Math.sqrt(regKm2) * 1.6, area: n.area }));
-  const pad = Math.sqrt(regKm2) / KM; // 강역 상자 여유 (도)
-  const prev = scn.keepLand;
-  scn.keepLand = (lon, lat) => {
-    if (prev && !prev(lon, lat)) return false;
-    const w = 1 + 0.22 * wob(lon, lat);
-    const c = Math.cos((lat * Math.PI) / 180);
-    for (const n of reach) {
-      if (Math.hypot((lon - n.lon) * c, lat - n.lat) * KM < n.r * w) return true;
-      if (n.area) for (const [a, b, e, f] of n.area) {
-        const dx = Math.max(a - lon, 0, lon - e) * c, dy = Math.max(b - lat, 0, lat - f);
-        if (Math.hypot(dx, dy) < pad * w) return true;
-      }
-    }
-    return false;
-  };
-}
 // 시대마다 쓸 세계 나라 목록 (BC는 BC220 세계사, 1805는 1800 세계사)
 const eraFor = (year) => {
   if (year < 0) return SCENARIOS.find((x) => x.id === 'world_bc220').nations;
@@ -1171,7 +1209,7 @@ const eraFor = (year) => {
 // 세계판이 되는 지역사 (좁은 무대는 worldGrid로 격자를 촘촘히)
 export const canWorld = (scn) => scn.group === 'region';
 
-const WORLD_BASE = { bbox: [-180, -56, 180, 83], cols: 216, rows: 111, regionSize: 13, seaReach: 5 };
+const WORLD_BASE = { bbox: [-26, -56, 334, 83], cols: 216, rows: 111, regionSize: 13, seaReach: 5 };
 const variants = {};
 export function worldVariant(base) {
   if (variants[base.id]) return variants[base.id];

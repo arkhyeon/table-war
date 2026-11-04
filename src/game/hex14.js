@@ -19,6 +19,8 @@ const COST = { [T.PLAINS]: 1, [T.DESERT]: 1.3, [T.TUNDRA]: 1.3, [T.FOREST]: 1.6,
 const DEF = { [T.PLAINS]: 1, [T.DESERT]: 1, [T.TUNDRA]: 1, [T.FOREST]: 1.15, [T.HILLS]: 1.25, [T.MOUNTAIN]: 1.35 };
 export const TERRAIN_NAME = { [T.PLAINS]: '평지', [T.DESERT]: '사막', [T.TUNDRA]: '동토', [T.FOREST]: '숲', [T.HILLS]: '구릉', [T.MOUNTAIN]: '산지' };
 
+// 세계 지도 북극 얼음 경계: 이 줄보다 위는 땅이든 바다든 모두 얼음 (들쭉날쭉한 한 줄 경계 — 땅·얼음이 얼룩덜룩 섞이지 않게)
+export const iceRow = (c) => 7 + Math.sin(c * 0.21) * 1.6 + Math.sin(c * 0.07 + 1.3) * 2.2 + Math.sin(c * 0.53 + 0.7) * 0.6;
 // ── 칸 지도 (저장하지 않고 world에서 매번 만듦) ──
 export function buildGrid(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
@@ -41,7 +43,7 @@ export function buildGrid(world) {
     const wob = (v, a) => 1.6 + Math.sin(v * 0.37 + a) * 1.1 + Math.sin(v * 0.11 + a * 2) * 1.3;
     for (let i = 0; i < N; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      if (r < wob(c, 0) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; }
+      if (r < iceRow(c) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
     }
   }
   const nb = [];
@@ -131,10 +133,17 @@ function pickCities(world, grid, base) {
     const gap = Math.max(3, Math.round(Math.sqrt(grid.region.filter((r) => r >= 0).length / Math.max(1, land.length / 4)) * 0.75));
     const groups = new Map();
     for (const r of land) { const o = base.regions[r.id].owner ?? -1; if (!groups.has(o)) groups.set(o, []); groups.get(o).push(r); }
+    // 칸이 촘촘한 좁은 무대(한반도·일본 등, 한 칸 20km 이하)는 성을 더 많이 둠
+    const per = (getScenario(base.scenarioId)?.kmPerHex || 30) <= 20 ? 2.5 : 4;
+    // 넓이 기준도 함께: 변방의 큰 나라(지역 하나하나가 넓음)도 땅 넓이만큼 성을 가짐 (중원만 성이 빽빽하지 않게)
+    const tilesOfRegs = (regs) => regs.reduce((a, r) => a + (grid.tilesOf[r.id]?.length || 0), 0);
+    const ownedGroups = [...groups].filter(([o]) => o !== -1);
+    const allTiles = ownedGroups.reduce((a, [, regs]) => a + tilesOfRegs(regs), 0);
+    const allWant = ownedGroups.reduce((a, [, regs]) => a + Math.max(2, Math.round(regs.length / per)), 0);
+    const tpc = allTiles / Math.max(1, allWant); // 성 하나당 평균 칸 수
     for (const [o, regs] of groups) {
-      // 칸이 촘촘한 좁은 무대(한반도·일본 등, 한 칸 20km 이하)는 성을 더 많이 둠
-      const per = (getScenario(base.scenarioId)?.kmPerHex || 30) <= 20 ? 2.5 : 4;
-      const want = o === -1 ? Math.round(regs.length / per) : Math.max(2, Math.round(regs.length / per));
+      const byArea = Math.round((tilesOfRegs(regs) / tpc) * 1.2);
+      const want = o === -1 ? Math.round(regs.length / per) : Math.max(2, Math.round(regs.length / per), byArea);
       let have = out.filter((c) => (base.regions[grid.region[c.tile]]?.owner ?? -1) === o).length;
       const order = regs.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
       for (const g of [gap, Math.max(2, Math.round(gap / 2)), 2]) for (const r of order) {
@@ -143,6 +152,17 @@ function pickCities(world, grid, base) {
         if (out.some((c) => c.tile === t) || !far(t, g)) continue;
         out.push({ name: base.regions[r.id].name, tile: t, kind: 'city' });
         have += 1;
+      }
+      // 지역이 넓어 성이 모자라면: 그 나라 땅에서 다른 성과 가장 먼 칸에 성을 더 둠 (넓은 땅이 텅 비지 않게)
+      if (o !== -1 && have < want) {
+        const cand = regs.flatMap((r) => grid.tilesOf[r.id] || []).filter((i) => grid.terrain[i] !== T.MOUNTAIN && grid.terrain[i] !== T.PEAK);
+        while (have < want && cand.length) {
+          let bt = -1, bd = -1;
+          for (let k = 0; k < cand.length; k += 3) { const i = cand[k]; let m = Infinity; for (const c of out) { const d = grid.dist(c.tile, i); if (d < m) m = d; if (m <= bd) break; } if (m > bd) { bd = m; bt = i; } }
+          if (bt < 0 || bd < Math.max(3, gap * 0.8)) break;
+          out.push({ name: base.regions[grid.region[bt]].name, tile: bt, kind: 'city' });
+          have += 1;
+        }
       }
     }
     // 성 이름: 지역 이름('○○ 남서부' 같은 방위 이름 포함) 대신, 성 자리에서 가까운 그 시대의 실제 지명을 씀
@@ -188,7 +208,17 @@ function pickCities(world, grid, base) {
       }
       // 같은 이름이 둘이면(지역 이름이 다른 성의 지명과 겹침) 뒤의 것은 '외곽'을 붙여 구별
       const seen = new Set();
-      for (const c of out) { if (seen.has(c.name)) c.name = `${c.name} 외곽`; seen.add(c.name); }
+      // 겹치면: 가까운 실제 지명들 + 방위('○○ 북부')로 먼저 찾아보고, 그래도 겹치면 '외곽'
+      const dirName = (c, p) => { const [x0, y0] = grid.center(p.t), [x1, y1] = grid.center(c.tile); const k = ((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8; return `${p.name} ${DIRS8[k]}`; };
+      for (const c of out) {
+        if (seen.has(c.name)) {
+          let nm = null;
+          for (const p of pts.slice().sort((a, b) => grid.dist(a.t, c.tile) - grid.dist(b.t, c.tile)).slice(0, 6)) { const d = grid.dist(p.t, c.tile); const cand = d <= 1 ? p.name : dirName(c, p); if (!seen.has(cand)) { nm = cand; break; } }
+          if (!nm) { let k = 2; nm = `${c.name} 외곽`; while (seen.has(nm)) nm = `${c.name} 외곽${k++}`; }
+          c.name = nm;
+        }
+        seen.add(c.name);
+      }
     }
   }
   return out;
@@ -259,7 +289,7 @@ export function createHex14(world, base) {
     const mine = castles.filter((x) => x.owner === g.nation);
     if (!mine.length) continue;
     const c = t >= 0 ? mine.reduce((a, b) => (grid.dist(b.tile, t) < grid.dist(a.tile, t) ? b : a)) : mine[0];
-    generals[g.id] = { id: g.id, name: g.name, war: g.war, lead: g.lead, intel: g.intel, pol: g.pol, traits: g.traits || [], nation: g.nation, castle: c.id, unit: null, status: 'active', ruler: base.nations[g.nation]?.ruler === g.id || undefined };
+    generals[g.id] = { id: g.id, pool: !g.pool || g.pool === 'ruler' || g.pool.startsWith('tk') ? base.nations[g.nation]?.pools?.[0] || g.pool : g.pool, name: g.name, war: g.war, lead: g.lead, intel: g.intel, pol: g.pol, traits: g.traits || [], nation: g.nation, castle: c.id, unit: null, status: 'active', ruler: base.nations[g.nation]?.ruler === g.id || undefined };
   }
   const nations = base.nations.map((n) => ({ id: n.id, name: n.name, color: n.color, alive: n.alive && castles.some((c) => c.owner === n.id), isPlayer: n.isPlayer, gold: n.gold, horde: !!n.horde, pools: n.pools || [] }));
   const st = {
@@ -504,8 +534,10 @@ export function orderNew(s, grid, u, kind, id) {
 // 수송: 장수 없이 병력만 내 다른 성으로 (길 길이만큼 걸려 도착, 도착지를 잃으면 가까운 내 성으로)
 export const absDay = (s) => s.turn * DAYS + s.day;
 // 성 수용 한도: 한 성에 무한정 쌓이지 않게 (넘는 병력은 순마다 15%씩 흩어짐 — 남는 병력은 부대로 내보내야 함)
-export const capOf = (c) => (c.kind === 'pass' ? 30000 : Math.max(40000, Math.round((c.pop || 0) * 600)) + lv(c, 'wall') * 10000);
-export const roomOf = (c) => Math.max(0, capOf(c) - c.troops);
+// 수용 병력 = 성 자체 수용 + 그 성 장수 중 출진 병력을 가장 많이 데리고 나갈 수 있는 3명의 출진 병력
+export const genRoom = (s, c) => (s ? Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').map((g) => 8000 + g.lead * 800).sort((a, b) => b - a).slice(0, 3).reduce((a, x) => a + x, 0) : 0);
+export const capOf = (c, s) => (c.kind === 'pass' ? 30000 : Math.max(40000, Math.round((c.pop || 0) * 600)) + lv(c, 'wall') * 10000) + genRoom(s, c);
+export const roomOf = (c, s) => Math.max(0, capOf(c, s) - c.troops);
 // 포위: 적 부대가 성 바로 옆에 있음
 export const besieged = (s, grid, c) => s.units.some((u) => enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 1);
 export const convoyDays = (len) => Math.max(1, Math.ceil(len / 1.5));
@@ -514,8 +546,8 @@ export function sendTroops(s, grid, fromId, toId, troops) {
   if (!a || !b || a.owner !== b.owner || a === b) return { ok: false, msg: '내 다른 성으로만 보낼 수 있습니다.' };
   if (besieged(s, grid, b)) return { ok: false, msg: `${b.name}은(는) 포위당해 수송대가 들어갈 수 없습니다. 장수가 부대로 데리고 가야 합니다.` };
   const inbound = (s.convoys || []).filter((v) => v.to === b.id).reduce((x, v) => x + v.troops, 0);
-  troops = Math.floor(Math.min(troops, a.troops - 500, roomOf(b) - inbound) / 1000) * 1000;
-  if (troops < 1000) return { ok: false, msg: roomOf(b) - inbound < 1000 ? `${b.name}은(는) 수용 한도(${fmtTroops(capOf(b))})가 찼습니다.` : '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
+  troops = Math.floor(Math.min(troops, a.troops - 500, roomOf(b, s) - inbound) / 1000) * 1000;
+  if (troops < 1000) return { ok: false, msg: roomOf(b, s) - inbound < 1000 ? `${b.name}은(는) 수용 한도(${fmtTroops(capOf(b, s))})가 찼습니다.` : '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
   const path = findPath(s, grid, a.tile, b.tile, a.owner, !!a.port);
   if (!path) return { ok: false, msg: '그 성까지 갈 길이 없습니다.' };
   const days = convoyDays(path.length); // 수송대: 내 땅 길로 하루 1.5칸 (부대 0.75칸보다 빠름)
@@ -894,7 +926,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
-  for (const c of s.castles) { const over = c.troops - capOf(c); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
+  for (const c of s.castles) { const over = c.troops - capOf(c, s); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c, s))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
   checkRulers(s);
   buildTurn(s, grid, redistrict);
   s.duelDone = null;

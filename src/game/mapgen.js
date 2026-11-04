@@ -25,14 +25,23 @@ function landPolygons() {
   return landCache;
 }
 
+// 세계 지도(경도 360도)는 대서양 한가운데(서경 26도)에서 자름 — 베링 해협(시베리아-알래스카)이 지도 가운데서 붙어 있게
+// 경도는 지도 범위 안으로 ±360 옮겨서 놓고, 돌려줄 때는 늘 -180~180으로
 function makeGeo(bbox, W, H) {
   const [lon0, lat0, lon1, lat1] = bbox;
+  const whole = lon1 - lon0 >= 359;
+  const wrap = (lon) => (whole ? (lon < lon0 ? lon + 360 : lon > lon1 ? lon - 360 : lon) : lon);
+  const norm = (lon) => (lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon);
   return {
-    toPx: (lon, lat) => [((lon - lon0) / (lon1 - lon0)) * W, ((lat1 - lat) / (lat1 - lat0)) * H],
-    toLL: (x, y) => [lon0 + (x / W) * (lon1 - lon0), lat1 - (y / H) * (lat1 - lat0)],
+    whole,
+    toPxRaw: (lon, lat) => [((lon - lon0) / (lon1 - lon0)) * W, ((lat1 - lat) / (lat1 - lat0)) * H],
+    toPx: (lon, lat) => [((wrap(lon) - lon0) / (lon1 - lon0)) * W, ((lat1 - lat) / (lat1 - lat0)) * H],
+    toLL: (x, y) => [norm(lon0 + (x / W) * (lon1 - lon0)), lat1 - (y / H) * (lat1 - lat0)],
     pxPerDeg: W / (lon1 - lon0),
   };
 }
+// 해안선 다각형을 그릴 때: 세계 지도는 ±360 사본도 그려 자른 곳 양쪽이 이어지게
+const polyCopies = (geo, poly0) => (geo.whole ? [-360, 0, 360].flatMap((d) => unwrapPoly(poly0).map((p) => p.map((r) => r.map(([lo, la]) => [lo + d, la])))) : unwrapPoly(poly0));
 
 // 날짜변경선(경도 ±180°)을 넘는 외곽선: 경도를 이어 붙여(unwrap) 지도 끝에서 끝까지 가로지르는 선이 생기지 않게 하고,
 // 지도 밖으로 넘친 부분은 ±360° 옮긴 사본으로 반대편에 다시 그림
@@ -64,11 +73,11 @@ function rasterLand(geo, W, H) {
   canvas.height = ch;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
-  for (const poly0 of landPolygons()) for (const poly of unwrapPoly(poly0)) {
+  for (const poly0 of landPolygons()) for (const poly of polyCopies(geo, poly0)) {
     ctx.beginPath();
     for (const ring of poly) {
       ring.forEach(([lon, lat], i) => {
-        const [x, y] = geo.toPx(lon, lat);
+        const [x, y] = geo.toPxRaw(lon, lat);
         if (i) ctx.lineTo(x, y);
         else ctx.moveTo(x, y);
       });
@@ -840,10 +849,10 @@ const f1 = (v) => Math.round(v * 10) / 10;
 // 실제 해안선 SVG 경로 (역사 지도)
 function realLandPath(geo, W, H) {
   let d = '';
-  for (const poly0 of landPolygons()) for (const poly of unwrapPoly(poly0)) {
+  for (const poly0 of landPolygons()) for (const poly of polyCopies(geo, poly0)) {
     let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
     const rings = poly.map((ring) => ring.map(([lo, la]) => {
-      const [x, y] = geo.toPx(lo, la);
+      const [x, y] = geo.toPxRaw(lo, la);
       if (x < minx) minx = x;
       if (x > maxx) maxx = x;
       if (y < miny) miny = y;

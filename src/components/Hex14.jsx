@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
+import { buildGrid, iceRow, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -63,14 +63,13 @@ function paintTerrain(grid, world) {
   // 세계 지도 북쪽 끝: 북극 바다는 얼음(해빙)으로 — 지도가 잘린 게 아니라 얼어붙은 바다로 보이게
   const bb = getScenario(world.scenarioId)?.bbox;
   if (bb && bb[2] - bb[0] >= 359) {
-    const iceRow = (c) => 7 + Math.sin(c * 0.21) * 1.6 + Math.sin(c * 0.07 + 1.3) * 2.2 + hash(c, 77) * 1.2;
     for (let i = 0; i < grid.N; i++) {
       if (grid.terrain[i] !== 0) continue;
       const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c);
-      if (r > lim + 1.5) continue;
+      if (r > lim + 1) continue;
       hexPath(i, 1.06);
-      // 가장자리는 깨진 얼음(옅게), 안쪽은 두꺼운 얼음
-      ctx.fillStyle = r > lim ? `rgba(226,238,244,${0.55 + hash(i, 78) * 0.3})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
+      // 가장자리 한 줄만 깨진 얼음(옅게), 안쪽은 두꺼운 얼음
+      ctx.fillStyle = r >= lim ? `rgba(226,238,244,${0.6 + hash(i, 78) * 0.25})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
       ctx.fill();
       if (r <= lim && hash(i, 80) < 0.25) { ctx.strokeStyle = 'rgba(150,180,200,0.6)'; ctx.lineWidth = sz * 0.06; const [cx, cy] = grid.center(i); ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + (hash(i, 81) - 0.5) * sz); ctx.lineTo(cx + sz * 0.1, cy); ctx.lineTo(cx + sz * 0.5, cy + (hash(i, 82) - 0.5) * sz); ctx.stroke(); }
     }
@@ -292,6 +291,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const startYear = getScenario(game.scenarioId)?.startYear ?? 200;
   const [sel, setSel] = useState(null); // {type:'castle'|'unit', id}
   const [sortieOpen, setSortieOpen] = useState(false);
+  const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
   const [pickG, setPickG] = useState([]);
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
@@ -397,7 +397,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.imageSmoothingEnabled = true;
     const B = land.current.base;
     // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (잘린 끝처럼 안 보이게)
-    if (polar) { ctx.fillStyle = '#e3ecf1'; ctx.fillRect(-grid.W, -grid.H * 2, grid.W * 3, grid.H * 2 + grid.size * 2); }
+    if (polar) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(-grid.W, -grid.H * 2, grid.W * 3, grid.H * 2 + grid.size * 4); }
     ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
@@ -1034,7 +1034,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
 
   // 출진 창 기본값
-  const castleGens = selCastle ? Object.values(game.generals).filter((g) => g.castle === selCastle.id && g.status === 'active') : [];
+  const castleGens = selCastle ? Object.values(game.generals).filter((g) => g.castle === selCastle.id && g.status === 'active').sort((a, b) => b.war + b.lead + b.intel + b.pol - (a.war + a.lead + a.intel + a.pol)) : [];
+  const shownGens = genMore === selCastle?.id ? castleGens : castleGens.slice(0, 3);
   useEffect(() => {
     if (!sortieOpen || !selCastle) return;
     const best = castleGens.slice().sort((a, b) => b.lead + b.war - (a.lead + a.war))[0];
@@ -1098,17 +1099,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <small className="muted">{selCastle.owner !== null && selCastle.owner >= 0 ? game.nations[selCastle.owner].name : selCastle.bandit || '중립'}</small>
           </h3>
           <div className="kv">
-            <span>수비병</span><span>{fmtTroops(selCastle.troops)}<small className="muted"> / 수용 {fmtTroops(capOf(selCastle))}</small></span>
+            <span>수비병</span><span>{fmtTroops(selCastle.troops)}<small className="muted"> / 수용 {fmtTroops(capOf(selCastle, game))}</small></span>
             <span>성벽</span><span>{Math.round(selCastle.dur)} / {selCastle.maxDur}</span>
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
             {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))} <small className="muted">지도에 흰색=내 관할, 빨강=아직 남의 것(채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)</small></span></>}
             {selCastle.kind === 'pass' && <><span>관문</span><span>수입은 없지만 성벽이 두꺼워 길목을 막음</span></>}
-            <span>장수</span><div className="gen-list">{castleGens.length ? castleGens.map((g) => (
+            <span>장수</span><div className="gen-list">{castleGens.length ? shownGens.map((g) => (
               <div key={g.id} className="gen-row">
                 <Face g={g} size={24} col={ownerColor(game, selCastle.owner)} />
                 <div className="gen-main"><div className="gen-top"><b>{g.name}</b>{selCastle.owner === pid && <Loyal g={g} />}<Job g={g} /></div><Stats g={g} /></div>
                 {selCastle.owner === pid && !playing ? <button className="xs" title="다른 내 성으로 보내기 (지도에서 성을 누름)" onClick={() => { setSendGen(g.id); setSheet(false); toast(`${g.name}: 보낼 내 성을 지도에서 누르세요 (병력 ${fmtTroops(callAmt)} 데려감)`); }}>➡️</button> : <span />}
-              </div>)) : <span className="muted">없음</span>}</div>
+              </div>)) : <span className="muted">없음</span>}
+              {castleGens.length > 3 && <button className="xs" style={{ marginTop: 4 }} onClick={() => setGenMore(genMore === selCastle.id ? null : selCastle.id)}>{genMore === selCastle.id ? '접기' : `더보기 (+${castleGens.length - 3}명)`}</button>}</div>
           </div>
           {(game.corps || []).filter((co) => co.cities.includes(selCastle.id)).map((co) => <div key={co.id} className="muted" style={{ fontSize: 12, marginTop: 4 }}>🎖️ {game.generals[co.leader]?.name} 군단이 맡은 도시입니다 (직접 출진도 가능)</div>)}
           {selCastle.port && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>⚓ 항구: 여기서 나간 부대는 배로 바닷길을 갈 수 있습니다.</div>}
@@ -1286,7 +1288,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
                     <b>🚚 병력 받기</b> <small className="muted">장수 없이 내 다른 성에서 이 성으로 · 수송대는 내 땅 길로 하루 1.5칸</small>
                     {besieged(game, grid, selCastle) ? <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>포위당해 수송대가 들어올 수 없습니다. 장수가 부대로 데리고 와야 합니다.</div> : <>
-                      <div style={{ fontSize: 12, marginTop: 4 }}>받을 병력 {fmtTroops(sendAmt)} <small className="muted">(남은 자리 {fmtTroops(Math.max(0, capOf(selCastle) - selCastle.troops))})</small></div>
+                      <div style={{ fontSize: 12, marginTop: 4 }}>받을 병력 {fmtTroops(sendAmt)} <small className="muted">(남은 자리 {fmtTroops(Math.max(0, capOf(selCastle, game) - selCastle.troops))})</small></div>
                       <Slider min={1000} max={30000} step={1000} value={sendAmt} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                       {(() => {
                         const donors = game.castles.filter((d) => d.owner === pid && d.id !== selCastle.id && d.troops >= 1500 && !(game.convoys || []).some((v) => v.from === d.id && v.to === selCastle.id)).map((d) => ({ d, dist: grid.dist(d.tile, selCastle.tile) })).sort((x, y) => x.dist - y.dist).slice(0, 5);
