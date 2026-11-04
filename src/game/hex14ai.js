@@ -1,11 +1,11 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf } from './hex14gov.js';
+import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf, bordering } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, hireMerc, mercMax, roomOf } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -127,7 +127,7 @@ function strategyDiplomacy(s, grid, nid, rng) {
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const avgC = alive.reduce((a, m) => a + citiesOf(s, m.id), 0) / Math.max(1, alive.length);
   const small = citiesOf(s, nid) <= 3 && citiesOf(s, nid) < avgC * 0.75;
-  if (rng() > (small ? 0.5 : 0.15)) return; // 작은 나라는 외교로 버팀: 훨씬 자주 사신을 보냄
+  if (rng() > (small ? 0.25 : 0.1)) return; // 외교는 가끔 — 싸워서 넓히는 게 먼저
   const nb = neighbors(s, grid, nid);
   if (n.strat === 'hold' || n.strat === 'center' || n.strat === 'build' || (small && nb.some((x) => x !== n.focus && powerOf(s, x) > powerOf(s, nid) * 1.5 && !pactOf(s, nid, x)))) {
     const m = nb.filter((x) => x !== n.focus && !pactOf(s, nid, x)).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
@@ -137,7 +137,7 @@ function strategyDiplomacy(s, grid, nid, rng) {
     const m = nb.filter((x) => x !== n.focus && !pactOf(s, nid, x)).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
     if (m !== undefined) propose(s, nid, m, 'ally', rng);
   } else if (n.strat === 'coalition' && n.focus !== null) {
-    const cand = s.nations.filter((m) => m.alive && !m.horde && m.id !== nid && m.id !== n.focus && !pactOf(s, nid, m.id) && enemy(s, m.id, n.focus));
+    const cand = s.nations.filter((m) => m.alive && !m.horde && m.id !== nid && m.id !== n.focus && !pactOf(s, nid, m.id) && enemy(s, m.id, n.focus) && bordering(s, grid, m.id, n.focus)); // 같은 적과 맞닿은 나라만
     if (cand.length) propose(s, nid, rng.pick(cand).id, 'ally', rng);
   }
 }
@@ -189,13 +189,14 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   }
   // 1) 이미 나간 부대: 약해지면 귀환, 목표가 없어지면 새 목표, 성벽 두꺼운 성 앞이면 공성병기
   for (const u of myUnits) {
+    if (u.routed) continue; // 패주 중인 부대는 그대로 물러나게 둠
     const home = nearestCastle(s, grid, u.tile, nid);
     if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }
     // 가망 없는 공성은 포기: 그 성으로 가는 우리 부대를 다 합쳐도 수비가 훨씬 세거나, 잔병(1.5천 미만)뿐이면 다른 목표·귀환
     if (u.order?.kind === 'castle' && enemy(s, nid, s.castles[u.order.id].owner)) {
       const c = s.castles[u.order.id];
       const ours = s.units.filter((x) => x.nation === nid && x.order?.kind === 'castle' && x.order.id === c.id).reduce((a, x) => a + x.troops, 0);
-      if (u.troops < 1500 || (!u.harass && c.troops * (c.dur > 0 ? 1.4 : 1) > ours * 1.6)) {
+      if (u.troops < 1500) { // 한번 나섰으면 잔병이 될 때까지 밀어붙임 (수비가 늘었다고 내빼지 않음)
         const t = u.troops >= 1500 ? tgt(u.tile, u.troops) : null;
         if (t && t.id !== c.id) order(s, grid, u, 'castle', t.id);
         else if (home) order(s, grid, u, 'castle', home.id);
@@ -254,11 +255,11 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     }
   }
   // 3) 출진: 남는 병력이 있는 성에서 노릴 성으로 (전략에 따라 남길 몫·대담함이 다름)
-  const maxUnits = Math.max(2, Math.ceil(mine.length * 1.2 * P.units));
+  const maxUnits = Math.max(3, Math.ceil(mine.length * 1.6 * P.units));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
     if (nUnits() >= maxUnits) break;
     const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
-    const reserve = Math.max(2500, c.troops * P.reserve, foeCastle * 0.5) + threatNear(s, grid, c) * 0.8;
+    const reserve = Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.3) + threatNear(s, grid, c) * 0.7;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
     const gs = fighters(s, c);
@@ -291,7 +292,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
       const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60));
       const need = 1.2 * (1 - stall);
       const cands = s.castles.filter((x) => x.kind !== 'pass' && x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && frontier(s, grid, nid, x) <= 12 * grid.k)
-        .filter((x) => !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && (wars.size < 2 || wars.has(x.owner) || x.owner === focus))
+        .filter((x) => !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && (wars.size < 3 || wars.has(x.owner) || x.owner === focus))
         .sort((a, b) => (b.owner === focus) - (a.owner === focus) || a.troops - b.troops);
       for (const x of cands.slice(0, 4)) {
         const guard = (x.troops + s.units.filter((u) => u.nation === x.owner && grid.dist(u.tile, x.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0)) * (x.dur > x.maxDur * 0.3 ? 1.5 : 1);
@@ -324,8 +325,6 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (n.food > use * 108 && n.gold < 60000) trade(s, nid, 'sell', Math.round((n.food - use * 72) / 1000) * 1000);
     else if (n.gold > 150000 && n.food < use * 40) trade(s, nid, 'buy', Math.round((n.gold - 100000) / 2 / 1000) * 1000);
   }
-  // 4.5) 용병: 금이 8만 넘게 쌓였는데 징병이 막힌(인구 한도) 위협받는 성·장수 있는 성에 용병
-  if (!scope && n.gold > 80000) for (const c of mine.filter((c) => (draftMax14(s, c) < 1000 || n.gold > 120000) && (threatNear(s, grid, c) > 0 || Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'))).slice(0, 3)) { if (n.gold <= 60000) break; hireMerc(s, c.id, Math.min(mercMax(s, c), Math.floor((n.gold - 60000) / 20 / 1000) * 1000)); }
   // 5) 징병: 금이 남으면 장수 있는 성부터 (내실·속공은 더 일찍 뽑음)
   const floor = scope ? 200000 : n.strat === 'build' || n.strat === 'blitz' ? 30000 : 50000;
   if (n.gold > floor && n.food > foodUse(s, nid) * 30) {
@@ -388,7 +387,7 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     const neutral = c.owner === null || c.owner === -1;
     if (!neutral && focus !== null && focus !== undefined && c.owner !== focus && (n.strat === 'hold' || n.strat === 'center')) continue;
     // 이미 두 나라와 싸우는 중이면 새 나라에는 싸움을 걸지 않음 (빈 땅·싸우던 상대만)
-    if (!neutral && wars && wars.size >= 2 && !wars.has(c.owner) && c.owner !== focus) continue;
+    if (!neutral && wars && wars.size >= 3 && !wars.has(c.owner) && c.owner !== focus) continue;
     const d = grid.dist(c.tile, from);
     if (d > 20 * grid.k) continue;
     if (!neutral && frontier(s, grid, nid, c) === Infinity) continue; // 남의 나라 땅 너머 성은 노리지 않음
@@ -396,7 +395,7 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     // 이미 그 성으로 가는 우리 부대와 힘을 합침
     const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
     const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60)); // 교착이 길수록 과감해짐 (최대 35%)
-    const need = (n.strat === 'blitz' ? 1.0 : n.strat === 'expand' || n.strat === 'ride' || n.strat === 'coalition' ? 1.1 : 1.25) * (1 - stall);
+    const need = (n.strat === 'blitz' ? 0.85 : n.strat === 'expand' || n.strat === 'ride' || n.strat === 'coalition' ? 0.95 : 1.05) * (1 - stall); // 적당히 이길 만하면 친다
     if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * need > (troops + ours) * P.bold) continue; // 수비보다 넉넉히 모였을 때만
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
     if (!neutral && c.owner === focus) v -= 8;

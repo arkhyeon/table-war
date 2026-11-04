@@ -207,6 +207,16 @@ export function answerInbox(s, i, yes) {
   const p = s.inbox[i];
   if (!p) return;
   s.inbox.splice(i, 1);
+  if (p.type === 'ransom') {
+    const g = s.generals[p.gid], me = s.nations[s.playerId];
+    if (!yes || !g || g.status !== 'prisoner') { addRel(s, p.from, s.playerId, -3); return; }
+    if (me.gold < p.price) { log(s, `금이 모자라 ${g.name}의 몸값 ${fmtGold(p.price)}을(를) 낼 수 없습니다.`, 'bad', [s.playerId]); return; }
+    me.gold -= p.price; s.nations[p.from].gold += p.price;
+    const home = s.castles.find((c) => c.owner === s.playerId);
+    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null });
+    log(s, `💰 몸값 금 ${fmtGold(p.price)}을(를) 내고 ${g.name}을(를) 데려왔습니다.`, 'diplo', [s.playerId, p.from]);
+    return;
+  }
   if (!yes) { addRel(s, p.from, s.playerId, p.type === 'vassal_demand' ? -10 : -5); return; }
   if (p.type === 'vassal_offer') makeVassal(s, s.playerId, p.from);
   else if (p.type === 'vassal_demand') makeVassal(s, p.from, s.playerId);
@@ -253,6 +263,42 @@ export function recruit(s, gid, nid, rng = Math.random) {
   return { ok: true, msg: `${g.name} 등용 성공!` };
 }
 
+// ── 몸값 흥정: 포로의 가치(능력치 합, 군주는 3배)보다 싸게 부를수록 잘 받아 줌. 돈이 모자라면 못 냄 ──
+export const ransomValue = (g) => Math.round(((g.war + g.lead + g.intel + g.pol) * 150 * (isRuler(g) ? 3 : 1)) / 1000) * 1000;
+export function ransomChance(s, g, price) {
+  const payer = s.nations[g.nation];
+  if (!payer?.alive || price > payer.gold) return 0;
+  const r = price / Math.max(1, ransomValue(g));
+  return Math.max(0.03, Math.min(0.95, 1.2 - r * 0.7));
+}
+// 내가(또는 by가) 잡은 포로를 돌려주는 대가로 몸값을 부름
+export function offerRansom(s, by, gid, price, rng = Math.random) {
+  const g = s.generals[gid];
+  if (!g || g.status !== 'prisoner' || g.captor !== by) return { ok: false, msg: '내 포로가 아닙니다.' };
+  if (g.ransomAsked === s.turn) return { ok: false, msg: '이번 턴에 이미 몸값을 불렀습니다.' };
+  const payer = s.nations[g.nation];
+  if (!payer?.alive) return { ok: false, msg: '돌려보낼 나라가 없습니다.' };
+  g.ransomAsked = s.turn;
+  if (rng() < ransomChance(s, g, price)) {
+    payer.gold -= price; s.nations[by].gold += price;
+    const home = s.castles.find((c) => c.owner === g.nation);
+    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null });
+    log(s, `💰 ${payer.name}이(가) 금 ${fmtGold(price)}을(를) 내고 ${g.name}을(를) 데려갔습니다.`, 'diplo', [by, g.nation]);
+    return { ok: true, msg: `몸값 금 ${fmtGold(price)}을(를) 받고 ${g.name}을(를) 돌려보냈습니다.` };
+  }
+  addRel(s, by, g.nation, -3);
+  return { ok: true, msg: `${payer.name}이(가) 금 ${fmtGold(price)}은(는) 너무 비싸다며 거절했습니다.` };
+}
+// 컴퓨터가 잡은 플레이어 장수: 가끔 몸값을 요구하는 사신 (가치의 0.8~1.2배)
+function ransomDemands(s, rng) {
+  const me = s.spectator ? null : s.playerId;
+  if (me === null || s.inbox.length || s.turn - (s.envoyAt ?? -99) < 3) return;
+  const g = Object.values(s.generals).find((x) => x.status === 'prisoner' && x.nation === me && x.captor !== me && x.captor !== null && s.nations[x.captor]?.alive && (x.held || 0) >= 1 && rng() < 0.35);
+  if (!g) return;
+  const price = Math.round((ransomValue(g) * (0.8 + rng() * 0.4)) / 1000) * 1000;
+  s.inbox.push({ from: g.captor, type: 'ransom', gid: g.id, price });
+  s.envoyAt = s.turn;
+}
 export function release(s, gid, by = s.playerId) {
   const g = s.generals[gid];
   const home = s.nations[g.nation]?.alive ? s.castles.find((c) => c.owner === g.nation) : null;
@@ -354,7 +400,8 @@ export function govTurn(s, grid) {
   }
   spreadLand(s, grid);
   peopleTurn(s);
-  diplomacyTurn(s, rng);
+  diplomacyTurn(s, rng, grid);
+  ransomDemands(s, rng);
   vassalTurn(s, grid, rng);
   people(s, rng);
 }
@@ -379,7 +426,15 @@ function spreadLand(s, grid) {
 }
 
 // 외교: 약조가 끝나면 알림, 우호는 조금씩 30으로, 컴퓨터끼리 동맹·정전
-function diplomacyTurn(s, rng) {
+// 국경이 맞닿은 나라: 두 나라 성 사이가 12칸 안 (멀리 떨어진 나라끼리는 약조를 맺지 않음)
+export function bordering(s, grid, a, b) {
+  if (!grid) return true;
+  const ca = s.castles.filter((c) => c.owner === a), cb = s.castles.filter((c) => c.owner === b);
+  return ca.some((x) => cb.some((y) => grid.dist(x.tile, y.tile) <= 12 * (grid.k || 1)));
+}
+// 같은 적: 두 나라 모두 맞닿아 있으며 둘 다 약조가 없는 제3국
+const commonFoe = (s, grid, a, b) => s.nations.some((m) => m.alive && m.id !== a && m.id !== b && !pactOf(s, a, m.id) && !pactOf(s, b, m.id) && bordering(s, grid, a, m.id) && bordering(s, grid, b, m.id));
+function diplomacyTurn(s, rng, grid) {
   const me = s.spectator ? null : s.playerId;
   const other = (p) => (p.a === me ? p.b : p.a);
   s.eventsQ = s.eventsQ || [];
@@ -401,19 +456,20 @@ function diplomacyTurn(s, rng) {
     const top = ranked[0];
     // 가장 강한 나라를 견제할 동맹, 또는 밀리는 상대와 정전
     if (top && top.id !== n.id) {
-      const cand = alive.filter((m) => m.id !== n.id && m.id !== top.id && !pactOf(s, n.id, m.id));
+      // 견제 동맹은 1등과 맞닿은 나라끼리, 서로 맞닿았거나 같은 적이 있을 때만
+      const cand = alive.filter((m) => m.id !== n.id && m.id !== top.id && !pactOf(s, n.id, m.id) && bordering(s, grid, n.id, top.id) && bordering(s, grid, m.id, top.id) && (bordering(s, grid, n.id, m.id) || commonFoe(s, grid, n.id, m.id)));
       const m = cand.length ? rng.pick(cand) : null;
       if (m) propose(s, n.id, m.id, 'ally', rng);
     }
-    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id)); const amt = 10000; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
-    const foe = ranked.find((m) => m.id !== n.id && !pactOf(s, n.id, m.id) && powerOf(s, m.id) > powerOf(s, n.id) * 1.8);
+    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id && bordering(s, grid, n.id, x.id))); const amt = 10000; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
+    const foe = ranked.find((m) => m.id !== n.id && !pactOf(s, n.id, m.id) && powerOf(s, m.id) > powerOf(s, n.id) * 1.8 && bordering(s, grid, n.id, m.id)); // 맞닿은 강국과만 정전
     if (foe && rng() < 0.4) propose(s, n.id, foe.id, 'truce', rng);
   }
   // 약한 나라는 훨씬 센 플레이어에게 먼저 조공(금)을 바치고 약조를 청함
   if (me !== null && s.nations[me]?.alive) {
     const pp = powerOf(s, me);
     for (const n of alive) {
-      if (n.id === me || pactOf(s, n.id, me) || powerOf(s, n.id) * 2 > pp || rng() > 0.05) continue;
+      if (n.id === me || pactOf(s, n.id, me) || powerOf(s, n.id) * 2 > pp || rng() > 0.05 || !bordering(s, grid, n.id, me)) continue; // 맞닿은 약소국만
       const pay = Math.min(20000, Math.round(n.gold * 0.15 / 1000) * 1000);
       if (pay >= 2000) {
         n.gold -= pay; s.nations[me].gold += pay; addRel(s, n.id, me, 6);

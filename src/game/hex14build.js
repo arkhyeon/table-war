@@ -20,6 +20,7 @@ export const usedSlots = (c) => Object.values(c.bld || {}).reduce((a, b) => a + 
 export const buildCost = (s, c, k) => Math.round(BUILDINGS[k].cost * (hasPolicy(s, c.owner, 'fortify') ? 0.7 : 1));
 
 export function canBuild(s, c, k) {
+  if (s.units.some((u) => u.nation !== c.owner && u.nation !== null && s.nations[u.nation] && (u.order?.kind === 'castle' && u.order.id === c.id) && u.path.length <= 1)) return '공격받고 있어 지을 수 없습니다.';
   const b = BUILDINGS[k];
   if (!b) return '없는 시설입니다.';
   if (c.founding) return '아직 공사 중인 도시입니다.';
@@ -148,6 +149,8 @@ export function castleFortCheck(s, grid, c, tile, kind) {
   if (!f || tile < 0) return '지을 수 없는 곳입니다.';
   if (!grid.passable(tile) && !(kind === 'palisade' && grid.sea?.[tile])) return '지을 수 없는 곳입니다.';
   if (grid.dist(c.tile, tile) > 4) return `${c.name}에서 4칸 안에만 지을 수 있습니다.`;
+  if (s.district?.[tile] !== c.id) return `${c.name}의 관할 땅에만 지을 수 있습니다 (성마다 망루 2개·시설 3개).`;
+  if (s.units.some((u) => enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 2)) return `${c.name}은(는) 공격받고 있어 지을 수 없습니다.`;
   if (grid.passable(tile) && s.owner[tile] !== c.owner) return '내 땅에만 지을 수 있습니다.';
   if (s.castles.some((x) => grid.dist(x.tile, tile) <= 1)) return '성 바로 옆에는 지을 수 없습니다.';
   if (fortAt(s, tile) || s.units.some((u) => u.tile === tile)) return '이미 무언가 있는 칸입니다.';

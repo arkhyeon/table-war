@@ -470,3 +470,36 @@ tr.clickable:hover, tr.sel { background: var(--panel3); }
   .end-turn-box { position: fixed; z-index: 25; }
   .h14-panel { padding-bottom: 72px; }
 }
+/* 성 정보: 장수 목록은 한 줄씩 (이름·능력치 왼쪽, 충성·담당 오른쪽, 줄바꿈 없이) */
+.kv > * { min-width: 0; }
+.gen-list { display: grid; gap: 4px; min-width: 0; }
+.gen-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 3px 6px 3px 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.gen-row img { margin: 0 !important; }
+.gen-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; }
+.gen-main b { white-space: nowrap; }
+.gen-main .stats { font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; white-space: nowrap; }
+.gen-tags { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
+.job-badge { white-space: nowrap; }
+.gen-row button.xs { padding: 2px 6px; }
+/* 내정의 선택 상자가 칸 밖으로 튀어나오지 않게 */
+.h14-panel select { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; text-overflow: ellipsis; }
+/* 왼쪽 위: 내 명령 + 이번 순 소식 */
+.h14-left { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; flex-direction: column; gap: 8px; width: min(340px, calc(100% - 80px)); max-height: calc(100% - 100px); pointer-events: none; }
+.h14-left > * { pointer-events: auto; }
+.h14-left .h14-report { position: static; width: 100%; max-height: 30vh; }
+.h14-orders { background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line2); border-radius: 14px; padding: 6px 10px; font-size: 12px; overflow: auto; max-height: 40vh; box-shadow: var(--shadow); }
+.h14-orders > summary { cursor: pointer; list-style: none; padding: 2px 0; }
+.h14-orders > summary::-webkit-details-marker { display: none; }
+.h14-orders > summary::before { content: '▸'; display: inline-block; margin-right: 4px; color: var(--muted); transition: transform 0.15s; }
+.h14-orders[open] > summary::before { transform: rotate(90deg); }
+.ord-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; width: 100%; text-align: left; padding: 4px 2px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; font-size: 12px; }
+.ord-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.ord-row:hover:not(:disabled) { background: var(--panel2); }
+.ord-row.bad span:first-child { color: var(--danger); }
+.ord-eta { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+@media (max-width: 760px) {
+  .h14-left { top: auto; bottom: 76px; width: min(320px, calc(100% - 20px)); max-height: 45%; }
+}
+.help-search { width: 100%; margin-bottom: 8px; font-size: 14px; padding: 8px 10px; }
+.help-none { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.help-hit { color: var(--text); }

@@ -165,6 +165,15 @@ function buildHistorical(scn, g) {
     }
     terrain[i] = t;
   }
+  // 외지: 무대와 상관없는 땅은 지역에서 빼 둠 (지도 완성 뒤 땅 모양은 되돌림)
+  if (scn.keepLand) {
+    g.outside = new Uint8Array(N); g.outsideT = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      if (terrain[i] === T.SEA) continue;
+      const [lon, lat] = geo.toLL(...center(i));
+      if (!scn.keepLand(lon, lat)) { g.outside[i] = 1; g.outsideT[i] = terrain[i] === T.PEAK ? T.MOUNTAIN : terrain[i]; terrain[i] = T.PEAK; }
+    }
+  }
   g.rivers = [];
   for (const rv of RIVERS) {
     const px = rv.pts.map(([lo, la]) => geo.toPx(lo, la));
@@ -1114,6 +1123,7 @@ export function generateWorld(scn0, seed, detail = 'normal') {
     return best;
   };
   linkStraits(g);
+  if (g.outside) { for (let i = 0; i < N; i++) if (g.outside[i]) { g.terrain[i] = g.outsideT[i]; g.river[i] = 0; } delete g.outsideT; }
 
   delete g.rng;
   return g;

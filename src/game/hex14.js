@@ -23,13 +23,14 @@ export function buildGrid(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
   const cols = Math.ceil(world.W / (size * SQRT3)), rows = Math.ceil((world.H - size) / (1.5 * size)) + 1;
   const N = cols * rows;
-  const terrain = new Uint8Array(N), region = new Int16Array(N).fill(-1), river = new Uint8Array(N);
+  const terrain = new Uint8Array(N), region = new Int16Array(N).fill(-1), river = new Uint8Array(N), outside = new Uint8Array(N);
   for (let i = 0; i < N; i++) {
     const [x, y] = cellCenter(size, cols, i);
     const f = pixelToCell(world.size, world.cols, world.rows, x, y);
     if (f < 0) continue;
     terrain[i] = world.terrain[f];
     river[i] = world.river[f] ? 1 : 0;
+    if (world.outside?.[f]) { outside[i] = 1; continue; } // 외지: 땅이지만 지나갈 수 없음
     const r = world.region[f];
     if (r >= 0 && !world.regions[r].sea && terrain[i] !== T.SEA && terrain[i] !== T.PEAK) region[i] = r;
   }
@@ -76,7 +77,7 @@ export function buildGrid(world) {
   for (let i = 0; i < N; i++) if (terrain[i] === T.SEA) sea[i] = 1;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
+  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -317,10 +318,12 @@ export function splitUnit(s, grid, uid, gid) {
 }
 // 지휘 한도: 가장 통솔 높은 장수 8천+통솔×800, 부장은 절반씩
 export const commandCap = (s, gids) => {
-  const caps = gensOf(s, gids).map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
-  return caps.length ? Math.round(caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) : 0;
+  const gs = gensOf(s, gids);
+  const caps = gs.map((g) => 8000 + g.lead * 800).sort((a, b) => b - a);
+  const mil = gs[0] && hasPolicy(s, gs[0].nation, 'military') ? 1.2 : 1; // 군비 확장: 지휘 한도 +20%
+  return caps.length ? Math.round((caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) * mil) : 0;
 };
-export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 1.0 : 0.75) * (u.siege ? 0.75 : 1) * (s.kmScale || 1); // 하루에 평지 0.75칸 (기마 1칸), 공성병기를 끌면 느림
+export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 1.0 : 0.75) * (u.siege ? 0.75 : 1) * (u.routed ? 1.2 : 1) * (s.kmScale || 1); // 하루에 평지 0.75칸 (기마 1칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
   if (grid.sea?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
@@ -411,9 +414,9 @@ export function findPath(s, grid, from, to, nation, navy = false) {
 // ── 출진: 성에서 장수와 병력을 뽑아 부대를 만듦 ──
 export const SIEGE_COST = 5000; // 공성병기(충차·투석기) 동반 비용
 // 출진 비용: 병사 1명당 0.5금(군비 확장 정책이면 절반) + 공성병기
-export const sortieCost = (s, nid, troops, siege = false) => Math.round(troops * SORTIE_COST * (hasPolicy(s, nid, 'military') ? 0.5 : 1)) + (siege ? SIEGE_COST : 0);
+export const sortieCost = () => 0; // 출진 비용 없음
 // 금으로 감당할 수 있는 출진 병력
-export const sortieAfford = (s, nid, siege = false) => Math.max(0, Math.floor((s.nations[nid].gold - (siege ? SIEGE_COST : 0)) / (SORTIE_COST * (hasPolicy(s, nid, 'military') ? 0.5 : 1)) / 1000) * 1000);
+export const sortieAfford = () => 1e9;
 export function sortie(s, grid, castleId, gids, troops, siege = false) {
   const c = s.castles[castleId];
   const gs = gids.map((id) => s.generals[id]);
@@ -421,15 +424,13 @@ export function sortie(s, grid, castleId, gids, troops, siege = false) {
   const cap = commandCap(s, gids);
   troops = Math.floor(Math.min(troops, cap, c.troops - 500) / 1000) * 1000; // 병력은 천 단위
   if (troops < 1000) return { ok: false, msg: '병력이 모자랍니다 (성에 500은 남겨야 함).' };
-  const cost = sortieCost(s, c.owner, troops, siege);
-  if (s.nations[c.owner].gold < cost) return { ok: false, msg: `출진 비용(군량 수송) 금 ${fmtGold(cost)}이 모자랍니다.` };
+
   // 성 옆 빈 칸에 나감
   const occ = unitAt(s);
   const spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
-  s.nations[c.owner].gold -= cost;
-  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: hasPolicy(s, c.owner, 'military') ? 1.05 : undefined, siege: siege || undefined };
+  const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: hasPolicy(s, c.owner, 'military') ? 1.08 : undefined, siege: siege || undefined };
   for (const g of gs) { g.castle = null; g.unit = u.id; }
   s.units.push(u);
   return { ok: true, unit: u, msg: `${gs[0].name} 부대 ${fmtTroops(troops)} 출진` };
@@ -459,6 +460,7 @@ export const capOf = (c) => (c.kind === 'pass' ? 30000 : Math.max(40000, Math.ro
 export const roomOf = (c) => Math.max(0, capOf(c) - c.troops);
 // 포위: 적 부대가 성 바로 옆에 있음
 export const besieged = (s, grid, c) => s.units.some((u) => enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 1);
+export const convoyDays = (len) => Math.max(1, Math.ceil(len / 1.5));
 export function sendTroops(s, grid, fromId, toId, troops) {
   const a = s.castles[fromId], b = s.castles[toId];
   if (!a || !b || a.owner !== b.owner || a === b) return { ok: false, msg: '내 다른 성으로만 보낼 수 있습니다.' };
@@ -468,7 +470,7 @@ export function sendTroops(s, grid, fromId, toId, troops) {
   if (troops < 1000) return { ok: false, msg: roomOf(b) - inbound < 1000 ? `${b.name}은(는) 수용 한도(${fmtTroops(capOf(b))})가 찼습니다.` : '보낼 병력이 모자랍니다 (성에 500은 남겨야 함).' };
   const path = findPath(s, grid, a.tile, b.tile, a.owner, !!a.port);
   if (!path) return { ok: false, msg: '그 성까지 갈 길이 없습니다.' };
-  const days = Math.max(1, Math.ceil(path.length / 0.8));
+  const days = convoyDays(path.length); // 수송대: 내 땅 길로 하루 1.5칸 (부대 0.75칸보다 빠름)
   a.troops -= troops;
   s.convoys = [...(s.convoys || []), { from: a.id, to: b.id, nation: a.owner, troops, start: absDay(s), arrive: absDay(s) + days }];
   return { ok: true, msg: `🚚 ${a.name} → ${b.name} 병력 ${fmtTroops(troops)} 수송 (${days}일 뒤 도착)` };
@@ -527,7 +529,7 @@ export function stepDay(s, grid) {
   }
   // 컴퓨터 부대(플레이어 군단 포함): 2칸 안 적 망루에 맞고 있으면 먼저 부수고 원래 명령으로 돌아감
   for (const u of s.units) {
-    if (u.dead || (u.nation === s.playerId && !s.spectator && !u.corps && !u.autoTower) || u.order?.kind === 'fort') continue;
+    if (u.dead || u.routed || (u.nation === s.playerId && !s.spectator && !u.corps) || u.order?.kind === 'fort') continue;
     if (u.order?.kind === 'castle' && grid.dist(u.tile, s.castles[u.order.id]?.tile) <= 1) continue; // 성 바로 앞 공성 중이면 계속
     const tw = (s.forts || []).find((f) => f.kind === 'tower' && !f.left && enemy(s, u.nation, f.owner) && grid.dist(f.tile, u.tile) <= 2);
     if (!tw) continue;
@@ -578,6 +580,7 @@ export function stepDay(s, grid) {
   const hits = new Map(); // 대상 → [{공격자, 피해}]
   const sieges = [];
   for (const u of s.units) {
+    if (u.routed) continue; // 패주 중인 부대는 싸우지 않고 물러남
     const adj = grid.nb[u.tile];
     let tgt = null;
     if (u.order?.kind === 'unit') { const t = s.units.find((x) => x.id === u.order.id); if (t && adj.includes(t.tile) && enemy(s, u.nation, t.nation)) tgt = t; }
@@ -622,7 +625,7 @@ export function stepDay(s, grid) {
     const pincer = 1 + 0.3 * (new Set(list.map((x) => x.u.tile)).size - 1);
     const inCamp = (s.forts || []).some((f) => f.tile === t.tile && f.kind === 'camp' && f.owner === t.nation && !f.left);
     // 공성병기를 끼고 있는 부대는 들판 싸움에 취약 (기습당하면 +35% 피해)
-    const total = list.reduce((a, x) => a + x.dmg, 0) * pincer * (t.guard > 0 ? 0.5 : 1) * (inCamp ? 0.7 : 1) * (t.siege ? 1.35 : 1);
+    const total = list.reduce((a, x) => a + x.dmg, 0) * pincer * (t.guard > 0 ? 0.5 : 1) * (inCamp ? 0.7 : 1) * (t.siege ? 1.35 : 1) * (t.routed ? 1.3 : 1);
     t.troops -= total;
     t.morale -= (total / Math.max(1, t.troops + total)) * 60 + (pincer > 1 ? 5 : 0);
     s.fx.push({ type: 'hit', tile: t.tile, amt: Math.round(total), pincer: pincer > 1 });
@@ -689,16 +692,22 @@ export function stepDay(s, grid) {
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {
     if (u.troops > 300 && u.morale > 5) continue;
-    u.dead = true;
     const home = nearestCastle(s, grid, u.tile, u.nation);
+    // 병력이 남았으면 패주: 그 자리에서 가까운 내 성으로 걸어서 물러남 (싸우지 않고, 쫓기면 잡힘)
+    if (u.troops > 1000 && home && !u.routed) {
+      u.routed = true; u.morale = 15; u.autoRet = false; u.queue = [];
+      if (order(s, grid, u, 'castle', home.id).ok) { log(s, `🏳️ ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 패주해 ${home.name}(으)로 물러납니다.`, 'battle', [u.nation]); continue; }
+    }
+    if (u.routed && u.troops > 300) continue; // 패주 중에는 사기가 낮아도 계속 물러남
+    u.dead = true;
     const foe = s.units.filter((x) => x !== u && !x.dead && enemy(s, u.nation, x.nation)).sort((a, b) => grid.dist(a.tile, u.tile) - grid.dist(b.tile, u.tile))[0];
+    const near = foe && grid.dist(foe.tile, u.tile) <= 2;
     for (const g of gensOf(s, u.gens)) {
       g.unit = null;
-      if (foe && (!home || rng() < 0.15)) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) 사로잡혔습니다.`, 'battle', [u.nation]); }
+      if (near && (!home || rng() < 0.4)) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
-    if (home && u.troops > 0) home.troops += Math.max(0, u.troops * 0.5);
-    log(s, `💥 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 무너졌습니다.`, 'battle', [u.nation]);
+    log(s, `💥 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 전멸했습니다.`, 'battle', [u.nation]);
   }
   s.units = s.units.filter((u) => !u.dead);
   advanceQueues(s, grid);
@@ -712,14 +721,13 @@ function dropLeaderless(s, grid) {
   for (const u of s.units) {
     u.gens = u.gens.filter((id) => s.generals[id]?.status === 'active' && s.generals[id].unit === u.id);
     if (u.gens.length) continue;
-    u.dead = true;
-    const home = nearestCastle(s, grid, u.tile, u.nation);
-    if (home) home.troops += Math.round(u.troops * 0.5);
+    u.dead = true; // 장수를 잃은 병사들은 흩어짐
   }
   s.units = s.units.filter((u) => !u.dead);
 }
 
 function enter(s, u, c) {
+  u.routed = false;
   c.troops += u.troops;
   for (const g of gensOf(s, u.gens)) { g.unit = null; g.castle = c.id; }
   u.dead = true;
@@ -858,20 +866,6 @@ export function endTurn14(s, grid) {
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
 export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));
-// 용병: 인구 한도와 상관없이 금으로 병력을 삼 (1명당 20금, 성마다 한 순에 5천까지) — 금은 많은데 징병이 막힌 작은 나라용
-export const MERC_COST = 20, MERC_CAP = 5000;
-export const mercLeft = (s, c) => (c.mercTurn === s.turn ? Math.max(0, MERC_CAP - (c.mercN || 0)) : MERC_CAP);
-export const mercMax = (s, c) => Math.max(0, Math.min(mercLeft(s, c), Math.floor(roomOf(c) / 1000) * 1000, Math.floor(s.nations[c.owner].gold / MERC_COST / 1000) * 1000));
-export function hireMerc(s, castleId, amt) {
-  const c = s.castles[castleId];
-  amt = Math.min(Math.floor(amt / 1000) * 1000, mercMax(s, c));
-  if (amt < 1000) return { ok: false, msg: `용병을 더 살 수 없습니다 (금 ${fmtGold(MERC_COST * 1000)}에 1천, 성마다 한 순 ${fmtTroops(MERC_CAP)}까지).` };
-  s.nations[c.owner].gold -= amt * MERC_COST;
-  c.troops += amt;
-  if (c.mercTurn !== s.turn) { c.mercTurn = s.turn; c.mercN = 0; }
-  c.mercN += amt;
-  return { ok: true, msg: `💰 ${c.name}에서 용병 ${fmtTroops(amt)} 고용 (금 -${fmtGold(amt * MERC_COST)})` };
-}
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];

@@ -83,11 +83,11 @@ const ROOT = 196; // G3
 const hz = (n) => ROOT * Math.pow(2, n / 12);
 // 장단 (12칸 한 장단): 덩=양손, 쿵=북편, 덕=채편, 기=채편 작게
 const JANGDAN = {
-  calm: ['덩', '', '', '덕', '', '쿵', '', '덕', '기', '쿵', '', ''], // 굿거리처럼 느긋하게
-  tension: ['덩', '', '', '', '', '', '쿵', '', '', '덕', '', ''], // 무겁고 느리게
+  calm: ['덩', '', '덕', '기', '쿵', '덕', '', '덕', '기', '쿵', '덕', '기'], // 굿거리처럼 흥겹게
+  tension: ['덩', '', '', '덕', '', '', '쿵', '', '덕', '덕', '', ''], // 무겁게 조여 오는
   battle: ['덩', '', '덕', '쿵', '', '덕', '덩', '', '덕', '쿵', '덕', '덕'], // 자진모리처럼 몰아치게
 };
-const BEAT = { calm: 0.25, tension: 0.3, battle: 0.15 }; // 12칸 한 칸 길이(초)
+const BEAT = { calm: 0.19, tension: 0.24, battle: 0.13 }; // 12칸 한 칸 길이(초) — 처지지 않게 경쾌하게
 let step = 0, nextT = 0, song = null, sect = -1;
 
 // 대금: 숨소리 섞인 부드러운 소리, 길게 끌면 떨림
@@ -118,7 +118,7 @@ function motif() {
   for (let b = 0; b < 4; b++) {
     let k = 0;
     while (k < 12) {
-      const len = [3, 3, 6, 2, 1, 3][Math.floor(Math.random() * 6)];
+      const len = [2, 2, 3, 1, 1, 3, 2, 4][Math.floor(Math.random() * 8)]; // 짧은 음 위주로 경쾌하게
       const l = Math.min(len, 12 - k);
       i = Math.max(0, Math.min(SCALE.length - 1, i + [-2, -1, -1, 0, 1, 1, 2][Math.floor(Math.random() * 7)]));
       out.push({ at: b * 12 + k, len: l, n: Math.random() < 0.15 && k > 0 ? null : SCALE[i] });
@@ -157,6 +157,8 @@ function tick() {
     for (const x of part) if (x.at === k && x.n !== null) daegeum(hz(x.n + 12), nextT, x.len * beat * (mood === 'battle' ? 0.9 : 1.05), mood === 'battle' ? 0.16 : 0.2);
     // 가야금 반주: 박마다 으뜸·5도·8도를 뜯음 (전투는 촘촘하게)
     if (k % (mood === 'battle' ? 3 : 6) === 0) { const root = (part.find((x) => x.at <= k && x.at + x.len > k)?.n ?? 0) % 12; pluck(hz(root - 12), nextT, 1.2, 0.16); if (Math.random() < 0.6) pluck(hz(root - 5), nextT + beat, 0.9, 0.11); }
+    // 가야금 장식음: 대금 선율 사이사이 짧게 (흥을 돋움)
+    if (k % 2 === 1 && Math.random() < (mood === 'calm' ? 0.45 : 0.3)) { const cur = part.find((x) => x.at <= k && x.at + x.len > k)?.n; if (cur !== null && cur !== undefined) pluck(hz(cur + (Math.random() < 0.5 ? 2 : 5)), nextT, 0.35, 0.12); }
     // 장구 장단
     janggu(JANGDAN[mood][step % 12], nextT, mood === 'calm' ? 0.18 : mood === 'tension' ? 0.24 : 0.28);
     nextT += beat;

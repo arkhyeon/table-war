@@ -152,5 +152,5 @@ export function vassalTurn(s, grid, rng) {
   }
 }
 
-export const vassalInboxText = (s, p) => (p.type === 'vassal_offer' ? `우리의 속국이 되겠다고 청합니다. 받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다.` : p.type === 'vassal_demand' ? `우리에게 속국이 되라고 요구합니다. 받아들이면 그 나라와 싸우지 않게 되지만 순마다 금 수입의 15%(지금 약 ${fmtGold(Math.round(incomeOf(s, s.playerId) * 0.15))})를 바칩니다.` : null);
+export const vassalInboxText = (s, p) => (p.type === 'ransom' ? `사로잡은 ${s.generals[p.gid]?.name}을(를) 금 ${fmtGold(p.price)}에 돌려주겠다고 합니다. (지금 금 ${fmtGold(s.nations[s.playerId].gold)})` : p.type === 'vassal_offer' ? `우리의 속국이 되겠다고 청합니다. 받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다.` : p.type === 'vassal_demand' ? `우리에게 속국이 되라고 요구합니다. 받아들이면 그 나라와 싸우지 않게 되지만 순마다 금 수입의 15%(지금 약 ${fmtGold(Math.round(incomeOf(s, s.playerId) * 0.15))})를 바칩니다.` : null);
 export { PACT };
