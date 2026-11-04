@@ -7,6 +7,7 @@ import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
+import { PLACES, placeExists, placeName } from './places.js';
 import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
@@ -140,6 +141,33 @@ function pickCities(world, grid, base) {
         if (out.some((c) => c.tile === t) || !far(t, g)) continue;
         out.push({ name: base.regions[r.id].name, tile: t, kind: 'city' });
         have += 1;
+      }
+    }
+    // 성 이름: 지역 이름('○○ 남서부' 같은 방위 이름 포함) 대신, 성 자리에서 가까운 그 시대의 실제 지명을 씀
+    if (world.geo) {
+      const year = getScenario(base.scenarioId)?.startYear ?? 1;
+      const used = new Set(out.filter((c) => c.capitalOf !== undefined).map((c) => c.name));
+      const pts = PLACES.filter((p) => placeExists(p, year) && !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: placeName(p, year), t: pixelToCell(grid.size, grid.cols, grid.rows, x, y), ok: x >= 0 && y >= 0 && x <= world.W && y <= world.H }; }).filter((p) => p.ok && p.t >= 0);
+      const R = Math.max(3, Math.round(90 / (getScenario(base.scenarioId)?.kmPerHex || 30))); // 약 90km 안
+      // 수도 자리에 있는 지명은 수도가 이미 그곳이므로 다른 성에 붙이지 않음 (완산주 옆에 '전주'가 또 생기지 않게)
+      const caps = out.filter((c) => c.capitalOf !== undefined);
+      const free = pts.filter((p) => !caps.some((c) => grid.dist(c.tile, p.t) <= 1));
+      const pairs = [];
+      // 나라 성은 조금 더 멀리(2배)까지 찾아 '○○ 북동부' 같은 이름이 남지 않게
+      for (const c of out) {
+        if (c.capitalOf !== undefined) continue;
+        const own = (base.regions[grid.region[c.tile]]?.owner ?? null) !== null;
+        for (const p of free) { const d = grid.dist(c.tile, p.t); if (d <= R || d <= R * (own ? 2 : 1.5)) pairs.push([d + (d > R ? 100 : 0), c, p.name]); }
+      }
+      pairs.sort((a, b) => a[0] - b[0]);
+      const done = new Set();
+      for (const [, c, nm] of pairs) { if (done.has(c) || used.has(nm)) continue; c.name = nm; done.add(c); used.add(nm); }
+      // 실제 지명을 못 찾은 성: 주인 없는 황무지(초원·동토 등)면 성을 두지 않고, 나라 땅이면 지역 이름 그대로
+      for (let k = out.length - 1; k >= 0; k--) {
+        const c = out[k];
+        if (done.has(c) || c.capitalOf !== undefined) continue;
+        if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
+        else used.add(c.name);
       }
     }
   }

@@ -886,7 +886,7 @@ export const SCENARIOS = [
     name: '고려·거란 전쟁 1010년',
     era: '강조의 정변 · 귀주대첩 전야',
     desc: '거란 성종이 40만 대군으로 고려를 침공한 해. 양규·강감찬의 고려, 북송·서하·여진이 요의 기세를 지켜봅니다.',
-    bbox: [108, 28, 134, 50],
+    bbox: [108, 28, 137, 50],
     cols: 50,
     rows: 50,
     regionSize: 9,
@@ -1001,6 +1001,9 @@ export const SCENARIOS = [
 // ── 지역사에 그 무대와 상관없는 땅(일본 지역사의 대륙 등)은 외지로: 보이지만 지나갈 수 없고 성도 없음 ──
 const JAPAN_ONLY = (lon, lat) => !(lon < 139 && lat > 0.55 * (lon - 129) + 34.4);
 for (const scn of SCENARIOS) if (scn.id === 'sengoku1560' || scn.id === 'genpei1180') scn.keepLand = JAPAN_ONLY;
+// 한반도 무대 지역사: 일본 열도(규슈·쓰시마 등)는 외지
+const NOT_JAPAN = (lon, lat) => lon < 139 && lat > 0.55 * (lon - 129) + 34.4;
+for (const scn of SCENARIOS) if (scn.id === 'later_three900') scn.keepLand = NOT_JAPAN; // 왜·일본이 나라로 나오는 지역사는 그대로
 
 // ── 국적이 뚜렷한 나라는 따로 명단을 씀 (스코틀랜드에 잉글랜드 장수가 들어가지 않게 등) ──
 const NAT_POOL = { 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
