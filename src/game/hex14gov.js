@@ -128,7 +128,7 @@ export function acceptChance(s, a, b, type) {
   const calm = ['hold', 'center', 'build'].includes(nb?.strat) && nb.focus !== a ? 0.25 : 0;
   // 패권국이 청하는 정전은 잘 받아 주지 않음 (그 나라 속국은 예외)
   const heg = hegemonOf(s);
-  const hegPenalty = heg === a && !(s.pacts || []).some((p) => p.type === 'vassal' && p.a === a && p.b === b) ? 0.35 : 0;
+  const hegPenalty = heg === a && !(s.pacts || []).some((p) => p.type === 'vassal' && p.a === a && p.b === b) ? 0.2 : 0;
   return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm + env - hegPenalty));
 }
 

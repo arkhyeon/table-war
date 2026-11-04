@@ -150,7 +150,9 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   // 전략은 군단(플레이어 나라)이 아닐 때만 고름: 1년마다, 또는 도시 수가 크게 바뀌면
   if (!daily && !scope && s.turn % 6 === 0) {
     const heg = hegemonOf(s);
-    if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
+    // 한꺼번에 몰려오지 않게: 확인할 때마다 절반만, 이미 두 나라와 싸우는 나라는 끼지 않음
+    const busyWars = new Set(s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle').map((u) => s.castles[u.order.id]?.owner).filter((o) => o !== null && o !== undefined && o >= 0 && o !== nid && o !== heg)).size;
+    if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && busyWars < 2 && makeRng(`heg:${s.seed}:${s.turn}:${nid}`)() < 0.5 && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
   }
   if (!scope && (!n.strat || s.turn - (n.stratAt || 0) >= 36 || Math.abs(citiesOf(s, nid) - (n.stratCities ?? 0)) >= 3)) {
     chooseStrategy(s, grid, nid);
