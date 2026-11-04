@@ -19,8 +19,10 @@ const COST = { [T.PLAINS]: 1, [T.DESERT]: 1.3, [T.TUNDRA]: 1.3, [T.FOREST]: 1.6,
 const DEF = { [T.PLAINS]: 1, [T.DESERT]: 1, [T.TUNDRA]: 1, [T.FOREST]: 1.15, [T.HILLS]: 1.25, [T.MOUNTAIN]: 1.35 };
 export const TERRAIN_NAME = { [T.PLAINS]: '평지', [T.DESERT]: '사막', [T.TUNDRA]: '동토', [T.FOREST]: '숲', [T.HILLS]: '구릉', [T.MOUNTAIN]: '산지' };
 
+// 칸 하나의 '게임 거리' (지역사는 km, 세계 지도는 기본 30을 칸이 촘촘해진 만큼 나눔) — 지명 찾는 거리·이동 빠르기에 씀
+const kmOf = (scn) => scn?.kmPerHex || 30 / (scn?.worldScale || 1);
 // 세계 지도 북극 얼음 경계: 이 줄보다 위는 땅이든 바다든 모두 얼음 (들쭉날쭉한 한 줄 경계 — 땅·얼음이 얼룩덜룩 섞이지 않게)
-export const iceRow = (c) => 7 + Math.sin(c * 0.21) * 1.6 + Math.sin(c * 0.07 + 1.3) * 2.2 + Math.sin(c * 0.53 + 0.7) * 0.6;
+export const iceRow = (c, k = 1) => k * (7 + Math.sin((c / k) * 0.21) * 1.6 + Math.sin((c / k) * 0.07 + 1.3) * 2.2 + Math.sin((c / k) * 0.53 + 0.7) * 0.6);
 // ── 칸 지도 (저장하지 않고 world에서 매번 만듦) ──
 export function buildGrid(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
@@ -40,10 +42,11 @@ export function buildGrid(world) {
   // 세계 지도: 북극·날짜변경선에서 땅이 일직선으로 잘려 보이지 않게 가장자리를 들쭉날쭉한 바다로
   const bb = getScenario(world.scenarioId)?.bbox;
   if (bb && bb[2] - bb[0] >= 359) {
+    const ws = getScenario(world.scenarioId)?.worldScale || 1;
     const wob = (v, a) => 1.6 + Math.sin(v * 0.37 + a) * 1.1 + Math.sin(v * 0.11 + a * 2) * 1.3;
     for (let i = 0; i < N; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      if (r < iceRow(c) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
+      if (r < iceRow(c, ws) || c < wob(r, 1) * 1.8 || cols - 1 - c < wob(r, 2) * 1.8) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
     }
   }
   const nb = [];
@@ -80,7 +83,7 @@ export function buildGrid(world) {
   for (let i = 0; i < N; i++) if (terrain[i] === T.SEA) sea[i] = 1;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: world.unit / size };
+  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, dist: (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -134,7 +137,7 @@ function pickCities(world, grid, base) {
     const groups = new Map();
     for (const r of land) { const o = base.regions[r.id].owner ?? -1; if (!groups.has(o)) groups.set(o, []); groups.get(o).push(r); }
     // 칸이 촘촘한 좁은 무대(한반도·일본 등, 한 칸 20km 이하)는 성을 더 많이 둠
-    const per = (getScenario(base.scenarioId)?.kmPerHex || 30) <= 20 ? 2.5 : 4;
+    const per = kmOf(getScenario(base.scenarioId)) <= 20 ? 2.5 : 4;
     // 넓이 기준도 함께: 변방의 큰 나라(지역 하나하나가 넓음)도 땅 넓이만큼 성을 가짐 (중원만 성이 빽빽하지 않게)
     const tilesOfRegs = (regs) => regs.reduce((a, r) => a + (grid.tilesOf[r.id]?.length || 0), 0);
     const ownedGroups = [...groups].filter(([o]) => o !== -1);
@@ -171,7 +174,7 @@ function pickCities(world, grid, base) {
       const used = new Set(out.filter((c) => c.capitalOf !== undefined).map((c) => c.name));
       const pts = PLACES.filter((p) => placeExists(p, year) && !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: placeName(p, year), t: pixelToCell(grid.size, grid.cols, grid.rows, x, y), ok: x >= 0 && y >= 0 && x <= world.W && y <= world.H }; }).filter((p) => p.ok && p.t >= 0);
       // 찾는 거리는 km로: 가까운 곳 100km, 나라 성은 170km·빈 땅 성은 130km까지 (더 멀면 엉뚱한 고을 이름이 붙음)
-      const km = getScenario(base.scenarioId)?.kmPerHex || 30;
+      const km = kmOf(getScenario(base.scenarioId));
       const R = Math.max(2, Math.round(100 / km)), Rown = Math.max(R, Math.round(170 / km)), Rfree = Math.max(R, Math.round(130 / km));
       // 수도 자리에 있는 지명은 수도가 이미 그곳이므로 다른 성에 붙이지 않음 (완산주 옆에 '전주'가 또 생기지 않게)
       const caps = out.filter((c) => c.capitalOf !== undefined);
@@ -299,7 +302,7 @@ export function createHex14(world, base) {
   initGov(st, makeRng(`gov0:${base.seed}`));
   rollWeather(st);
   // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
-  st.kmScale = Math.min(2, 30 / (getScenario(base.scenarioId)?.kmPerHex || 30));
+  st.kmScale = Math.min(2, 30 / kmOf(getScenario(base.scenarioId)));
   st.playerStart = castles.filter((c) => c.owner === base.playerId && c.kind !== 'pass').length; // 작은 나라로 시작하면 숨 돌릴 틈이 김
   return st;
 }

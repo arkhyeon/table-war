@@ -65,7 +65,7 @@ function paintTerrain(grid, world) {
   if (bb && bb[2] - bb[0] >= 359) {
     for (let i = 0; i < grid.N; i++) {
       if (grid.terrain[i] !== 0) continue;
-      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c);
+      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c, getScenario(world.scenarioId)?.worldScale || 1);
       if (r > lim + 1) continue;
       hexPath(i, 1.06);
       // 가장자리 한 줄만 깨진 얼음(옅게), 안쪽은 두꺼운 얼음
