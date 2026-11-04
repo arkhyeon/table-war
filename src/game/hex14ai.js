@@ -1,11 +1,11 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact } from './hex14gov.js';
+import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, hireMerc, mercMax } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -117,7 +117,7 @@ function strategyDiplomacy(s, grid, nid, rng) {
   // 약조 연장: 끝나기 3순 전, 노리는 나라가 아니고 우리만큼 센 상대면 연장을 청함 (만료되자마자 대국과 전면전이 나지 않게)
   for (const p of (s.pacts || []).filter((x) => x.type !== 'vassal' && (x.a === nid || x.b === nid) && x.until - s.turn <= 3 && x.until > s.turn)) {
     const o = p.a === nid ? p.b : p.a;
-    if (o === n.focus || o === s.playerId && !s.spectator || p.renewAsked === s.turn) continue;
+    if (o === n.focus || o === s.playerId && !s.spectator || p.renewAsked === s.turn || o === hegemonOf(s)) continue;
     if (powerOf(s, o) < powerOf(s, nid) * 0.8) continue;
     // 크게 앞선 1등(도시 35% 이상)은 연장하지 않음 — 정전을 이어 가기만 하다 칠 상대가 없어지면 맞수에게 뒤집힘 (직접 플레이에서 확인)
     if (citiesOf(s, nid) >= s.castles.filter((c) => c.kind !== 'pass').length * 0.35) continue;
@@ -148,6 +148,10 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const n = s.nations[nid];
   if (!n.alive) return;
   // 전략은 군단(플레이어 나라)이 아닐 때만 고름: 1년마다, 또는 도시 수가 크게 바뀌면
+  if (!daily && !scope && s.turn % 6 === 0) {
+    const heg = hegemonOf(s);
+    if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
+  }
   if (!scope && (!n.strat || s.turn - (n.stratAt || 0) >= 36 || Math.abs(citiesOf(s, nid) - (n.stratCities ?? 0)) >= 3)) {
     chooseStrategy(s, grid, nid);
     n.stratCities = citiesOf(s, nid);
@@ -318,6 +322,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (n.food > use * 108 && n.gold < 60000) trade(s, nid, 'sell', Math.round((n.food - use * 72) / 1000) * 1000);
     else if (n.gold > 150000 && n.food < use * 40) trade(s, nid, 'buy', Math.round((n.gold - 100000) / 2 / 1000) * 1000);
   }
+  // 4.5) 용병: 금이 8만 넘게 쌓였는데 징병이 막힌(인구 한도) 위협받는 성·장수 있는 성에 용병
+  if (!scope && n.gold > 80000) for (const c of mine.filter((c) => draftMax14(s, c) < 1000 && (threatNear(s, grid, c) > 0 || Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'))).slice(0, 2)) { if (n.gold <= 60000) break; hireMerc(s, c.id, Math.min(mercMax(s, c), Math.floor((n.gold - 60000) / 20 / 1000) * 1000)); }
   // 5) 징병: 금이 남으면 장수 있는 성부터 (내실·속공은 더 일찍 뽑음)
   const floor = scope ? 200000 : n.strat === 'build' || n.strat === 'blitz' ? 30000 : 50000;
   if (n.gold > floor && n.food > foodUse(s, nid) * 30) {
@@ -348,12 +354,17 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     strategyDiplomacy(s, grid, nid, rng);
   }
   // 6) 장수 재배치: 장수 없는 성에 남는 장수를 보냄 (입성 명령 대신 즉시 이동: 같은 나라 성끼리)
-  const empty = mine.filter((c) => !Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active'));
+  // 장수도 플레이어처럼 걸어서 감 (병력 1천을 데리고) — 순마다 2명까지, 국경 성부터
+  const hasG = (c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active');
+  const incoming = (c) => s.units.some((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id);
+  const empty = mine.filter((c) => c.kind !== 'pass' && !hasG(c) && !incoming(c)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
+  let sent = 0;
   for (const c of empty) {
-    const donor = mine.find((d) => Object.values(s.generals).filter((g) => g.castle === d.id && g.status === 'active').length >= 3);
+    if (sent >= 2) break;
+    const donor = mine.filter((d) => Object.values(s.generals).filter((g) => g.castle === d.id && g.status === 'active').length >= 3 && d.troops > 4000).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];
     if (!donor) break;
     const g = Object.values(s.generals).filter((x) => x.castle === donor.id && x.status === 'active').sort((a, b) => a.lead - b.lead)[0];
-    g.castle = c.id;
+    if (summonGeneral(s, grid, g.id, c.id, 1000).ok) sent++;
   }
 }
 

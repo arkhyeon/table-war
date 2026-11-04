@@ -853,6 +853,20 @@ export function endTurn14(s, grid) {
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
 export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));
+// 용병: 인구 한도와 상관없이 금으로 병력을 삼 (1명당 20금, 성마다 한 순에 5천까지) — 금은 많은데 징병이 막힌 작은 나라용
+export const MERC_COST = 20, MERC_CAP = 5000;
+export const mercLeft = (s, c) => (c.mercTurn === s.turn ? Math.max(0, MERC_CAP - (c.mercN || 0)) : MERC_CAP);
+export const mercMax = (s, c) => Math.max(0, Math.min(mercLeft(s, c), Math.floor(s.nations[c.owner].gold / MERC_COST / 1000) * 1000));
+export function hireMerc(s, castleId, amt) {
+  const c = s.castles[castleId];
+  amt = Math.min(Math.floor(amt / 1000) * 1000, mercMax(s, c));
+  if (amt < 1000) return { ok: false, msg: `용병을 더 살 수 없습니다 (금 ${fmtGold(MERC_COST * 1000)}에 1천, 성마다 한 순 ${fmtTroops(MERC_CAP)}까지).` };
+  s.nations[c.owner].gold -= amt * MERC_COST;
+  c.troops += amt;
+  if (c.mercTurn !== s.turn) { c.mercTurn = s.turn; c.mercN = 0; }
+  c.mercN += amt;
+  return { ok: true, msg: `💰 ${c.name}에서 용병 ${fmtTroops(amt)} 고용 (금 -${fmtGold(amt * MERC_COST)})` };
+}
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];

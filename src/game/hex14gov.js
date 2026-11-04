@@ -104,6 +104,14 @@ export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round(((
 export const isSmall = (s, nid) => nid !== null && nid !== undefined && nid >= 0 && s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length <= 4;
 
 // 받아들일 확률 (b가 a의 제안을)
+// 패권국: 전체 도시의 30%를 넘고 2등보다 1.5배 넘게 큰 나라 (다른 나라들이 견제함)
+export function hegemonOf(s) {
+  const cc = (id) => s.castles.filter((c) => c.owner === id && c.kind !== 'pass').length;
+  const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
+  const ranked = s.nations.filter((n) => n.alive && !n.horde).map((n) => [n.id, cc(n.id)]).sort((x, y) => y[1] - x[1]);
+  if (!ranked.length || ranked[0][1] < total * 0.3 || (ranked[1] && ranked[0][1] < ranked[1][1] * 1.5)) return null;
+  return ranked[0][0];
+}
 export function acceptChance(s, a, b, type) {
   const rel = relOf(s, a, b);
   const env = envoyOf(s, a).bonus;
@@ -111,13 +119,17 @@ export function acceptChance(s, a, b, type) {
   if (type === 'ally') {
     // 가장 강한 나라를 함께 두려워하면 잘 받아줌
     const top = s.nations.filter((n) => n.alive).sort((x, y) => powerOf(s, y.id) - powerOf(s, x.id))[0];
-    const fear = top && top.id !== a && top.id !== b ? 0.2 : -0.1;
+    const heg = hegemonOf(s);
+    const fear = heg !== null && heg !== a && heg !== b ? 0.35 : top && top.id !== a && top.id !== b ? 0.2 : -0.1;
     return Math.max(0, Math.min(0.95, (rel - 35) / 60 + fear + env));
   }
   // 정전: 약한 쪽이 더 바람. 지키는 전략(수성·사방 방어·내실)인 나라는 노리는 상대가 아니면 잘 받아 줌
   const nb = s.nations[b];
   const calm = ['hold', 'center', 'build'].includes(nb?.strat) && nb.focus !== a ? 0.25 : 0;
-  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm + env));
+  // 패권국이 청하는 정전은 잘 받아 주지 않음 (그 나라 속국은 예외)
+  const heg = hegemonOf(s);
+  const hegPenalty = heg === a && !(s.pacts || []).some((p) => p.type === 'vassal' && p.a === a && p.b === b) ? 0.35 : 0;
+  return Math.max(0, Math.min(0.95, (rel - 25) / 70 + (pa > pb ? 0.2 : -0.1) + calm + env - hegPenalty));
 }
 
 export function gift(s, a, b, amt) {

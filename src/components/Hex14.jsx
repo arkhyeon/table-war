@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, hireMerc, mercMax, MERC_COST, MERC_CAP } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -1260,6 +1260,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금)
                   <Slider min={0} max={draftMax14(game, selCastle)} step={1000} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={(v) => setDraftAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
+                  <button className="sm" disabled={mercMax(game, selCastle) < 1000} title={`인구와 상관없이 금으로 병력을 삽니다 (1명당 ${MERC_COST}금, 성마다 한 순에 ${fmtTroops(MERC_CAP)}까지)`} onClick={() => act((s) => hireMerc(s, selCastle.id, mercMax(s, s.castles[selCastle.id])))}>💰 용병 {fmtTroops(mercMax(game, selCastle))} (금 {fmtGold(mercMax(game, selCastle) * MERC_COST)})</button>
                   <div style={{ marginTop: 8 }}>🚚 병력만 보내기 {fmtTroops(Math.min(sendAmt, Math.max(0, selCastle.troops - 500)))} <small className="muted">(장수 없이, 내 다른 성으로)</small></div>
                   <Slider min={1000} max={Math.max(1000, Math.floor((selCastle.troops - 500) / 1000) * 1000)} step={1000} value={Math.min(sendAmt, Math.max(1000, selCastle.troops - 500))} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={selCastle.troops < 1500} onClick={() => { setSendFrom(selCastle.id); setSheet(false); toast('받을 내 성을 지도에서 누르세요'); }}>🚚 보낼 성 고르기</button>
