@@ -200,10 +200,28 @@ function buildHistorical(scn, g) {
       }
       if (edge || !touch) for (const x of comp) out[x] = 1;
     }
+    // 무대 땅에서 바다 건너 110km 안의 섬(무대 바깥으로 쳐진 땅이라도)은 외지에서 뺌 — 홋카이도·제주처럼 붙어 있는 섬
+    {
+      const [w0, s0, e0, n0] = scn.bbox;
+      const cellKm = ((e0 - w0) * 111.32 * Math.cos((((s0 + n0) / 2) * Math.PI) / 180)) / g.cols;
+      const steps = Math.ceil(110 / Math.max(1, cellKm));
+      const sd = new Int16Array(N).fill(-1), q3 = [];
+      for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA && !cand[i]) { sd[i] = 0; q3.push(i); }
+      for (let k = 0; k < q3.length; k++) { const x = q3[k]; if (sd[x] >= steps) continue; for (const j of nbOf(x)) if (sd[j] < 0) { sd[j] = sd[x] + 1; if (terrain[j] === T.SEA) q3.push(j); } }
+      let stageLand = 0; for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA && !cand[i]) stageLand++;
+      const seen3 = new Uint8Array(N);
+      for (let i = 0; i < N; i++) {
+        if (!out[i] || seen3[i]) continue;
+        const comp = [i]; seen3[i] = 1;
+        for (let k = 0; k < comp.length; k++) for (const j of nbOf(comp[k])) if (out[j] && !seen3[j]) { seen3[j] = 1; comp.push(j); }
+        const touchesStage = comp.some((x) => nbOf(x).some((j) => terrain[j] !== T.SEA && !cand[j]));
+        if (!scn.strictStage && !touchesStage && comp.length <= stageLand * 0.15 && comp.some((x) => sd[x] >= 0)) for (const x of comp) out[x] = 0;
+      }
+    }
     // 무대 땅 가까이(땅으로 지도 크기의 약 12% 안)의 바깥 땅은 외지에서 뺌 — 나라 사이·전쟁터 한가운데가 회색으로 막히지 않게.
     // 회색은 무대에서 멀리 떨어진 진짜 변두리만
     {
-      const K = Math.max(5, Math.round(Math.min(g.cols, g.rows) * 0.12));
+      const K = Math.max(6, Math.round(Math.min(g.cols, g.rows) * 0.2));
       const dd = new Int16Array(N).fill(-1), qd = [];
       for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA && !cand[i]) { dd[i] = 0; qd.push(i); }
       for (let k = 0; k < qd.length; k++) { const x = qd[k]; if (dd[x] >= K) continue; for (const j of nbOf(x)) if (dd[j] < 0 && terrain[j] !== T.SEA) { dd[j] = dd[x] + 1; qd.push(j); } }

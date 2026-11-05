@@ -153,6 +153,18 @@ function pickCities(world, grid, base, tileOwner = null) {
   const far = (t, m) => out.every((c) => grid.dist(c.tile, t) >= m);
   // 빈 땅 메우기: 성 사이 보통 간격보다 훨씬 먼 곳(나라 땅이든 빈 땅이든)에 성을 더 둠 — 어느 지역은 성이 빽빽하고 어느 곳은 텅 비지 않게
   let fillPts = null;
+  const snapMajor = (onlyFrom = 0) => {
+    // 큰 고을(삿포로·한양 등) 자리 가까이에 성이 있으면 성을 그 자리로 옮김 (섬 끝자락 같은 엉뚱한 곳에 서지 않게)
+    if (world.geo) for (const p of PLACES) {
+      if (!MAJOR.has(p.name)) continue;
+      const [x, y] = world.geo.toPx(p.lon, p.lat);
+      if (x < 0 || y < 0 || x > world.W || y > world.H) continue;
+      const pt = pixelToCell(grid.size, grid.cols, grid.rows, x, y);
+      if (pt < 0 || !grid.passable(pt) || out.some((c) => c.tile === pt)) continue;
+      const near = out.slice(onlyFrom).filter((c) => c.capitalOf === undefined).map((c) => [c, grid.dist(c.tile, pt)]).sort((a, b) => a[1] - b[1])[0];
+      if (near && near[1] <= 6 && out.every((c) => c === near[0] || grid.dist(c.tile, pt) >= 3)) near[0].tile = pt;
+    }
+  };
   const fillGaps = (mult) => {
     if (out.length < 3) return;
     const nn = out.map((c) => { let m = Infinity; for (const d of out) if (d !== c) m = Math.min(m, grid.dist(c.tile, d.tile)); return m; }).sort((a, b) => a - b);
@@ -175,9 +187,9 @@ function pickCities(world, grid, base, tileOwner = null) {
       if (bt < 0) break;
       // 빈 곳 가까이에 실제 고을 자리가 있으면 그 자리에 세움 (예: 홋카이도 빈 곳 → 삿포로)
       if (world.geo) {
-        if (!fillPts) { const yr = getScenario(base.scenarioId)?.startYear ?? 1; fillPts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return x >= 0 && y >= 0 && x <= world.W && y <= world.H ? pixelToCell(grid.size, grid.cols, grid.rows, x, y) : -1; }).filter((x) => x >= 0 && grid.passable(x) && grid.terrain[x] !== T.PEAK); }
+        if (!fillPts) fillPts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { t: x >= 0 && y >= 0 && x <= world.W && y <= world.H ? pixelToCell(grid.size, grid.cols, grid.rows, x, y) : -1, major: MAJOR.has(p.name) }; }).filter((p) => p.t >= 0 && grid.passable(p.t) && grid.terrain[p.t] !== T.PEAK);
         let st = -1, sd = Math.max(2, gapN * 0.45);
-        for (const pt of fillPts) { const d = grid.dist(pt, bt); if (d < sd && dist[pt] >= gapN * 0.55 && !out.some((c) => c.tile === pt)) { sd = d; st = pt; } }
+        for (const { t: pt, major } of fillPts) { const d = grid.dist(pt, bt) - (major ? 3 : 0); if (d < sd && dist[pt] >= gapN * 0.5 && !out.some((c) => c.tile === pt)) { sd = d; st = pt; } }
         if (st >= 0) bt = st;
       }
       out.push({ name: base.regions[grid.region[bt]]?.name || '', tile: bt, kind: 'city', fill: true });
@@ -310,9 +322,10 @@ function pickCities(world, grid, base, tileOwner = null) {
       // 이름 없는 빈 땅 성을 뺀 다음에 빈 곳 메우기 (먼저 메우면 나중에 빠진 자리가 다시 텅 빔) — 새 성은 가까운 실제 지명으로
       const nBefore = out.length;
       fillGaps(world.geo.whole ? 1.45 : 1.3);
+      snapMajor(nBefore);
       for (const c of out.slice(nBefore)) {
         let best = null, bd = Infinity;
-        for (const p of free) { if (used.has(p.name)) continue; const d = grid.dist(c.tile, p.t); if (d <= Rfree * 1.5 && d < bd) { bd = d; best = p; } }
+        for (const p of free) { if (used.has(p.name)) continue; const d = grid.dist(c.tile, p.t) - (MAJOR.has(p.name) ? 2.5 : 0); if (d <= Rfree * 1.5 && d < bd) { bd = d; best = p; } }
         if (best) { c.name = best.name; used.add(best.name); done.add(c); }
       }
       // 지명 사전에 없는 지어낸 지역 이름(예: '국벌')이 남은 성은 가장 가까운 실제 지명 + 방위로

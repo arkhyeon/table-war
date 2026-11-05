@@ -1125,10 +1125,10 @@ export const SCENARIOS = [
 
 // ── 지역사에 그 무대와 상관없는 땅(일본 지역사의 대륙 등)은 외지로: 보이지만 지나갈 수 없고 성도 없음 ──
 const JAPAN_ONLY = (lon, lat) => !(lon < 139 && lat > 0.55 * (lon - 129) + 34.4);
-for (const scn of SCENARIOS) if (scn.id === 'sengoku1560' || scn.id === 'genpei1180') scn.keepLand = JAPAN_ONLY;
+for (const scn of SCENARIOS) if (scn.id === 'sengoku1560' || scn.id === 'genpei1180') { scn.keepLand = JAPAN_ONLY; scn.strictStage = true; }
 // 한반도 무대 지역사: 일본 열도(규슈·쓰시마 등)는 외지
 const NOT_JAPAN = (lon, lat) => lon < 139 && lat > 0.55 * (lon - 129) + 34.4;
-for (const scn of SCENARIOS) if (scn.id === 'later_three900') scn.keepLand = NOT_JAPAN; // 왜·일본이 나라로 나오는 지역사는 그대로
+for (const scn of SCENARIOS) if (scn.id === 'later_three900') { scn.keepLand = NOT_JAPAN; scn.strictStage = true; } // 왜·일본이 나라로 나오는 지역사는 그대로
 
 // ── 국적이 뚜렷한 나라는 따로 명단을 씀 (스코틀랜드에 잉글랜드 장수가 들어가지 않게 등) ──
 const NAT_POOL = { 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
@@ -1155,7 +1155,7 @@ for (const scn of SCENARIOS) {
 const KM = 111.32, COL_KM = 50, ROW_KM = 43.3, MAX_CELLS = 8500, LAND_CELLS = 2200;
 const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
 // 일본 무대: 홋카이도까지 열도 전체
-const LAND_SHARE = {"eastasia650":0.488,"europe1400":0.473,"africa1400":0.368,"warring_bc260":0.572,"korea400":0.304,"punic_bc218":0.313,"sengoku1560":0.109,"imjin1592":0.396,"napoleon1805":0.46,"later_three900":0.161,"genghis1206":0.333,"hundred1340":0.252,"thirty1618":0.312,"sui612":0.313,"goryeo1010":0.34,"genpei1180":0.112,"yuanend1360":0.327,"constantinople1453":0.278}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
+const LAND_SHARE = {"eastasia650":0.445,"europe1400":0.422,"africa1400":0.342,"warring_bc260":0.472,"korea400":0.25,"punic_bc218":0.271,"sengoku1560":0.077,"imjin1592":0.339,"napoleon1805":0.41,"later_three900":0.109,"genghis1206":0.303,"hundred1340":0.194,"thirty1618":0.245,"sui612":0.266,"goryeo1010":0.287,"genpei1180":0.081,"yuanend1360":0.268,"constantinople1453":0.225}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
 const STAGE = { sengoku1560: [[129.3, 30.8, 146, 45.6]], genpei1180: [[129.3, 30.8, 146, 45.6]] };
 for (const scn of SCENARIOS) {
   if (scn.group !== 'region' || !scn.bbox) continue;
@@ -1197,7 +1197,7 @@ for (const scn of SCENARIOS) {
       if (n.area) for (const [a, b, e, f] of n.area) add(a - pad * 1.3, b - pad * 1.3, e + pad * 1.3, f + pad * 1.3);
     }
     for (const [a, b, e, f] of stage) add(a, b, e, f);
-    const m = 1.0;
+    const m = 2.5; // 지도 여백(도) — 무대 바로 바깥 땅(예: 말레이 반도·홋카이도)이 잘리지 않게
     scn.bbox = [Math.max(-179, W - m), Math.max(-56, S - m), Math.min(179, E + m), Math.min(80, Nn + m)].map((v) => Math.round(v * 10) / 10);
   }
   const [w, so, e, n] = scn.bbox;
