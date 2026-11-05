@@ -486,6 +486,7 @@ tr.clickable:hover, tr.sel { background: var(--panel3); }
 /* 왼쪽 위: 내 명령 + 이번 순 소식 */
 .h14-left { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; flex-direction: column; gap: 8px; width: min(340px, calc(100% - 80px)); max-height: calc(100% - 100px); pointer-events: none; }
 .h14-left > * { pointer-events: auto; }
+.h14-left.below-hint { top: 84px; } /* 지도 위 안내(부대 명령·장수 보내기 등)와 겹치지 않게 */
 .h14-left .h14-report { position: static; width: 100%; max-height: 30vh; }
 .h14-orders { background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line2); border-radius: 14px; padding: 6px 10px; font-size: 12px; overflow: auto; max-height: 40vh; box-shadow: var(--shadow); }
 .h14-orders > summary { cursor: pointer; list-style: none; padding: 2px 0; }
@@ -499,6 +500,7 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .ord-eta { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
 @media (max-width: 760px) {
   .h14-left { top: auto; bottom: 76px; width: min(320px, calc(100% - 20px)); max-height: 45%; }
+  .h14-left.below-hint { top: auto; }
 }
 .help-search { width: 100%; margin-bottom: 8px; font-size: 14px; padding: 8px 10px; }
 .help-none { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
@@ -508,3 +510,24 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .gen-top { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; min-width: 0; }
 .gen-top b { overflow: hidden; text-overflow: ellipsis; }
 .gen-top .job-badge { margin-left: auto; }
+
+/* ── 폰 화면 정리 (v90) ── */
+@media (max-width: 760px) {
+  /* 아래 진행 버튼: 화면 맨 아래 한 줄 막대, 글자는 한 줄로 */
+  .end-turn-box { left: 0; right: 0; bottom: 0; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); gap: 6px; background: var(--glass); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid var(--line2); }
+  .end-turn-box > button { white-space: nowrap; }
+  .end-turn-box > button.sm { flex: 0 0 auto; padding: 10px 12px; font-size: 13px; }
+  .end-turn-box .end-turn { flex: 1; padding: 11px 10px; font-size: 15px; }
+  .end-turn-box .lbl-long { display: none; }
+  /* 아래 정보창은 진행 버튼 막대 바로 위에 (버튼이 내용을 가리지 않게) */
+  .h14-panel { bottom: 58px; padding-bottom: 16px; }
+  /* 위쪽 수치 줄: 넘치면 옆으로 밀어 보기 (잘리지 않게) */
+  .tb-stats { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .tb-stats::-webkit-scrollbar { display: none; }
+  .tb-stats > * { flex: 0 0 auto; }
+  /* 알림(토스트)은 진행 버튼 막대 위 가운데, 내 명령 창은 위쪽 왼편 (서로·안내창과 겹치지 않게) */
+  .h14-map .toast { bottom: 70px; max-width: calc(100% - 24px); }
+  .h14-left { top: 8px; bottom: auto; max-height: 40%; width: min(300px, calc(100% - 70px)); }
+  .h14-left.below-hint { display: none; }
+  .map-hint { max-height: 40%; overflow: auto; }
+}

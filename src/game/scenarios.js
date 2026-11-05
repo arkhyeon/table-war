@@ -1155,7 +1155,7 @@ for (const scn of SCENARIOS) {
 const KM = 111.32, COL_KM = 50, ROW_KM = 43.3, MAX_CELLS = 8500, LAND_CELLS = 2200;
 const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
 // 일본 무대: 홋카이도까지 열도 전체
-const LAND_SHARE = {"eastasia650":0.459,"europe1400":0.446,"africa1400":0.353,"warring_bc260":0.527,"korea400":0.304,"punic_bc218":0.321,"sengoku1560":0.095,"imjin1592":0.354,"napoleon1805":0.417,"later_three900":0.161,"genghis1206":0.377,"hundred1340":0.252,"thirty1618":0.312,"sui612":0.326,"goryeo1010":0.339,"genpei1180":0.112,"yuanend1360":0.327,"constantinople1453":0.278}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
+const LAND_SHARE = {"eastasia650":0.488,"europe1400":0.473,"africa1400":0.368,"warring_bc260":0.572,"korea400":0.304,"punic_bc218":0.313,"sengoku1560":0.109,"imjin1592":0.396,"napoleon1805":0.46,"later_three900":0.161,"genghis1206":0.333,"hundred1340":0.252,"thirty1618":0.312,"sui612":0.313,"goryeo1010":0.34,"genpei1180":0.112,"yuanend1360":0.327,"constantinople1453":0.278}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
 const STAGE = { sengoku1560: [[129.3, 30.8, 146, 45.6]], genpei1180: [[129.3, 30.8, 146, 45.6]] };
 for (const scn of SCENARIOS) {
   if (scn.group !== 'region' || !scn.bbox) continue;
@@ -1163,14 +1163,16 @@ for (const scn of SCENARIOS) {
   const lonKm0 = (e0 - w0) * KM * Math.cos((((s0 + n0) / 2) * Math.PI) / 180), latKm0 = (n0 - s0) * KM;
   const regionKm2 = scn.regionSize * (lonKm0 / scn.cols) * (latKm0 / scn.rows);
   const tk = scn.id.startsWith('threekingdoms');
-  if (!tk && scn.nations?.length) {
+  if (scn.nations?.length) { // 삼국지도 나라 둘레 모양 무대 (네모로 자르지 않음)
     // 나라마다 무대 범위: 강역 상자들, 없으면 수도에서 영토 크기만큼의 원
     const reach = scn.nations.map((n) => {
       const area = AREAS[scn.id]?.[n.name];
-      return { lon: n.lon, lat: n.lat, r: Math.sqrt((Math.max(1, n.size) * regionKm2) / Math.PI) * 1.5 + Math.sqrt(regionKm2) * 1.4, area };
+      // 강역 상자가 있는 나라는 상자(+여유)만, 없으면 수도 둘레 원 (바다 건너 엉뚱한 섬까지 닿지 않게 여유는 200km까지)
+      return { lon: n.lon, lat: n.lat, r: area ? 0 : Math.sqrt((Math.max(1, n.size) * regionKm2) / Math.PI) * 1.5 + Math.min(200, Math.sqrt(regionKm2) * 1.4), area };
     });
     const pad = Math.max(0.8, Math.sqrt(regionKm2) / KM * 1.2); // 강역 상자 둘레 여유(도)
     const stage = STAGE[scn.id] || [];
+    scn.stageBoxes = stage; // 무대로 꼭 넣을 땅 (mapgen에서 외지로 빼지 않음)
     const prev = scn.keepLand;
     scn.keepLand = (lon, lat) => {
       if (prev && !prev(lon, lat)) return false;

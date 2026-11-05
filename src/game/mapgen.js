@@ -126,7 +126,7 @@ function buildHistorical(scn, g) {
       const [cx, cy] = corner(x, y, size * 0.6, k);
       if (isLand(cx, cy)) n++;
     }
-    terrain[i] = n >= (geo.whole ? 3 : 4) ? T.PLAINS : T.SEA; // 세계 지도는 칸이 굵어 반도·해안이 깎이지 않게 뭍을 조금 너그럽게
+    terrain[i] = n >= 4 ? T.PLAINS : T.SEA;
   }
   // 세계 지도: 일본·영국·필리핀·뉴질랜드처럼 가는 섬은 칸이 굵어 실제보다 훨씬 작아 보이므로 한 겹 두껍게
   if (scn.bbox[2] - scn.bbox[0] >= 300) {
@@ -199,6 +199,20 @@ function buildHistorical(scn, g) {
         for (const j of nbOf(x)) { if (cand[j]) { if (!seenC[j]) { seenC[j] = 1; comp.push(j); } } else if (terrain[j] !== T.SEA) touch = true; }
       }
       if (edge || !touch) for (const x of comp) out[x] = 1;
+    }
+    // 수도가 하나도 없는 큰 섬·땅덩어리(예: 삼국지의 규슈)는 어느 나라 강역 상자에도 안 들면 외지
+    {
+      const capCells = new Set((scn.nations || []).map((n) => { const [x, y] = geo.toPx(n.lon, n.lat); return pixelToCell(size, g.cols, g.rows, x, y); }));
+      const inArea = (i) => { const [lon, lat] = geo.toLL(...center(i)); const inB = ([a, b, e, f]) => lon >= a && lon <= e && lat >= b && lat <= f; return (scn.stageBoxes || []).some(inB) || (scn.nations || []).some((n) => (n.area || []).some(inB)); };
+      const seen = new Uint8Array(N);
+      for (let i = 0; i < N; i++) {
+        if (seen[i] || terrain[i] === T.SEA) continue;
+        const qq = [i]; seen[i] = 1; let hasCap = false;
+        for (let k = 0; k < qq.length; k++) { if (capCells.has(qq[k])) hasCap = true; for (const j of nbOf(qq[k])) if (!seen[j] && terrain[j] !== T.SEA) { seen[j] = 1; qq.push(j); } }
+        if (hasCap || qq.length < 40) continue;
+        if (qq.some((x) => !out[x] && inArea(x))) continue;
+        for (const x of qq) out[x] = 1;
+      }
     }
     // 나라 수도 칸들이 땅으로 이어지는지 확인 → 외지 때문에 끊긴 곳은 이어 줌
     const caps = (scn.nations || []).map((n) => { const [x, y] = geo.toPx(n.lon, n.lat); return pixelToCell(size, g.cols, g.rows, x, y); }).filter((c) => c >= 0 && terrain[c] !== T.SEA);

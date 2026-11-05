@@ -134,6 +134,16 @@ function paintTerrain(grid, world) {
       if (hash(i, 96) < 0.3) { ctx.strokeStyle = 'rgba(120,130,90,0.6)'; ctx.lineWidth = sz * 0.05; const x = cx + (hash(i, 97) - 0.5) * sz, y = cy + (hash(i, 98) - 0.5) * sz; ctx.beginPath(); ctx.moveTo(x - sz * 0.08, y); ctx.lineTo(x - sz * 0.04, y - sz * 0.14); ctx.moveTo(x + sz * 0.06, y); ctx.lineTo(x + sz * 0.05, y - sz * 0.15); ctx.stroke(); }
     }
   }
+  // 실제 해안선을 가는 선으로 덧그림 (칸이 굵어도 한반도·일본 같은 땅 모양을 알아보기 쉽게)
+  if (world.geo && world.paths?.land) {
+    try {
+      const coast = new Path2D(world.paths.land);
+      ctx.strokeStyle = 'rgba(30,60,80,0.55)';
+      ctx.lineWidth = sz * 0.14;
+      ctx.lineJoin = 'round';
+      for (const ox of grid.wrap ? [0, -grid.period, grid.period] : [0]) { ctx.save(); ctx.translate(ox, 0); ctx.stroke(coast); ctx.restore(); }
+    } catch { /* 해안선 없이 */ }
+  }
   // 칸 테두리 (아주 옅게)
   ctx.strokeStyle = 'rgba(0,0,0,0.07)';
   ctx.lineWidth = sz * 0.05;
@@ -822,6 +832,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
+      probe: (lon, lat) => { const [x, y] = world.geo.toPx(lon, lat); const t = pixelToCell(grid.size, grid.cols, grid.rows, x, y); return { t, terrain: grid.terrain[t], pass: grid.passable(t), N: grid.N, cols: grid.cols, W: world.W, H: world.H, wc: world.cols, wr: world.rows }; },
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],
       castles: () => gameRef.current.castles.map((c) => ({ id: c.id, tile: c.tile, name: c.name, owner: c.owner, troops: c.troops, kind: c.kind, dur: c.dur, building: !!c.build, founding: !!c.founding })),
@@ -1003,7 +1014,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 내 부대를 고른 상태: 누른 곳으로 명령
     if (selUnit && selUnit.nation === pid && !(u && u.nation === pid)) {
       const kind = u ? 'unit' : c ? 'castle' : 'tile';
-      if (kind === 'tile' && (t < 0 || !grid.passable(t))) return toast('갈 수 없는 곳입니다.');
+      // 얕은 바다(뭍 가까이)는 누구나, 깊은 바다는 항구에서 나온 수군만 갈 수 있음
+      if (kind === 'tile' && (t < 0 || !(grid.passable(t) || grid.water[t] || (selUnit.navy && grid.sea[t])))) return toast(grid.sea?.[t] ? '깊은 바다는 항구에서 나온 수군만 갈 수 있습니다.' : '갈 수 없는 곳입니다 (외지·험산).');
       const id = u ? u.id : c ? c.id : t;
       const other = u ? u.nation : c && c.owner !== pid ? c.owner : null;
       if (other !== null && other !== undefined && !enemy(game, pid, other)) return toast(`${game.nations[other].name}과(와)는 ${PACT[pactOf(game, pid, other).type]} 중이라 칠 수 없습니다.`);
@@ -1743,9 +1755,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '눌러서 명령 · 꾹 눌러(PC는 Shift+클릭) 경유지 추가'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <><button className="sm" title="마지막에 넣은 경유지 하나만 취소" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️ 하나 취소</button><button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 모두 지웠습니다' }; })}>모두 지우기</button></> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
           
           <div className="end-turn-box">
-            <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 ({DAYS - game.day}일)</button>
+            <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 <span className="lbl-long">({DAYS - game.day}일)</span></button>
             <button className="primary end-turn" disabled={playing || !!game.over} onClick={() => runTurn(false)}>
-              {playing ? '⏳ 진행 중' : `하루 진행 ▶ (${game.day + 1}/${DAYS}일)`}
+              {playing ? '⏳ 진행 중' : <>하루 진행 ▶ <span className="lbl-day">{game.day + 1}/{DAYS}일</span></>}
             </button>
           </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
@@ -1777,7 +1789,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
             );
           })()}
-          <div className="h14-left">
+          <div className={'h14-left' + (placeFort || sendFrom !== null || sendGen || founding || (selUnit && selUnit.nation === pid && !playing) ? ' below-hint' : '')}>
           {(() => {
             // 내 명령: 부대 목적지·남은 날, 수송, 공사, 포로
             const etaOf = (u) => (u.path.length ? Math.ceil(u.path.reduce((a, t, i) => a + Math.min(3, moveCost(grid, i ? u.path[i - 1] : u.tile, t, game, u)), 0) / Math.max(0.05, speedOf(game, u))) : 0);

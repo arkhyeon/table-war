@@ -129,6 +129,29 @@ function pickCities(world, grid, base, tileOwner = null) {
   };
   const out = [];
   const far = (t, m) => out.every((c) => grid.dist(c.tile, t) >= m);
+  // 빈 땅 메우기: 성 사이 보통 간격보다 훨씬 먼 곳(나라 땅이든 빈 땅이든)에 성을 더 둠 — 어느 지역은 성이 빽빽하고 어느 곳은 텅 비지 않게
+  const fillGaps = (mult) => {
+    if (out.length < 3) return;
+    const nn = out.map((c) => { let m = Infinity; for (const d of out) if (d !== c) m = Math.min(m, grid.dist(c.tile, d.tile)); return m; }).sort((a, b) => a - b);
+    const gapN = Math.max(4, nn[Math.floor(nn.length / 2)] * mult);
+    // 땅 덩어리 크기 (아주 작은 섬에는 안 둠)
+    const comp = new Int32Array(grid.N).fill(-1), csize = [];
+    for (let i = 0; i < grid.N; i++) { if (comp[i] >= 0 || !grid.passable(i)) continue; const q = [i]; comp[i] = csize.length; for (let k = 0; k < q.length; k++) for (const j of grid.nb[q[k]]) if (comp[j] < 0 && grid.passable(j)) { comp[j] = csize.length; q.push(j); } csize.push(q.length); }
+    const dist = new Float32Array(grid.N).fill(Infinity);
+    const spread = (src) => { const q = [src]; dist[src] = 0; for (let k = 0; k < q.length; k++) { const x = q[k], dx = dist[x] + 1; if (dx > gapN * 1.5) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < dist[j]) { dist[j] = dx; q.push(j); } } };
+    for (const c of out) spread(c.tile);
+    for (let it = 0; it < 400; it++) {
+      let bt = -1, bd = gapN;
+      for (let i = 0; i < grid.N; i++) {
+        if (!grid.passable(i) || grid.terrain[i] === T.MOUNTAIN || grid.terrain[i] === T.PEAK) continue;
+        const d = dist[i] === Infinity ? (csize[comp[i]] >= gapN * gapN * 0.6 ? gapN * 1.5 : 0) : dist[i];
+        if (d > bd) { bd = d; bt = i; }
+      }
+      if (bt < 0) break;
+      out.push({ name: base.regions[grid.region[bt]]?.name || '', tile: bt, kind: 'city', fill: true });
+      spread(bt);
+    }
+  };
   if (/^threekingdoms/.test(base.scenarioId) && world.geo) {
     for (const [name, lon, lat, kind] of TK_CITIES) {
       const [x, y] = world.geo.toPx(lon, lat);
@@ -151,6 +174,26 @@ function pickCities(world, grid, base, tileOwner = null) {
     if (out.some((c) => grid.region[c.tile] === n.capital)) continue;
     if (!far(t, 3)) { const c = out.filter((c) => c.kind === 'city').sort((a, b) => grid.dist(a.tile, t) - grid.dist(b.tile, t))[0]; if (c) { c.capitalOf = n.id; continue; } }
     out.push({ name: base.regions[n.capital].name, tile: t, kind: 'city', capitalOf: n.id });
+  }
+  // 삼국지: 정해진 도시 사이 빈 곳(한반도·북방·남방 등)을 메우고, 가까운 실제 지명 + 방위로 이름을 붙임
+  if (/^threekingdoms/.test(base.scenarioId) && world.geo) {
+    const before = out.length;
+    fillGaps(1.6);
+    const pts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: p.name, t: pixelToCell(grid.size, grid.cols, grid.rows, x, y) }; }).filter((p) => p.t >= 0);
+    const used = new Set(out.map((c) => c.name));
+    const D8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
+    for (const c of out.slice(before)) {
+      let nm = null;
+      for (const p of pts.slice().sort((a, b) => grid.dist(a.t, c.tile) - grid.dist(b.t, c.tile)).slice(0, 8)) {
+        const d = grid.dist(p.t, c.tile);
+        let cand = p.name;
+        if (d > 2) { const [x0, y0] = grid.center(p.t), [x1, y1] = grid.center(c.tile); cand = `${p.name} ${D8[((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8]}`; }
+        if (!used.has(cand)) { nm = cand; break; }
+      }
+      c.name = nm || `${c.name || '변경'} ${out.indexOf(c)}`;
+      c.pop = 30;
+      used.add(c.name);
+    }
   }
   // 그 밖(삼국지가 아닌 판): 나라마다 자기 땅 지역 4곳당 1곳(최소 2곳), 남은 빈 땅도 4곳당 1곳 — 큰 지역부터, 서로 떨어지게
   if (!/^threekingdoms/.test(base.scenarioId) || !world.geo) {
@@ -206,6 +249,7 @@ function pickCities(world, grid, base, tileOwner = null) {
         }
       }
     }
+    fillGaps(world.geo?.whole ? 1.7 : 1.3);
     // 성 이름: 지역 이름('○○ 남서부' 같은 방위 이름 포함) 대신, 성 자리에서 가까운 그 시대의 실제 지명을 씀
     if (world.geo) {
       const year = getScenario(base.scenarioId)?.startYear ?? 1;
@@ -230,7 +274,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       for (let k = out.length - 1; k >= 0; k--) {
         const c = out[k];
         if (done.has(c) || c.capitalOf !== undefined) continue;
-        if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
+        if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !c.fill && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
       }
       // 지명 사전에 없는 지어낸 지역 이름(예: '국벌')이 남은 성은 가장 가까운 실제 지명 + 방위로
       // 남겨도 되는 이름: 그 시대에 있던 실제 고을·부족 이름 (강·초원 같은 넓은 땅 이름이나 후대 이름은 바꿈)
@@ -362,6 +406,18 @@ export function createHex14(world, base) {
   for (const c of castles) owner[c.tile] = c.owner === null ? -1 : c.owner;
   // 항구: 바닷길이 3칸 안에 닿는 도시
   for (const c of castles) c.port = c.kind !== 'pass' && grid.water.some((w, t) => w && grid.dist(t, c.tile) <= 3);
+  // 항구가 하나도 없는 땅덩어리(큰 섬 등)는 바다에 가장 가까운 성을 항구로 — 배로 오갈 수 없는 고립된 성이 생기지 않게
+  {
+    const comp = new Int32Array(grid.N).fill(-1); let nc = 0;
+    for (const c of castles) { if (comp[c.tile] >= 0) continue; const q = [c.tile]; comp[c.tile] = nc; for (let k = 0; k < q.length; k++) for (const j of grid.nb[q[k]]) if (comp[j] < 0 && grid.passable(j)) { comp[j] = nc; q.push(j); } nc++; }
+    for (let k = 0; k < nc; k++) {
+      const cs = castles.filter((c) => comp[c.tile] === k && c.kind !== 'pass');
+      if (!cs.length || cs.some((c) => c.port)) continue;
+      const coast = (c) => { let m = Infinity; for (let t = 0; t < grid.N; t++) if (grid.water[t]) { const d = grid.dist(t, c.tile); if (d < m) m = d; } return m; };
+      const best = cs.map((c) => [c, coast(c)]).sort((a, b) => a[1] - b[1])[0];
+      if (best && best[1] < 12) best[0].port = true;
+    }
+  }
   const generals = {};
   for (const g of Object.values(base.generals)) {
     if (g.status !== 'active' || g.nation === null || g.nation === undefined) continue;
