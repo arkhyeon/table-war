@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 도적·산적·비적·해적 — 아무 데서나 무리가 일어나 근처 성·부대를 들이받음 ─────────
-// 모두 하나의 「도적」 세력(나라 목록·외교·통일 계산에서는 빠짐)으로 묶음. 성을 깨면 차지하지 않고 약탈하고 떠남
+// 모두 하나의 「도적」 세력(나라 목록·외교·통일 계산에서는 빠짐)으로 묶음. 약탈은 안 하고 병사만 박살냄 — 부대를 전멸시키거나 성 수비병을 0으로 만들면 다음 표적으로
 import { T } from './rules.js';
 import { order, log, gensOf } from './hex14.js';
 import { fmtTroops, fmtGold } from './format.js';
@@ -79,62 +79,33 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   s.generals[gid].unit = uid;
   const victims = owned.filter((c) => grid.dist(c.tile, spot) <= 8).map((c) => c.owner);
   log(s, `🏴 ${near.name} 근처에 ${name}의 ${kind} ${fmtTroops(troops)}이(가) 일어났습니다!`, 'bad', [...new Set(victims)]);
-  s.outlawStats = s.outlawStats || { rise: 0, raid: 0, sack: 0 }; s.outlawStats.rise++;
+  s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.rise++;
   return true;
 }
 
-// 날마다: 6칸 안에서 가장 가까운 성이나 부대를 들이받음, 없으면 떠돎
+// 날마다: 6칸 안에서 가장 가까운 성(수비병 있는)이나 부대를 들이받음, 없으면 떠돎
 export function outlawDay(s, grid, rng) {
   const oid = s.outlawId;
   if (oid === undefined) return;
   for (const u of s.units) {
     if (u.nation !== oid || u.dead) continue;
     const o = u.order;
-    const alive = o && (o.kind === 'unit' ? s.units.some((x) => x.id === o.id && !x.dead) : o.kind === 'castle' ? !isOutlaw(s, s.castles[o.id]?.owner) : u.path.length > 0);
+    const alive = o && (o.kind === 'unit' ? s.units.some((x) => x.id === o.id && !x.dead) : o.kind === 'castle' ? !isOutlaw(s, s.castles[o.id]?.owner) && s.castles[o.id]?.troops > 0 : u.path.length > 0);
     if (alive && u.path.length) continue;
     let best = null, bd = Infinity;
     for (const x of s.units) { if (x.nation === oid || x.dead) continue; const d = grid.dist(x.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['unit', x.id]; } }
-    for (const c of s.castles) { if (c.owner === null || c.owner < 0 || isOutlaw(s, c.owner)) continue; const d = grid.dist(c.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['castle', c.id]; } }
+    for (const c of s.castles) { if (c.owner === null || c.owner < 0 || isOutlaw(s, c.owner) || c.troops < 200) continue; const d = grid.dist(c.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['castle', c.id]; } }
     if (best && order(s, grid, u, best[0], best[1]).ok) continue;
     // 떠돎: 4칸 안 아무 칸
     for (let k = 0; k < 10; k++) { const t = grid.nb[u.tile][Math.floor(rng() * grid.nb[u.tile].length)]; const t2 = grid.nb[t]?.[Math.floor(rng() * 6)] ?? t; if (t2 !== undefined && (u.navy ? grid.water?.[t2] || grid.passable(t2) : grid.passable(t2)) && order(s, grid, u, 'tile', t2).ok) break; }
   }
 }
 
-// 성 앞 약탈: 성에 붙어 있는 동안 매일 털어 감 (성을 못 깨도 타격)
-export function outlawRaid(s, grid) {
-  const oid = s.outlawId;
-  if (oid === undefined) return;
-  for (const u of s.units) {
-    if (u.nation !== oid || u.order?.kind !== 'castle') continue;
-    const c = s.castles[u.order.id];
-    if (!c || c.owner === null || c.owner < 0 || grid.dist(u.tile, c.tile) > 1) continue;
-    const n = s.nations[c.owner];
-    const g = Math.round(n.gold * 0.01), f = Math.round((n.food || 0) * 0.005), k = Math.round(c.troops * 0.015);
-    n.gold -= g; n.food -= f; c.troops = Math.max(0, c.troops - k);
-    let wiped = 0;
-    const own = [];
-    s.district?.forEach((d, t) => { if (d === c.id && t !== c.tile && s.owner[t] === c.owner) own.push(t); });
-    for (let i = 0; i < 1 && own.length; i++) { const t = own.splice(Math.floor(Math.random() * own.length), 1)[0]; s.owner[t] = -1; wiped++; }
-    s.fx.push({ type: 'hit', tile: c.tile, amt: k });
-    s.outlawStats = s.outlawStats || { rise: 0, raid: 0, sack: 0 }; s.outlawStats.raid++;
-    if (!u.raidLogged || u.raidLogged !== c.id) { u.raidLogged = c.id; log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}을(를) 털고 있습니다! (매일 금·병량을 빼앗고 땅을 휩쓺)`, 'bad', [c.owner]); }
-  }
-}
-
-// 도적이 성을 깨면: 차지하지 않고 약탈 — 금·병량을 털고 관할 땅 일부를 휩쓸고 떠남
+// 도적이 성 수비병을 0으로 만들면: 차지하지도 털지도 않고 다음 먹잇감으로 감
 export function outlawSack(s, grid, c, u) {
-  const n = s.nations[c.owner];
-  const gold = n ? Math.round(n.gold * 0.12) : 0;
-  const food = n ? Math.round((n.food || 0) * 0.08) : 0;
-  if (n) { n.gold -= gold; n.food -= food; }
-  c.troops = 300;
+  c.troops = 0;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);
-  let wiped = 0;
-  const tiles = (s.district ? [...s.district.keys()].filter((t) => s.district[t] === c.id) : []);
-  for (const t of tiles) if (s.owner[t] === c.owner && t !== c.tile && Math.random() < 0.3) { s.owner[t] = -1; wiped++; }
   u.order = null; u.path = [];
-  u.life = Math.max(1, (u.life ?? 3) - 1);
-  s.outlawStats = s.outlawStats || { rise: 0, raid: 0, sack: 0 }; s.outlawStats.sack++;
-  log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}을(를) 약탈했습니다! 금 ${fmtGold(gold)}·병량 ${fmtTroops(food)}을 빼앗기고 땅 ${wiped}칸이 휩쓸렸습니다.`, 'bad', [c.owner]);
+  s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.smash++;
+  log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}의 수비병을 모두 쓰러뜨리고 다음 먹잇감을 찾아 떠납니다.`, 'bad', [c.owner]);
 }

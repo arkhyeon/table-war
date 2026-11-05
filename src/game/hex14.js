@@ -11,7 +11,7 @@ import { PLACES, placeExists, placeName } from './places.js';
 import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
-import { outlawTurn, outlawDay, outlawSack, outlawRaid } from './hex14outlaw.js';
+import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -976,7 +976,6 @@ export function stepDay(s, grid) {
     if (c.troops <= 0) capture(s, grid, c, u);
   }
   fortsDay(s, grid);
-  outlawRaid(s, grid);
   // 4) 보급: 내 성과 내 땅으로 이어져 있지 않으면 병력·사기가 줄어듦
   const supplied = {};
   for (const u of s.units) {
@@ -1004,9 +1003,11 @@ export function stepDay(s, grid) {
     const near = foe && grid.dist(foe.tile, u.tile) <= 2;
     for (const g of gensOf(s, u.gens)) {
       g.unit = null;
-      if (near && (!home || rng() < 0.4)) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
+      if (s.nations[u.nation]?.outlaw) { g.status = 'gone'; continue; } // 도적 두목은 사로잡지 않음 (그냥 죽음)
+      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4)) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
+    if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; }
     log(s, `💥 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 전멸했습니다.`, 'battle', [u.nation]);
   }
   s.units = s.units.filter((u) => !u.dead);
@@ -1065,7 +1066,7 @@ export function supplyMap(s, grid, nation) {
 
 // 성 함락: 그 지역 땅이 통째로 넘어감, 공격 부대는 성에 들어감
 function capture(s, grid, c, u) {
-  if (s.nations[u.nation]?.outlaw) { outlawSack(s, grid, c, u); return; } // 도적은 성을 차지하지 않고 약탈
+  if (s.nations[u.nation]?.outlaw) { outlawSack(s, grid, c, u); return; } // 도적은 성을 차지하지 않음
   const old = c.owner;
   c.owner = u.nation;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);
