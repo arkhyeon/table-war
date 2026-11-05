@@ -163,8 +163,10 @@ function pickCities(world, grid, base, tileOwner = null) {
     for (let it = 0; it < 400; it++) {
       let bt = -1, bd = gapN;
       for (let i = 0; i < grid.N; i++) {
-        if (!grid.passable(i) || grid.terrain[i] === T.MOUNTAIN || grid.terrain[i] === T.PEAK) continue;
-        const d = dist[i] === Infinity ? (csize[comp[i]] >= gapN * gapN * 0.6 ? gapN * 1.5 : 0) : dist[i];
+        if (!grid.passable(i) || grid.terrain[i] === T.PEAK) continue;
+        // 산지도 성이 없으면 세움 (실제로도 산간 요새·고을이 있었음) — 다만 같은 거리면 평지를 먼저
+        const d0 = dist[i] === Infinity ? (csize[comp[i]] >= gapN * gapN * 0.6 ? gapN * 1.5 : 0) : dist[i];
+        const d = grid.terrain[i] === T.MOUNTAIN ? d0 - 0.6 : d0;
         if (d > bd) { bd = d; bt = i; }
       }
       if (bt < 0) break;

@@ -60,19 +60,40 @@ function paintTerrain(grid, world, chunk = null) {
     for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * k, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
     ctx.closePath();
   };
-  // 바다: 깊은 곳은 짙게, 뭍 가까운 곳은 옅게
-  ctx.fillStyle = '#3f7598';
+  // 바다: 뭍에서 멀수록 짙게 (10칸까지 부드럽게 단계), 먼바다 바탕
+  ctx.fillStyle = '#2a5d82';
   ctx.fillRect(0, 0, grid.W, grid.H);
   // 둥근 세계 지도: 북극 얼음 띠 바탕을 먼저 깔아 칸 사이 틈(지그재그)이 바다색 점선으로 보이지 않게
   if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 2); }
   const isLand = (i) => i !== undefined && grid.terrain[i] !== 0;
+  if (!grid.seaDepth) {
+    const dd = new Uint8Array(grid.N).fill(255), q = [];
+    for (let i = 0; i < grid.N; i++) if (grid.terrain[i] !== 0) { dd[i] = 0; q.push(i); }
+    for (let k = 0; k < q.length; k++) { const x = q[k]; if (dd[x] >= 10) continue; for (const j of grid.nb[x]) if (dd[j] === 255 && grid.terrain[j] === 0) { dd[j] = dd[x] + 1; q.push(j); } }
+    grid.seaDepth = dd;
+  }
+  const SEA_NEAR = [143, 208, 222], SEA_FAR = [42, 93, 130];
   for (const i of (TILES || ALL)) {
     if (grid.terrain[i] !== 0) continue;
-    const near = grid.nb[i].some(isLand), near2 = near || grid.nb[i].some((j) => grid.nb[j].some(isLand));
-    if (!near2) continue;
-    hexPath(i, 1.05);
-    ctx.fillStyle = near ? '#79b4c9' : '#5b97b6';
+    const d = Math.min(10, grid.seaDepth[i]);
+    if (d >= 10) continue;
+    const f = Math.pow((d - 1) / 9, 0.7), n = 0.97 + hash(i, 5) * 0.06;
+    hexPath(i, 1.06);
+    ctx.fillStyle = `rgb(${SEA_NEAR.map((a, k) => Math.round((a + (SEA_FAR[k] - a) * f) * n)).join(',')})`;
     ctx.fill();
+  }
+  // 파도 거품: 실제 해안선 바깥쪽에 흰 띠 (땅 칸이 안쪽을 덮음)
+  if (world.geo && world.paths?.land) {
+    try {
+      const coast = new Path2D(world.paths.land);
+      ctx.lineJoin = 'round';
+      for (const ox of grid.wrap ? [0, -grid.period, grid.period] : [0]) {
+        ctx.save(); ctx.translate(ox, 0);
+        ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = sz * 1.2; ctx.stroke(coast);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = sz * 0.55; ctx.stroke(coast);
+        ctx.restore();
+      }
+    } catch { /* 거품 없이 */ }
   }
   // 물결
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
@@ -114,6 +135,32 @@ function paintTerrain(grid, world, chunk = null) {
     hexPath(i, 1.04);
     ctx.fillStyle = shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + hash(i, 4) * 0.1);
     ctx.fill();
+  }
+  // 입체감: 북서쪽에서 빛이 비친다고 보고, 높은 땅(산·구릉·숲) 둘레에 빛·그림자를 칠함
+  {
+    const HT = [0, 0, 0.6, 1.3, 0.1, 0.2, 2.4, 3.2];
+    if (!grid.relief) {
+      const h0 = new Float32Array(grid.N);
+      for (let i = 0; i < grid.N; i++) h0[i] = grid.terrain[i] ? HT[grid.terrain[i]] ?? 0 : -0.3;
+      const h1 = new Float32Array(grid.N);
+      for (let i = 0; i < grid.N; i++) { let s2 = h0[i] * 2, c = 2; for (const j of grid.nb[i]) { s2 += h0[j]; c++; } h1[i] = s2 / c; }
+      const lit = new Float32Array(grid.N);
+      for (let i = 0; i < grid.N; i++) {
+        if (!grid.terrain[i]) continue;
+        const [x0, y0] = grid.center(i);
+        let gx = 0, gy = 0;
+        for (const j of grid.nb[i]) { const [x1, y1] = grid.center(j); const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1; if (L > sz * 3) continue; gx += ((h1[j] - h1[i]) * dx) / L; gy += ((h1[j] - h1[i]) * dy) / L; }
+        lit[i] = (gx + gy) * 0.7; // 북서쪽(-x,-y)이 낮으면 빛을 받음
+      }
+      grid.relief = lit;
+    }
+    for (const i of (TILES || ALL)) {
+      const l = grid.relief[i];
+      if (!grid.terrain[i] || Math.abs(l) < 0.05) continue;
+      hexPath(i, 1.04);
+      ctx.fillStyle = l > 0 ? `rgba(255,248,225,${Math.min(0.22, l * 0.16)})` : `rgba(20,25,40,${Math.min(0.28, -l * 0.18)})`;
+      ctx.fill();
+    }
   }
   // 풀·모래 무늬
   for (const i of (TILES || ALL)) {
@@ -357,6 +404,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sel, setSel] = useState(null); // {type:'castle'|'unit', id}
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
+  const [booted, setBooted] = useState(false); // 처음 지도 그림을 마쳤는지
   const [sheetH, setSheetH] = useState(() => { try { return +localStorage.getItem('tw-sheetH') || 40; } catch { return 40; } }); // 폰 바텀시트 높이(vh)
   useEffect(() => { try { localStorage.setItem('tw-sheetH', String(Math.round(sheetH))); } catch { /* 무시 */ } }, [sheetH]);
   const [pickG, setPickG] = useState([]);
@@ -448,7 +496,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
       view.current = { k, x: x - cw / k / 2, y: y - ch / k / 2 };
     }
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
-    if (!land.current.base) land.current.base = paintTerrain(grid, world);
+    // 처음 지도 그림은 큰 지도에서 몇 초 걸리므로 로딩 화면을 먼저 보여 준 뒤 그림
+    if (!land.current.base) {
+      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { land.current.base = paintTerrain(grid, world); setBooted(true); }, 40); }
+      return;
+    }
     if (land.current.ref !== s.owner) {
       const prev = land.current.prev;
       const dPrev = land.current.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
@@ -472,7 +524,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const { k, y: vy } = view.current;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#3f7598';
+    ctx.fillStyle = '#2a5d82';
     ctx.fillRect(0, 0, cw, ch);
     // 선명한 조각 관리: 확대 배율이 바탕 그림보다 1.6배 넘게 크면, 멈춘 뒤 잠깐 있다가 보이는 범위만 새로 그림
     {
@@ -517,7 +569,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (CH && CH.ok) { ctx.drawImage(CH.cv, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.over, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.rcv, CH.x, CH.y, CH.w, CH.h); }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
-      const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(63,117,152,';
+      const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(42,93,130,';
       const edge = (x0, y0, x1, y1, rx, ry, rw, rh) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, sea + '1)'); g.addColorStop(1, sea + '0)'); ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh); };
       edge(0, 0, 0, m, 0, 0, W, m);
       edge(0, Hh, 0, Hh - m, 0, Hh - m, W, m);
@@ -839,6 +891,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     return f;
     }
+    // 화면 가장자리를 살짝 어둡게 (지도가 한 장의 그림처럼 보이게)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (!land.current.vig || land.current.vig.w !== cw || land.current.vig.h !== ch) {
+      const g = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.45, cw / 2, ch / 2, Math.hypot(cw, ch) * 0.6);
+      g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(8,12,20,0.32)');
+      land.current.vig = { w: cw, h: ch, g };
+    }
+    ctx.fillStyle = land.current.vig.g; ctx.fillRect(0, 0, cw, ch);
     // 날씨 효과 (화면 기준): 비 줄기·눈송이·바람
     const wk = s.weather?.kind;
     if (wk === 'rain' || wk === 'snow' || wk === 'wind') {
@@ -1892,6 +1952,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
           )}
         </div>
+        {!booted && <div className="boot-loading"><div className="spinner" /><b>지도를 그리는 중…</b><small className="muted">바다·지형·영토를 그리고 있어요 (큰 지도는 몇 초 걸려요)</small></div>}
         <div className={'h14-panel' + (sheet ? ' open' : '')} style={{ '--sheet-h': `${sheetH}vh` }}>
           {/* 폰: 손잡이를 위아래로 끌어 높이 조절 (짧게 누르면 작게↔크게), 아주 내리면 닫힘 */}
           <div

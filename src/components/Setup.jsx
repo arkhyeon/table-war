@@ -54,9 +54,16 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const preview = useMemo(() => (ready ? createGame(world, scn, seed, 0, opts) : null), [ready, world, scn, seed, opts]); // eslint-disable-line react-hooks/exhaustive-deps
   const pid = preview && player < preview.nations.length ? player : 0;
 
+  // 게임 시작은 큰 지도에서 몇 초 걸려 화면이 멈춘 것처럼 보이므로, 로딩 화면을 먼저 그린 뒤 만듦
+  const [starting, setStarting] = useState(false);
   const start = (spectator = false, hex = false) => {
-    const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator, detail }, loadHistory());
-    onStart(world, scn, hex ? createHex14(world, state) : state);
+    setStarting(true);
+    setTimeout(() => {
+      try {
+        const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator, detail }, loadHistory());
+        onStart(world, scn, hex ? createHex14(world, state) : state);
+      } catch (e) { console.error(e); setStarting(false); }
+    }, 60);
   };
   const nameOf = (n) => names[n.id] || n.name;
   const pick = (id) => {
@@ -67,6 +74,13 @@ export default function Setup({ onStart, onResume, hasSave }) {
 
   return (
     <div className="setup">
+      {starting && (
+        <div className="boot-loading">
+          <div className="spinner" />
+          <b>전장을 준비하는 중…</b>
+          <small className="muted">성 배치·장수 배치·지도 그림 — 세계사는 10~20초 걸릴 수 있어요</small>
+        </div>
+      )}
       <div className="setup-inner">
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div>
@@ -82,7 +96,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         {showSaves && (
           <div style={{ marginTop: 12 }}>
-            <SaveSlots onLoad={(d) => { if (!onResume(d)) setError('이 저장은 불러올 수 없습니다 — 업데이트로 지도 크기가 바뀌었거나 이전 버전입니다. 세계사 저장은 그대로 됩니다.'); }} />
+            <SaveSlots onLoad={(d) => { setStarting(true); setTimeout(() => { if (!onResume(d)) { setStarting(false); setError('이 저장은 불러올 수 없습니다 — 업데이트로 지도 크기가 바뀌었거나 이전 버전입니다. 세계사 저장은 그대로 됩니다.'); } }, 60); }} />
           </div>
         )}
         <h3 style={{ marginTop: 18 }}>1. 시나리오</h3>

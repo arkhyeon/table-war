@@ -532,3 +532,9 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
   .h14-left.below-hint { display: none; }
   .map-hint { max-height: 40%; overflow: auto; }
 }
+
+/* 게임 시작·지도 그리기 로딩 화면 */
+.boot-loading { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(circle at 50% 40%, #1f2a3a, #0c1016 70%); color: var(--text); font-size: 16px; text-align: center; padding: 20px; }
+.boot-loading .spinner { width: 46px; height: 46px; }
+.map-busy { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 8; background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line2); border-radius: 12px; padding: 6px 12px; font-size: 12px; pointer-events: none; display: flex; gap: 8px; align-items: center; }
+.map-busy .spinner { width: 14px; height: 14px; border-width: 2px; }
