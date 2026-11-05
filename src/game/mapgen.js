@@ -181,13 +181,44 @@ function buildHistorical(scn, g) {
     terrain[i] = t;
   }
   // 외지: 무대와 상관없는 땅은 지역에서 빼 둠 (지도 완성 뒤 땅 모양은 되돌림)
+  // 외지는 지도 가장자리에 붙은 바깥 땅만 (무대 한가운데 빈 땅이 회색으로 막혀 나라끼리 못 가는 일이 없게),
+  // 그래도 나라끼리 땅이 끊기면 사이 외지를 길만큼 다시 엶
   if (scn.keepLand) {
-    g.outside = new Uint8Array(N); g.outsideT = new Uint8Array(N);
-    for (let i = 0; i < N; i++) {
-      if (terrain[i] === T.SEA) continue;
-      const [lon, lat] = geo.toLL(...center(i));
-      if (!scn.keepLand(lon, lat)) { g.outside[i] = 1; g.outsideT[i] = terrain[i] === T.PEAK ? T.MOUNTAIN : terrain[i]; terrain[i] = T.PEAK; }
+    const nbOf = (i) => { const out = []; for (let d = 0; d < 6; d++) { const j = neighborIndex(g.cols, g.rows, i, d); if (j >= 0) out.push(j); } return out; };
+    const cand = new Uint8Array(N);
+    for (let i = 0; i < N; i++) { if (terrain[i] === T.SEA) continue; const [lon, lat] = geo.toLL(...center(i)); if (!scn.keepLand(lon, lat)) cand[i] = 1; }
+    const out = new Uint8Array(N), q = [];
+    for (let i = 0; i < N; i++) { const c = i % g.cols, r = Math.floor(i / g.cols); if (cand[i] && (c === 0 || r === 0 || c === g.cols - 1 || r === g.rows - 1)) { out[i] = 1; q.push(i); } }
+    for (let k = 0; k < q.length; k++) for (const j of nbOf(q[k])) if (cand[j] && !out[j]) { out[j] = 1; q.push(j); }
+    // 나라 수도 칸들이 땅으로 이어지는지 확인 → 외지 때문에 끊긴 곳은 이어 줌
+    const caps = (scn.nations || []).map((n) => { const [x, y] = geo.toPx(n.lon, n.lat); return pixelToCell(size, g.cols, g.rows, x, y); }).filter((c) => c >= 0 && terrain[c] !== T.SEA);
+    // 수도 말고도, 무대 안 땅덩어리(20칸 넘는 것)는 모두 이어지게
+    { const seen = new Uint8Array(N); for (let i = 0; i < N; i++) { if (seen[i] || terrain[i] === T.SEA || out[i]) continue; const qq = [i]; seen[i] = 1; for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) if (!seen[j] && terrain[j] !== T.SEA && !out[j]) { seen[j] = 1; qq.push(j); } if (qq.length >= 20) caps.push(i); } }
+    for (let round = 0; round < 12 && caps.length > 1; round++) {
+      const comp = new Int32Array(N).fill(-1);
+      let nc = 0;
+      for (const s0 of caps) {
+        if (comp[s0] >= 0 || out[s0]) continue;
+        const qq = [s0]; comp[s0] = nc;
+        for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) if (comp[j] < 0 && terrain[j] !== T.SEA && !out[j]) { comp[j] = nc; qq.push(j); }
+        nc++;
+      }
+      if (nc <= 1) break;
+      // 0번 무리에서 바다 아닌 땅(외지 포함)으로 넓혀 다른 무리에 닿는 가장 짧은 길을 찾아 그 길의 외지를 엶
+      const prev = new Int32Array(N).fill(-2), qq = [];
+      for (let i = 0; i < N; i++) if (comp[i] === 0) { prev[i] = -1; qq.push(i); }
+      let hit = -1;
+      for (let k = 0; k < qq.length && hit < 0; k++) for (const j of nbOf(qq[k])) {
+        if (prev[j] !== -2 || terrain[j] === T.SEA) continue;
+        prev[j] = qq[k];
+        if (comp[j] > 0) { hit = j; break; }
+        qq.push(j);
+      }
+      if (hit < 0) break; // 바다로 떨어진 나라 (배로 감)
+      for (let x = hit; x >= 0; x = prev[x]) { out[x] = 0; for (const j of nbOf(x)) out[j] = 0; } // 길과 그 양옆
     }
+    g.outside = new Uint8Array(N); g.outsideT = new Uint8Array(N);
+    for (let i = 0; i < N; i++) if (out[i]) { g.outside[i] = 1; g.outsideT[i] = terrain[i] === T.PEAK ? T.MOUNTAIN : terrain[i]; terrain[i] = T.PEAK; }
   }
   g.rivers = [];
   for (const rv of RIVERS) {
