@@ -200,6 +200,23 @@ function buildHistorical(scn, g) {
       }
       if (edge || !touch) for (const x of comp) out[x] = 1;
     }
+    // 무대 땅 가까이(땅으로 지도 크기의 약 12% 안)의 바깥 땅은 외지에서 뺌 — 나라 사이·전쟁터 한가운데가 회색으로 막히지 않게.
+    // 회색은 무대에서 멀리 떨어진 진짜 변두리만
+    {
+      const K = Math.max(5, Math.round(Math.min(g.cols, g.rows) * 0.12));
+      const dd = new Int16Array(N).fill(-1), qd = [];
+      for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA && !cand[i]) { dd[i] = 0; qd.push(i); }
+      for (let k = 0; k < qd.length; k++) { const x = qd[k]; if (dd[x] >= K) continue; for (const j of nbOf(x)) if (dd[j] < 0 && terrain[j] !== T.SEA) { dd[j] = dd[x] + 1; qd.push(j); } }
+      for (let i = 0; i < N; i++) if (out[i] && dd[i] >= 0) out[i] = 0;
+      // 그래도 사방이 무대 땅으로 둘러싸인 외지 덩어리(가장자리에 안 닿음)는 모두 엶
+      const seen2 = new Uint8Array(N);
+      for (let i = 0; i < N; i++) {
+        if (!out[i] || seen2[i]) continue;
+        const comp = [i]; seen2[i] = 1; let edge = false;
+        for (let k = 0; k < comp.length; k++) { const x = comp[k], c = x % g.cols, r = Math.floor(x / g.cols); if (c === 0 || r === 0 || c === g.cols - 1 || r === g.rows - 1) edge = true; for (const j of nbOf(x)) if (out[j] && !seen2[j]) { seen2[j] = 1; comp.push(j); } }
+        if (!edge && comp.some((x) => nbOf(x).some((j) => terrain[j] !== T.SEA && !out[j]))) for (const x of comp) out[x] = 0;
+      }
+    }
     // 수도가 하나도 없는 섬·땅덩어리: 어느 나라 강역 상자에 들지 않고, 수도가 있는 땅에서 바다로 110km 넘게 떨어져 있으면 외지
     // (제주·쓰시마처럼 가까운 섬은 남고, 삼국지의 규슈·시코쿠처럼 먼 섬은 빠짐)
     {
