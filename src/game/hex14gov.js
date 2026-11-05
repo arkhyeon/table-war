@@ -1,5 +1,16 @@
 // ───────── 삼국지14식 모드: 내정(농업·상업·징병 담당관), 병량·수확, 관할 땅 넓히기, 외교, 인재 ─────────
 import { makeRng } from './rng.js';
+import { tv, initTraits, TRAITS } from './traits.js';
+
+// 특성이 없는 장수(새로 나온 장수 등)에게 능력에 맞는 특성을 붙임
+export function ensureTraits(s) {
+  for (const g of Object.values(s.generals)) {
+    if (g.status === 'gone') continue;
+    g.traits = (g.traits || []).filter(([t]) => TRAITS[t]);
+    if (g.traits.length) continue;
+    g.traits = initTraits(g, makeRng(`trait:${s.seed}:${g.id}`)).traits;
+  }
+}
 import { fmtTroops, fmtGold } from './format.js';
 import { POOLS } from './generals.js';
 import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
@@ -16,6 +27,7 @@ export const HARVEST_MONTH = 7; // 8월(가을) 상순에 수확
 
 // ── 처음 설정 ──
 export function initGov(s, rng) {
+  ensureTraits(s);
   for (const c of s.castles) {
     const pass = c.kind === 'pass';
     c.devMax = pass ? 0 : Math.round(c.pop * 10);
@@ -352,6 +364,7 @@ export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
 // ── 한 턴 마무리의 내정 ──
 export function govTurn(s, grid) {
+  ensureTraits(s);
   const rng = makeRng(`gov:${s.seed}:${s.turn}`);
   const harvest = isHarvest(s);
   for (const n of s.nations) {
@@ -363,12 +376,12 @@ export function govTurn(s, grid) {
       if (c.auto || n.id !== s.playerId || s.spectator) autoJobs(s, c);
       const f = jobGen(s, c, 'farm'), t = jobGen(s, c, 'trade'), d = jobGen(s, c, 'draft');
       const edu = 1;
-      if (f) c.farm = Math.min(c.devMax, c.farm + Math.round((3 + f.pol / 6) * edu));
-      if (t) c.trade = Math.min(c.devMax, c.trade + Math.round((3 + t.pol / 6) * edu));
+      if (f) c.farm = Math.min(c.devMax, c.farm + Math.round((3 + f.pol / 6) * edu * (1 + tv([f], '농정') + tv([f], '정치') / 2)));
+      if (t) c.trade = Math.min(c.devMax, c.trade + Math.round((3 + t.pol / 6) * edu * (1 + tv([t], '정치') + tv([t], '상업') * 5 + tv([t], '교역'))));
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 * (1 + tv([d], '징병') + tv([d], '모병') / 2 + tv([d], '인덕') / 10) : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
       c.popMax = c.popMax || c.pop * 1.2;

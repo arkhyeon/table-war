@@ -1,7 +1,7 @@
 // ───────── 삼국지14식 모드: 도적·산적·비적·해적 — 아무 데서나 무리가 일어나 근처 성·부대를 들이받음 ─────────
 // 모두 하나의 「도적」 세력(나라 목록·외교·통일 계산에서는 빠짐)으로 묶음. 약탈은 안 하고 병사만 박살냄 — 부대를 전멸시키거나 성 수비병을 0으로 만들면 다음 표적으로
 import { T } from './rules.js';
-import { order, log, gensOf } from './hex14.js';
+import { order, log, gensOf, districtTiles, nearestCastle } from './hex14.js';
 import { fmtTroops, fmtGold } from './format.js';
 
 export const OUTLAW_KINDS = {
@@ -10,6 +10,9 @@ export const OUTLAW_KINDS = {
   비적: { mark: '비', desc: '사막·초원·변경을 떠도는 비적' },
   해적: { mark: '해', desc: '바다에서 해안을 터는 해적' },
 };
+// 무리 크기에 따른 우두머리 칭호
+export const rankOf = (troops) => (troops >= 15000 ? '총대장' : troops >= 10000 ? '대장' : troops >= 6000 ? '단장' : '두목');
+const KIND_TRAIT = { 도적: '돌격', 산적: '산악', 비적: '기마', 해적: '수군' };
 const BOSS = ['흑풍', '적미', '황건', '청룡', '독안', '철퇴', '야차', '귀면', '비호', '흑룡', '백랑', '혈수', '광풍', '철갑', '살귀', '흑호'];
 
 // 도적 세력 (없으면 만듦)
@@ -72,8 +75,10 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   const avg = owned.reduce((a, c) => a + c.troops, 0) / owned.length;
   const troops = Math.round(Math.max(4000, Math.min(20000, avg * (0.6 + rng() * 0.6))) / 1000) * 1000; // 꽤 아프게
   const gid = `out_${s.turn}_${spot}`;
-  const name = `${kind} 두목 ${BOSS[Math.floor(rng() * BOSS.length)]}`;
-  s.generals[gid] = { id: gid, name, war: 68 + Math.floor(rng() * 20), lead: 55 + Math.floor(rng() * 20), intel: 20 + Math.floor(rng() * 20), pol: 10 + Math.floor(rng() * 15), traits: [['맹장', 1]], nation: oid, castle: null, unit: null, status: 'active' };
+  const boss = BOSS[Math.floor(rng() * BOSS.length)];
+  const name = `${kind} ${rankOf(troops)} ${boss}`;
+  const tier = troops >= 15000 ? 3 : troops >= 10000 ? 2 : 1;
+  s.generals[gid] = { id: gid, name, war: 68 + Math.floor(rng() * 20), lead: 55 + Math.floor(rng() * 20), intel: 20 + Math.floor(rng() * 20), pol: 10 + Math.floor(rng() * 15), traits: [['맹장', tier], [KIND_TRAIT[kind], tier]], boss, kind, nation: oid, castle: null, unit: null, status: 'active' };
   const uid = s.nextUnit++;
   s.units.push({ id: uid, nation: oid, gens: [gid], troops, max: troops, morale: 90, tile: spot, path: [], order: null, mp: 0, home: null, wait: 0, cd: 0, navy: kind === '해적', ships: kind === '해적' || undefined, outlaw: kind, life: 5 + Math.floor(rng() * 5) });
   s.generals[gid].unit = uid;
@@ -83,29 +88,53 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   return true;
 }
 
-// 날마다: 6칸 안에서 가장 가까운 성(수비병 있는)이나 부대를 들이받음, 없으면 떠돎
+// 날마다: 6칸 안의 부대를 먼저 노리고(장수 우선), 없으면 가까운 성, 그것도 없으면 떠돎
 export function outlawDay(s, grid, rng) {
   const oid = s.outlawId;
   if (oid === undefined) return;
   for (const u of s.units) {
     if (u.nation !== oid || u.dead) continue;
+    const boss = gensOf(s, u.gens)[0];
+    if (boss?.boss) boss.name = `${boss.kind} ${rankOf(u.troops)} ${boss.boss}`; // 무리가 줄거나 늘면 칭호도 바뀜
     const o = u.order;
-    const alive = o && (o.kind === 'unit' ? s.units.some((x) => x.id === o.id && !x.dead) : o.kind === 'castle' ? !isOutlaw(s, s.castles[o.id]?.owner) && s.castles[o.id]?.troops > 0 : u.path.length > 0);
-    if (alive && u.path.length) continue;
+    const aliveUnit = o?.kind === 'unit' && s.units.some((x) => x.id === o.id && !x.dead);
+    if (aliveUnit && u.path.length) continue; // 부대를 쫓는 중이면 계속
+    // 가까운 부대 (성을 치러 가는 길에도 부대가 보이면 그쪽으로 돌아섬)
     let best = null, bd = Infinity;
     for (const x of s.units) { if (x.nation === oid || x.dead) continue; const d = grid.dist(x.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['unit', x.id]; } }
-    for (const c of s.castles) { if (c.owner === null || c.owner < 0 || isOutlaw(s, c.owner) || c.troops < 200) continue; const d = grid.dist(c.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['castle', c.id]; } }
     if (best && order(s, grid, u, best[0], best[1]).ok) continue;
-    // 떠돎: 4칸 안 아무 칸
+    const c0 = o?.kind === 'castle' ? s.castles[o.id] : null;
+    if (c0 && c0.owner !== null && c0.owner >= 0 && !isOutlaw(s, c0.owner) && u.path.length) continue; // 성으로 가는 중
+    if (o?.kind === 'tile' && u.path.length) continue; // 떠도는 중
+    bd = Infinity; best = null;
+    for (const c of s.castles) { if (c.owner === null || c.owner < 0 || isOutlaw(s, c.owner)) continue; const d = grid.dist(c.tile, u.tile); if (d <= 6 && d < bd) { bd = d; best = ['castle', c.id]; } }
+    if (best && order(s, grid, u, best[0], best[1]).ok) continue;
+    // 떠돎: 2칸 안 아무 칸
     for (let k = 0; k < 10; k++) { const t = grid.nb[u.tile][Math.floor(rng() * grid.nb[u.tile].length)]; const t2 = grid.nb[t]?.[Math.floor(rng() * 6)] ?? t; if (t2 !== undefined && (u.navy ? grid.water?.[t2] || grid.passable(t2) : grid.passable(t2)) && order(s, grid, u, 'tile', t2).ok) break; }
   }
 }
 
-// 도적이 성 수비병을 0으로 만들면: 차지하지도 털지도 않고 다음 먹잇감으로 감
+// 도적이 성을 깨면: 차지하지 않고 그 성은 주인 없는 중립 성이 됨 (수비병도 중립 성만큼 다시 모임), 도적은 다음 먹잇감으로
 export function outlawSack(s, grid, c, u) {
-  c.troops = 0;
+  const old = c.owner;
+  // 성에 있던 장수는 가까운 자기 성으로 피신, 갈 데가 없으면 재야로
+  c.owner = null;
+  const home = old !== null && old >= 0 ? nearestCastle(s, grid, c.tile, old) : null;
+  for (const g of Object.values(s.generals)) {
+    if (g.castle !== c.id || g.status !== 'active') continue;
+    if (home) g.castle = home.id; else if (!g.ruler) { g.status = 'free'; g.nation = null; }
+  }
+  c.bandit = null;
+  c.capital = false;
+  if (c.jobs) c.jobs = { farm: null, trade: null, draft: null };
+  c.troops = c.kind === 'pass' ? 3000 : Math.round(Math.min(45000, 18000 + (c.pop || 0) * 180) / 100) * 100;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);
+  const tiles = c.kind === 'pass' ? [c.tile, ...grid.nb[c.tile]] : districtTiles(s)[c.id] || [];
+  for (const t of tiles) if (s.owner[t] === old) s.owner[t] = -1;
+  s.owner[c.tile] = -1;
   u.order = null; u.path = [];
+  s.fx.push({ type: 'capture', tile: c.tile, text: `${c.name} 중립화` });
   s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.smash++;
-  log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}의 수비병을 모두 쓰러뜨리고 다음 먹잇감을 찾아 떠납니다.`, 'bad', [c.owner]);
+  log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}${old !== null && old >= 0 ? `(${s.nations[old]?.name})` : ''}을(를) 무너뜨렸습니다! 성은 주인 없는 땅이 되고, 도적은 다음 먹잇감을 찾아 떠납니다.`, 'bad', [old]);
+  return old;
 }

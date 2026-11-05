@@ -6,6 +6,7 @@ import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
+import { traitLabel, traitDesc } from '../game/traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
@@ -1305,7 +1306,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const Loyal = ({ g }) => (g.ruler ? null : <small style={{ color: loyalOf(g) < 40 ? 'var(--danger)' : 'var(--muted)', marginLeft: 2 }}>충{loyalOf(g)}</small>);
   // 능력치: 85 이상 금색, 95 이상 주황 굵게
   const St = ({ k, v }) => <span className={v >= 95 ? 'stat-top' : v >= 85 ? 'stat-high' : undefined}>{k}{v}</span>;
-  const Stats = ({ g, keys = ['war', 'lead', 'intel', 'pol'] }) => <span className="stats">{keys.map((k) => <St key={k} k={{ war: '무', lead: '통', intel: '지', pol: '정' }[k]} v={g[k]} />)}</span>;
+  // 특성: 이름+등급(Ⅰ~Ⅲ), 마우스를 올리면 효과
+  const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => <span key={tr[0]} className={`trait t${tr[1]}`} title={`${traitLabel(tr)}: ${traitDesc(tr[0], tr[1])}`}>{traitLabel(tr)}</span>)}</span> : null);
+  const Stats = ({ g, keys = ['war', 'lead', 'intel', 'pol'] }) => <span className="stats">{keys.map((k) => <St key={k} k={{ war: '무', lead: '통', intel: '지', pol: '정' }[k]} v={g[k]} />)}<Traits g={g} /></span>;
   // 지금 맡은 내정 (그 성 담당이면 배지)
   const jobOf = (g) => { const c = g.castle !== null && g.castle !== undefined ? game.castles[g.castle] : null; if (!c) return null; return Object.keys(ROLES).find((r) => jobGen(game, c, r)?.id === g.id) || null; };
   const JOB_ICON = { farm: '🌾', trade: '💰', draft: '💂' };
@@ -1477,7 +1480,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         const nx = e.target.checked ? [...pickG, g.id].slice(-3) : pickG.filter((x) => x !== g.id);
                         setPickG(nx);
                         setAmt(Math.max(0, Math.min(commandCap(game, nx), selCastle.troops - 500)));
-                      }} /> <Face g={g} col={me.color} /> {g.name}<Loyal g={g} /><Job g={g} /> <small className="muted"><Stats g={g} keys={['war', 'lead', 'intel']} />{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}{(g.traits || []).some(([t]) => t === '기마') ? ' · 기마' : ''}</small>
+                      }} /> <Face g={g} col={me.color} /> {g.name}<Loyal g={g} /><Job g={g} /> <small className="muted"><Stats g={g} keys={['war', 'lead', 'intel']} />{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}</small>
                     </label>
                   ))}
                   <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(Math.min(amt, maxAmt))} / 지휘 한도 {fmtTroops(cap)}</div>
@@ -1566,6 +1569,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <span>사기 (파란 막대)</span><span>{Math.round(selUnit.morale)} <small className="muted">5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일</small></span>
               <span>공·방</span><span>{Math.round(st.atk)} · {Math.round(st.def)}{selUnit.siege ? ' · ⚙️ 공성병기' : ''}</span>
               <span>전법</span><span>{gs.map(tacticName).filter(Boolean).join(', ') || '없음'}</span>
+              <span>특성</span><span>{gs.flatMap((g) => g.traits || []).length ? gs.map((g) => <Traits key={g.id} g={g} />) : '없음'}</span>
               <span>보급</span><span style={{ color: selUnit.cut ? 'var(--danger)' : undefined }}>{selUnit.cut ? '끊김 (병력·사기 감소)' : '이어짐'}</span>
               <span>목표</span><span>{tgt}{days ? ` (약 ${days}일)` : ''}</span>
               {selUnit.queue?.length > 0 && <><span>경유지</span><span>{selUnit.queue.map((q, i) => `${i + 1}. ${q.kind === 'castle' ? (game.castles[q.id]?.owner === selUnit.nation ? `${game.castles[q.id]?.name} 입성` : `${game.castles[q.id]?.name} 공략`) : q.kind === 'unit' ? `${gensOf(game, game.units.find((x) => x.id === q.id)?.gens || [])[0]?.name || '적'} 부대 공격` : q.kind === 'fort' ? '시설 파괴' : '이동'}`).join(' → ')} <small className="muted">(최대 8개 · 목표가 사라지면 다음으로)</small></span></>}
@@ -1829,7 +1833,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
-                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(4천~2만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 두목이 병사를 이끌고 다니며 병사만 박살냅니다 — 금·병량은 안 뺏고 성도 차지하지 않아요. 부대를 전멸시키거나 성 수비병을 0으로 만들면 다음 표적을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 5~9순 지나거나 1천 아래로 줄면 흩어집니다.</li>
+                <li>🎖️ 장수 특성: 장수 이름 옆 작은 꼬리표(예: 맹장Ⅱ)가 특성이에요. 마우스를 올리면 효과가 나옵니다. 명장·맹장·책략은 공격·방어, 기마는 평원·사막, 산악은 산·구릉, 돌격은 병력이 적을 때, 위압은 적 방어를 깎고, 수성·궁술·철벽·축성은 성을 지킬 때, 공성은 성벽을 더 깎고, 추격은 적장을 더 잘 사로잡아요. 농정·정치·상업은 농업·상업 담당, 징병·모병은 징병 담당일 때 더 잘합니다. 등급이 높을수록 셉니다.</li>
+                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(4천~2만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 5~9순 지나거나 1천 아래로 줄면 흩어집니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>
                 <li>🏳️ 패주: 사기가 꺾인 부대는 가까운 내 성으로 걸어서 물러납니다. 물러나는 동안은 싸우지 않고 받는 피해가 30% 늘어 쫓아가면 잡을 수 있습니다.</li>

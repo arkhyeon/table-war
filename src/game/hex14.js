@@ -8,10 +8,11 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { PLACES, placeExists, placeName } from './places.js';
-import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall, ensureTraits } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
+import { tv, MIL, CIV } from './traits.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -485,7 +486,7 @@ export function createHex14(world, base) {
     mode: 'hex14', version: 14, scenarioId: base.scenarioId, seed: base.seed, opts: base.opts, playerId: base.playerId, spectator: base.spectator,
     startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
-  initGov(st, makeRng(`gov0:${base.seed}`));
+  initGov(st, makeRng(`gov0:${base.seed}`)); ensureTraits(st);
   rollWeather(st);
   // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
   st.kmScale = Math.min(2, 30 / kmOf(getScenario(base.scenarioId)));
@@ -531,7 +532,9 @@ export const unitStats = (s, u) => {
   const best = (k) => (gs.length ? Math.max(...gs.map((g) => g[k])) : 30); // 대장을 잃은 부대는 약함
   // 부장 보좌: 부장 하나마다 공격·방어 +12% (둘까지) — 둘이 따로 나가 협공하는 것과 비슷하게
   const aid = 1 + 0.12 * Math.min(2, Math.max(0, gs.length - 1));
-  return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid, intel: best('intel') };
+  // 특성: 명장·맹장 공격↑, 책략 공격·방어↑
+  const ta = 1 + tv(gs, '명장') + tv(gs, '맹장') + tv(gs, '책략'), td = 1 + tv(gs, '책략');
+  return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid * ta, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid * td, intel: best('intel') };
 };
 // 장수 부르기: 다른 내 성의 장수가 병력을 이끌고 이 성으로 행군해 옴
 export function summonGeneral(s, grid, gid, toCid, troops) {
@@ -888,7 +891,11 @@ export function stepDay(s, grid) {
     const a = unitStats(s, u), d = unitStats(s, tgt);
     // 물 위에서는 수군 장수가 없으면 약함
     const sea = (x) => (grid.sea[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
-    let dmg = (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
+    const ug = gensOf(s, u.gens), tr = grid.terrain[tgt.tile];
+    // 지형·상황 특성: 기마(평원·사막·동토), 산악(산·구릉), 돌격(병력 열세), 위압(적 방어↓), 화공(맑은 날 숲·구릉)
+    const tb = 1 + (tr === T.PLAINS || tr === T.DESERT || tr === T.TUNDRA ? tv(ug, '기마') : 0) + (tr === T.MOUNTAIN || tr === T.HILLS ? tv(ug, '산악') : 0)
+      + (u.troops < tgt.troops ? tv(ug, '돌격') : 0) + tv(ug, '위압') + (tr === T.DESERT ? tv(ug, '사막') : 0) + ((tr === T.FOREST || tr === T.HILLS) && fireMult(s) > 1 ? tv(ug, '화공') : 0);
+    let dmg = tb * (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
     maybeDuel(s, u, tgt, rng);
     // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
@@ -965,12 +972,16 @@ export function stepDay(s, grid) {
     const sea = grid.sea[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
     a.atk *= sea;
     // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
-    const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1);
+    const ug = gensOf(s, u.gens);
+    // 성을 지키는 장수의 특성: 수성·궁술 방어↑, 철벽 피해↓, 축성 성벽↑ / 공격 쪽 공성은 성벽을 더 깎음
+    const cg = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active' && g.nation === c.owner);
+    const guardT = 1 + tv(cg, '수성') + tv(cg, '궁술') + tv(cg, '철벽');
+    const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1) * (1 + tv(ug, '공성') * 0.25) / (1 + tv(cg, '축성'));
     c.dur = Math.max(0, c.dur - wall);
     // 약소국은 결사 항전: 수비병 피해 −15%
-    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1);
+    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
-    u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1);
+    u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + tv(cg, '궁술') * 2) * (1 - tv(ug, '노련') * 0.5);
     u.morale -= walled ? 0.5 : 0;
     s.fx.push({ type: 'clash', a: u.tile, b: c.tile }, { type: 'hit', tile: c.tile, amt: Math.round(kill), wall: walled });
     if (c.troops <= 0) capture(s, grid, c, u);
@@ -1004,7 +1015,7 @@ export function stepDay(s, grid) {
     for (const g of gensOf(s, u.gens)) {
       g.unit = null;
       if (s.nations[u.nation]?.outlaw) { g.status = 'gone'; continue; } // 도적 두목은 사로잡지 않음 (그냥 죽음)
-      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4)) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
+      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + tv(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
     if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; }
@@ -1066,7 +1077,7 @@ export function supplyMap(s, grid, nation) {
 
 // 성 함락: 그 지역 땅이 통째로 넘어감, 공격 부대는 성에 들어감
 function capture(s, grid, c, u) {
-  if (s.nations[u.nation]?.outlaw) { outlawSack(s, grid, c, u); return; } // 도적은 성을 차지하지 않음
+  if (s.nations[u.nation]?.outlaw) { checkFall(s, outlawSack(s, grid, c, u)); return; } // 도적은 성을 차지하지 않음 — 중립 성이 됨
   const old = c.owner;
   c.owner = u.nation;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);

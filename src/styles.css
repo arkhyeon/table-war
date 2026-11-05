@@ -477,7 +477,7 @@ tr.clickable:hover, tr.sel { background: var(--panel3); }
 .gen-row img { margin: 0 !important; }
 .gen-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; min-width: 0; }
 .gen-main b { white-space: nowrap; }
-.gen-main .stats { font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; white-space: nowrap; }
+.gen-main .stats { font-size: 11px; color: var(--muted); display: inline-flex; gap: 4px; white-space: nowrap; flex-wrap: wrap; }
 .gen-tags { display: flex; gap: 4px; align-items: center; white-space: nowrap; }
 .job-badge { white-space: nowrap; }
 .gen-row button.xs { padding: 2px 6px; }
@@ -538,3 +538,9 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .boot-loading .spinner { width: 46px; height: 46px; }
 .map-busy { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 8; background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line2); border-radius: 12px; padding: 6px 12px; font-size: 12px; pointer-events: none; display: flex; gap: 8px; align-items: center; }
 .map-busy .spinner { width: 14px; height: 14px; border-width: 2px; }
+/* 장수 특성 꼬리표 */
+.traits { display: inline-flex; gap: 3px; flex-wrap: wrap; margin-left: 5px; vertical-align: middle; }
+.stats > .traits { margin-left: 6px; }
+.trait { font-size: 10px; line-height: 1; padding: 2px 4px; border-radius: 4px; background: rgba(140, 160, 200, 0.18); color: #b9c8e6; border: 1px solid rgba(140, 160, 200, 0.35); white-space: nowrap; cursor: help; }
+.trait.t2 { background: rgba(240, 194, 75, 0.16); color: #f0c24b; border-color: rgba(240, 194, 75, 0.45); }
+.trait.t3 { background: rgba(255, 140, 60, 0.18); color: #ff9a4d; border-color: rgba(255, 140, 60, 0.55); font-weight: 700; }
