@@ -11,6 +11,7 @@ import { PLACES, placeExists, placeName } from './places.js';
 import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
+import { outlawTurn, outlawDay, outlawSack, outlawRaid } from './hex14outlaw.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -818,6 +819,7 @@ export function encloseLand(s, grid) {
 export const ORPHAN_DAYS = 30;
 
 export function stepDay(s, grid) {
+  outlawDay(s, grid, makeRng(`outlawd:${s.seed}:${s.turn}:${s.day}`));
   s.day += 1;
   encloseLand(s, grid);
   s.fx = [];
@@ -974,10 +976,12 @@ export function stepDay(s, grid) {
     if (c.troops <= 0) capture(s, grid, c, u);
   }
   fortsDay(s, grid);
+  outlawRaid(s, grid);
   // 4) 보급: 내 성과 내 땅으로 이어져 있지 않으면 병력·사기가 줄어듦
   const supplied = {};
   for (const u of s.units) {
     if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
+    if (u.outlaw) { u.cut = false; continue; } // 도적은 보급이 없어도 버팀 (대신 몇 순 뒤 흩어짐)
     if (!grid.sea[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.995; u.morale -= 1; u.cut = true; continue; } // 보급이 끊기면 병력·사기가 천천히 줄어듦
     u.cut = false;
     // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
@@ -1061,6 +1065,7 @@ export function supplyMap(s, grid, nation) {
 
 // 성 함락: 그 지역 땅이 통째로 넘어감, 공격 부대는 성에 들어감
 function capture(s, grid, c, u) {
+  if (s.nations[u.nation]?.outlaw) { outlawSack(s, grid, c, u); return; } // 도적은 성을 차지하지 않고 약탈
   const old = c.owner;
   c.owner = u.nation;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);
@@ -1133,7 +1138,7 @@ export function checkRulers(s) {
 function checkFall(s, nid) {
   if (nid === null || nid === -1 || nid === undefined) return;
   const n = s.nations[nid];
-  if (!n.alive || s.castles.some((c) => c.owner === nid)) return;
+  if (!n.alive || n.outlaw || s.castles.some((c) => c.owner === nid)) return;
   n.alive = false;
   for (const u of s.units) if (u.nation === nid) u.dead = true;
   for (const g of Object.values(s.generals)) if (g.nation === nid && g.status === 'active') { g.status = 'gone'; g.castle = null; }
@@ -1147,6 +1152,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  outlawTurn(s, grid, makeRng(`outlaw:${s.seed}:${s.turn}`));
   for (const c of s.castles) { const over = c.troops - capOf(c, s); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c, s))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
   checkRulers(s);
   buildTurn(s, grid, redistrict);

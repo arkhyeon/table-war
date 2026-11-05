@@ -851,7 +851,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillStyle = '#fff';
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.lineWidth = sz * 0.16;
-      const mark = n.name[0];
+      const mark = u.outlaw ? ({ 도적: '도', 산적: '산', 비적: '비', 해적: '해' })[u.outlaw] || '도' : n.name[0];
       ctx.strokeText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
       ctx.fillText(mark, fx0 + fw / 2, top + fh * 0.75 + wave / 2);
       // 물 위면 배
@@ -1184,7 +1184,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const s = clone(game);
     const startN = s.logN || 0;
     if (s.day === 0) {
-      for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id);
+      for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) aiTurn14(s, grid, n.id);
       if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
       else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id });
     }
@@ -1212,7 +1212,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
       // 하루마다 컴퓨터도 군사 판단 (내정·외교는 순 첫날에만)
       if (s.day > 0) {
-        for (const n of s.nations) if (n.alive && n.id !== pid) aiTurn14(s, grid, n.id, null, true);
+        for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) aiTurn14(s, grid, n.id, null, true);
         if (s.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid, null, true);
         else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, true);
       }
@@ -1715,7 +1715,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   </div>
                 );
               })()}
-              {game.nations.filter((n) => n.alive && n.id !== pid).sort((a, b) => powerOf(game, b.id) - powerOf(game, a.id)).map((n) => {
+              {game.nations.filter((n) => n.alive && !n.horde && n.id !== pid).sort((a, b) => powerOf(game, b.id) - powerOf(game, a.id)).map((n) => {
                 const p = pactOf(game, pid, n.id), r = Math.round(relOf(game, pid, n.id));
                 return (
                   <div key={n.id} style={{ borderBottom: '1px solid var(--line)', padding: '6px 0' }}>
@@ -1829,6 +1829,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
+                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(4천~2만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 성에 붙어 있는 동안 매일 금·병량을 털고 수비병을 죽이며 땅을 휩쓸고, 수비병을 0으로 만들면 크게 약탈하고 떠납니다(성을 차지하지는 않음). 5~9순 지나거나 1천 아래로 줄면 흩어집니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>
                 <li>🏳️ 패주: 사기가 꺾인 부대는 가까운 내 성으로 걸어서 물러납니다. 물러나는 동안은 싸우지 않고 받는 피해가 30% 늘어 쫓아가면 잡을 수 있습니다.</li>
