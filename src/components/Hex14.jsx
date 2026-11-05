@@ -220,46 +220,93 @@ function paintTerrain(grid, world, chunk = null) {
   const order = [];
   each((i) => { if ([2, 3, 6, 7].includes(grid.terrain[i])) order.push(i); });
   order.sort((a, b) => grid.center(a)[1] - grid.center(b)[1]);
-  const peak = (x, y, w, h, snow) => {
-    const apx = x + (hash(Math.round(x * 7), 1) - 0.5) * w * 0.3;
-    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w * 0.15, y); ctx.closePath();
-    ctx.fillStyle = snow ? '#a89a8a' : '#b49a74'; ctx.fill();
-    ctx.beginPath(); ctx.moveTo(x + w * 0.15, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w, y); ctx.closePath();
-    ctx.fillStyle = snow ? '#6d6258' : '#7a6248'; ctx.fill();
-    if (snow) { ctx.beginPath(); ctx.moveTo(apx, y - h); ctx.lineTo(apx - w * 0.32, y - h * 0.62); ctx.lineTo(apx - w * 0.05, y - h * 0.7); ctx.lineTo(apx + w * 0.12, y - h * 0.58); ctx.lineTo(apx + w * 0.3, y - h * 0.66); ctx.closePath(); ctx.fillStyle = '#f4f6f8'; ctx.fill(); }
-    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.lineTo(apx, y - h); ctx.lineTo(x + w, y);
-    ctx.strokeStyle = 'rgba(45,32,20,0.75)'; ctx.lineWidth = sz * 0.07; ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(apx, y - h); ctx.lineTo(x + w * 0.15, y); ctx.strokeStyle = 'rgba(45,32,20,0.35)'; ctx.lineWidth = sz * 0.05; ctx.stroke();
+  // ── 지형 그림 (수채화풍): 빛은 북서쪽에서 — 밝은 면은 따뜻하게, 그림자 면은 차갑게 ──
+  const shadowBlob = (x, y, w, h, a = 0.22) => { ctx.beginPath(); ctx.ellipse(x + w * 0.12, y + h * 0.15, w, h, 0, 0, 7); ctx.fillStyle = `rgba(30,25,20,${a})`; ctx.fill(); };
+  // 산: 봉우리 + 능선 + 바위 결 + (높으면) 눈
+  const peak = (x, y, w, h, snow, seed) => {
+    const r = (k) => hash(seed, k);
+    const apx = x + (r(1) - 0.5) * w * 0.35, apy = y - h;
+    const sx = x + w * (0.05 + r(2) * 0.15); // 능선이 내려오는 자리
+    shadowBlob(x, y, w * 1.05, h * 0.12, 0.25);
+    // 밝은 면
+    let g = ctx.createLinearGradient(x - w, apy, sx, y);
+    g.addColorStop(0, snow ? '#d9d2c4' : '#d8bf92'); g.addColorStop(1, snow ? '#a59a8a' : '#b29468');
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x - w * 0.55, y - h * 0.45, apx, apy); ctx.lineTo(sx, y); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    // 그림자 면
+    g = ctx.createLinearGradient(apx, apy, x + w, y);
+    g.addColorStop(0, snow ? '#7d7887' : '#86694c'); g.addColorStop(1, snow ? '#575466' : '#5f4a37');
+    ctx.beginPath(); ctx.moveTo(sx, y); ctx.lineTo(apx, apy); ctx.quadraticCurveTo(x + w * 0.6, y - h * 0.4, x + w, y); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    // 바위 결 (그림자 면에 짧은 사선)
+    ctx.strokeStyle = 'rgba(40,28,20,0.35)'; ctx.lineWidth = sz * 0.04;
+    for (let k = 0; k < 3; k++) { const f = 0.3 + k * 0.2; const px = apx + (x + w - apx) * f * 0.6, py = apy + (y - apy) * f; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + w * 0.18, py + h * 0.16); ctx.stroke(); }
+    // 눈 덮인 꼭대기
+    if (snow || h > sz * 1.45) {
+      const sh = h * (snow ? 0.42 : 0.24);
+      ctx.beginPath(); ctx.moveTo(apx, apy);
+      ctx.lineTo(apx - w * 0.36 * (sh / h) * 2, apy + sh); ctx.lineTo(apx - w * 0.12, apy + sh * 0.72); ctx.lineTo(apx + w * 0.05, apy + sh * 0.95); ctx.lineTo(apx + w * 0.2, apy + sh * 0.7); ctx.lineTo(apx + w * 0.36 * (sh / h) * 2, apy + sh); ctx.closePath();
+      ctx.fillStyle = '#f7f9fb'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(apx, apy); ctx.lineTo(apx + w * 0.05, apy + sh * 0.95); ctx.lineTo(apx + w * 0.2, apy + sh * 0.7); ctx.lineTo(apx + w * 0.36 * (sh / h) * 2, apy + sh); ctx.closePath(); ctx.fillStyle = '#c9d3e0'; ctx.fill();
+    }
+    // 윤곽
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x - w * 0.55, y - h * 0.45, apx, apy); ctx.quadraticCurveTo(x + w * 0.6, y - h * 0.4, x + w, y);
+    ctx.strokeStyle = 'rgba(45,32,22,0.7)'; ctx.lineWidth = sz * 0.06; ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(apx, apy); ctx.lineTo(sx, y); ctx.strokeStyle = 'rgba(45,32,22,0.3)'; ctx.lineWidth = sz * 0.04; ctx.stroke();
   };
-  const tree = (x, y, h) => {
-    ctx.fillStyle = '#5a4026'; ctx.fillRect(x - h * 0.07, y - h * 0.25, h * 0.14, h * 0.28);
-    for (const [yy, ww] of [[0.25, 0.42], [0.55, 0.32]]) {
-      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.55)); ctx.lineTo(x + h * ww, y - h * yy); ctx.closePath();
-      ctx.fillStyle = '#2f6a35'; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.55)); ctx.lineTo(x, y - h * yy); ctx.closePath();
-      ctx.fillStyle = '#4c9149'; ctx.fill();
+  // 침엽수 (북쪽·산지)
+  const pine = (x, y, h, seed) => {
+    shadowBlob(x, y, h * 0.32, h * 0.09, 0.22);
+    ctx.fillStyle = '#5a4026'; ctx.fillRect(x - h * 0.05, y - h * 0.18, h * 0.1, h * 0.2);
+    const tiers = [[0.18, 0.4], [0.45, 0.31], [0.7, 0.22]];
+    for (const [yy, ww] of tiers) {
+      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.42)); ctx.lineTo(x + h * ww, y - h * yy); ctx.closePath();
+      ctx.fillStyle = '#2d5e36'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - h * ww, y - h * yy); ctx.lineTo(x, y - h * (yy + 0.42)); ctx.lineTo(x - h * ww * 0.1, y - h * yy); ctx.closePath();
+      ctx.fillStyle = '#4f8f4a'; ctx.fill();
     }
   };
-  const mound = (x, y, w, h) => {
-    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI, 0); ctx.closePath();
-    ctx.fillStyle = '#c4a674'; ctx.fill();
-    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI * 1.5, 0); ctx.lineTo(x, y); ctx.closePath();
-    ctx.fillStyle = '#a3845a'; ctx.fill();
-    ctx.beginPath(); ctx.ellipse(x, y, w, h, 0, Math.PI, 0); ctx.strokeStyle = 'rgba(60,40,20,0.55)'; ctx.lineWidth = sz * 0.06; ctx.stroke();
+  // 활엽수 (둥근 수관 + 빛)
+  const leafy = (x, y, h, seed) => {
+    const r = (k) => hash(seed, k);
+    shadowBlob(x, y, h * 0.42, h * 0.11, 0.24);
+    ctx.fillStyle = '#5d4128'; ctx.fillRect(x - h * 0.05, y - h * 0.3, h * 0.1, h * 0.32);
+    const base = ['#3f7a3a', '#4a8540', '#56893b', '#3c7246'][Math.floor(r(1) * 4)];
+    const cy0 = y - h * 0.55;
+    for (const [dx, dy, rr] of [[-0.18, 0.05, 0.27], [0.18, 0.06, 0.26], [0, -0.12, 0.32]]) {
+      ctx.beginPath(); ctx.arc(x + dx * h, cy0 + dy * h, rr * h, 0, 7); ctx.fillStyle = base; ctx.fill();
+    }
+    const g = ctx.createRadialGradient(x - h * 0.15, cy0 - h * 0.2, h * 0.02, x, cy0, h * 0.45);
+    g.addColorStop(0, 'rgba(210,240,150,0.55)'); g.addColorStop(1, 'rgba(210,240,150,0)');
+    ctx.beginPath(); ctx.arc(x, cy0 - h * 0.04, h * 0.38, 0, 7); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.arc(x + h * 0.1, cy0 + h * 0.08, h * 0.3, 0.1, 2.2); ctx.strokeStyle = 'rgba(20,45,20,0.35)'; ctx.lineWidth = sz * 0.04; ctx.stroke();
+  };
+  // 구릉: 둥근 언덕 + 빛 + 풀 포기
+  const mound = (x, y, w, h, seed) => {
+    shadowBlob(x, y, w * 0.95, h * 0.18, 0.2);
+    const g = ctx.createLinearGradient(x - w, y - h, x + w * 0.6, y);
+    g.addColorStop(0, '#dcc591'); g.addColorStop(0.55, '#bf9f68'); g.addColorStop(1, '#94764c');
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.bezierCurveTo(x - w * 0.6, y - h * 1.05, x + w * 0.5, y - h * 1.05, x + w, y); ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x - w, y); ctx.bezierCurveTo(x - w * 0.6, y - h * 1.05, x + w * 0.5, y - h * 1.05, x + w, y); ctx.strokeStyle = 'rgba(70,50,28,0.5)'; ctx.lineWidth = sz * 0.05; ctx.stroke();
+    ctx.strokeStyle = 'rgba(90,120,50,0.6)'; ctx.lineWidth = sz * 0.035;
+    for (let k = 0; k < 2; k++) { const gx = x - w * 0.3 + hash(seed, 40 + k) * w * 0.6, gy = y - h * (0.35 + hash(seed, 50 + k) * 0.3); ctx.beginPath(); ctx.moveTo(gx - sz * 0.05, gy); ctx.lineTo(gx - sz * 0.02, gy - sz * 0.12); ctx.moveTo(gx + sz * 0.04, gy); ctx.lineTo(gx + sz * 0.05, gy - sz * 0.13); ctx.stroke(); }
   };
   for (const i of order) {
     const t = grid.terrain[i];
     const [cx, cy] = grid.center(i);
     const j = (k) => (hash(i, k) - 0.5) * sz;
-    if (t === 7) { peak(cx + j(1) * 0.3, cy + sz * 0.55, sz * 1.15, sz * (1.9 + hash(i, 2) * 0.5), true); }
+    if (t === 7) { peak(cx + j(1) * 0.3, cy + sz * 0.55, sz * 1.15, sz * (1.9 + hash(i, 2) * 0.5), true, i); }
     else if (t === 6) {
-      peak(cx - sz * 0.35 + j(3) * 0.2, cy + sz * 0.3, sz * 0.75, sz * (1.1 + hash(i, 4) * 0.4), false);
-      peak(cx + sz * 0.35 + j(5) * 0.2, cy + sz * 0.6, sz * 0.8, sz * (1.2 + hash(i, 6) * 0.4), false);
+      peak(cx - sz * 0.35 + j(3) * 0.2, cy + sz * 0.3, sz * 0.75, sz * (1.1 + hash(i, 4) * 0.45), false, i * 3 + 1);
+      peak(cx + sz * 0.35 + j(5) * 0.2, cy + sz * 0.6, sz * 0.8, sz * (1.2 + hash(i, 6) * 0.45), false, i * 3 + 2);
     } else if (t === 3) {
-      mound(cx - sz * 0.3 + j(7) * 0.2, cy + sz * 0.2, sz * 0.55, sz * 0.45);
-      mound(cx + sz * 0.3 + j(8) * 0.2, cy + sz * 0.5, sz * 0.6, sz * 0.5);
+      mound(cx - sz * 0.3 + j(7) * 0.2, cy + sz * 0.2, sz * 0.55, sz * 0.45, i * 2);
+      mound(cx + sz * 0.3 + j(8) * 0.2, cy + sz * 0.5, sz * 0.6, sz * 0.5, i * 2 + 1);
     } else if (t === 2) {
-      for (let k = 0; k < 4; k++) tree(cx + (hash(i, 11 + k) - 0.5) * sz * 1.3, cy + (hash(i, 21 + k) - 0.3) * sz * 0.9, sz * (0.75 + hash(i, 31 + k) * 0.3));
+      // 북쪽(지도 위쪽)이나 산 옆은 침엽수, 남쪽은 활엽수 많게
+      const north = cy / grid.H < 0.35 || grid.nb[i].some((n) => grid.terrain[n] === 6 || grid.terrain[n] === 7);
+      const pts = [];
+      for (let k = 0; k < 5; k++) pts.push([cx + (hash(i, 11 + k) - 0.5) * sz * 1.4, cy + (hash(i, 21 + k) - 0.3) * sz * 0.95, sz * (0.7 + hash(i, 31 + k) * 0.32), hash(i, 41 + k)]);
+      pts.sort((a, b) => a[1] - b[1]);
+      for (const [x, y, h, rr] of pts) (rr < (north ? 0.75 : 0.25) ? pine : leafy)(x, y, h, i * 7 + Math.round(rr * 100));
     }
   }
   // 외지: 무대 밖 땅은 회색으로 흐리게 (지나갈 수 없음)
@@ -282,7 +329,7 @@ function drawOwnerTiles(grid, s, ctx, tiles) {
     if (!byColor.has(col)) byColor.set(col, []);
     byColor.get(col).push(i);
   }
-  ctx.globalAlpha = 0.34;
+  ctx.globalAlpha = 0.24; // 영토 색은 옅게 (지형 그림이 비쳐 보이게)
   for (const [col, list] of byColor) {
     ctx.beginPath();
     for (const i of list) { const [cx, cy] = grid.center(i); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); }

@@ -447,7 +447,7 @@ export function createHex14(world, base) {
     else {
       c.pop = picks[c.id].pop ?? Math.round(Math.min(130, 25 + c.pop * 0.35));
       if (c.capital) c.pop += 15;
-      if (c.owner === null) c.troops = Math.round(Math.min(30000, Math.max(c.troops, 12000 + c.pop * 120)) / 100) * 100; // 빈 성(중립): 인구에 따라 1.2만~3만
+      if (c.owner === null) c.troops = Math.round(Math.min(45000, Math.max(c.troops, 18000 + c.pop * 180)) / 100) * 100; // 빈 성(중립): 인구에 따라 1.8만~4.5만
       else c.troops = Math.max(c.troops, c.capital ? 8000 : 3000); // 지역 병력이 다른 성으로 모여 빈 성이 되지 않게
     }
   }
