@@ -44,9 +44,15 @@ function seamFix(grid, cv, sc) {
 }
 
 // ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
-function paintTerrain(grid, world) {
-  const sc = mapScale(grid);
-  const [cv, ctx] = newLayer(grid, sc);
+// chunk가 있으면: 그 사각형(지도 좌표)만, 주어진 배율로 새로 그림 (확대했을 때 흐려지지 않게)
+function paintTerrain(grid, world, chunk = null) {
+  const sc = chunk ? chunk.sc : mapScale(grid);
+  const layer = () => { if (!chunk) return newLayer(grid, sc); const c2 = document.createElement('canvas'); c2.width = Math.ceil(chunk.w * sc); c2.height = Math.ceil(chunk.h * sc); const x = c2.getContext('2d'); x.scale(sc, sc); x.translate(-chunk.x, -chunk.y); return [c2, x]; };
+  const [cv, ctx] = layer();
+  const m = grid.size * 3;
+  const TILES = chunk ? (() => { const out = []; for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); if (x > chunk.x - m && x < chunk.x + chunk.w + m && y > chunk.y - m && y < chunk.y + chunk.h + m) out.push(i); } return out; })() : null;
+  const ALL = { [Symbol.iterator]: function* () { for (let i = 0; i < grid.N; i++) yield i; } };
+  const each = (fn) => { if (TILES) for (const i of TILES) fn(i); else for (let i = 0; i < grid.N; i++) fn(i); };
   const sz = grid.size;
   const hexPath = (i, k = 1) => {
     const [cx, cy] = grid.center(i);
@@ -60,7 +66,7 @@ function paintTerrain(grid, world) {
   // 둥근 세계 지도: 북극 얼음 띠 바탕을 먼저 깔아 칸 사이 틈(지그재그)이 바다색 점선으로 보이지 않게
   if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 2); }
   const isLand = (i) => i !== undefined && grid.terrain[i] !== 0;
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of (TILES || ALL)) {
     if (grid.terrain[i] !== 0) continue;
     const near = grid.nb[i].some(isLand), near2 = near || grid.nb[i].some((j) => grid.nb[j].some(isLand));
     if (!near2) continue;
@@ -71,7 +77,7 @@ function paintTerrain(grid, world) {
   // 물결
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = sz * 0.07;
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of (TILES || ALL)) {
     if (grid.terrain[i] !== 0 || hash(i, 1) > 0.18) continue;
     const [cx, cy] = grid.center(i);
     const x = cx + (hash(i, 2) - 0.5) * sz, y = cy + (hash(i, 3) - 0.5) * sz;
@@ -80,7 +86,7 @@ function paintTerrain(grid, world) {
   // 세계 지도 북쪽 끝: 북극 바다는 얼음(해빙)으로 — 지도가 잘린 게 아니라 얼어붙은 바다로 보이게
   const bb = getScenario(world.scenarioId)?.bbox;
   if (bb && bb[2] - bb[0] >= 359) {
-    for (let i = 0; i < grid.N; i++) {
+    for (const i of (TILES || ALL)) {
       if (grid.terrain[i] !== 0) continue;
       const c = i % grid.cols;
       const edge = grid.ice[i] && grid.nb[i].some((j) => !grid.ice[j]);
@@ -95,14 +101,14 @@ function paintTerrain(grid, world) {
     }
   }
   // 모래톱: 바다와 맞닿은 땅
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of (TILES || ALL)) {
     if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue;
     hexPath(i, 1.18);
     ctx.fillStyle = grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8'; // 동토 해안은 모래 대신 회색 자갈
     ctx.fill();
   }
   // 땅 바탕: 지형 색에 칸마다 살짝 다른 밝기
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of (TILES || ALL)) {
     const t = grid.terrain[i];
     if (t === 0) continue;
     hexPath(i, 1.04);
@@ -110,7 +116,7 @@ function paintTerrain(grid, world) {
     ctx.fill();
   }
   // 풀·모래 무늬
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of (TILES || ALL)) {
     const t = grid.terrain[i];
     const [cx, cy] = grid.center(i);
     if (t === 1) {
@@ -147,11 +153,11 @@ function paintTerrain(grid, world) {
   // 칸 테두리 (아주 옅게)
   ctx.strokeStyle = 'rgba(0,0,0,0.07)';
   ctx.lineWidth = sz * 0.05;
-  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) { hexPath(i, 0.98); ctx.stroke(); }
+  for (const i of (TILES || ALL)) if (grid.passable(i)) { hexPath(i, 0.98); ctx.stroke(); }
   // 강: 실제 강줄기를 부드럽게 (짙은 테두리 + 밝은 물빛)
   const rivers = (world.rivers || []).filter((r) => r.pts?.length > 1);
   // 강은 영토 색에 덮이지 않게 따로 한 장에 그림
-  const [rcv, rctx] = newLayer(grid, sc);
+  const [rcv, rctx] = layer();
   {
     const ctx = rctx;
     const curveR = (pts) => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let k = 1; k < pts.length - 1; k++) { const mx = (pts[k][0] + pts[k + 1][0]) / 2, my = (pts[k][1] + pts[k + 1][1]) / 2; ctx.quadraticCurveTo(pts[k][0], pts[k][1], mx, my); } const l = pts[pts.length - 1]; ctx.lineTo(l[0], l[1]); };
@@ -165,7 +171,7 @@ function paintTerrain(grid, world) {
   }
   // 산·구릉·숲: 위에서부터 차례로 그려야 앞의 것이 뒤를 가림
   const order = [];
-  for (let i = 0; i < grid.N; i++) if ([2, 3, 6, 7].includes(grid.terrain[i])) order.push(i);
+  each((i) => { if ([2, 3, 6, 7].includes(grid.terrain[i])) order.push(i); });
   order.sort((a, b) => grid.center(a)[1] - grid.center(b)[1]);
   const peak = (x, y, w, h, snow) => {
     const apx = x + (hash(Math.round(x * 7), 1) - 0.5) * w * 0.3;
@@ -212,9 +218,9 @@ function paintTerrain(grid, world) {
   // 외지: 무대 밖 땅은 회색으로 흐리게 (지나갈 수 없음)
   if (grid.outside) {
     ctx.fillStyle = 'rgba(110,110,120,0.55)';
-    for (let i = 0; i < grid.N; i++) if (grid.outside[i]) { hexPath(i, 1.02); ctx.fill(); }
+    for (const i of (TILES || ALL)) if (grid.outside[i]) { hexPath(i, 1.02); ctx.fill(); }
   }
-  seamFix(grid, cv, sc); seamFix(grid, rcv, sc);
+  if (!chunk) { seamFix(grid, cv, sc); seamFix(grid, rcv, sc); }
   return { cv, rcv, sc };
 }
 
@@ -446,6 +452,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (land.current.ref !== s.owner) {
       const prev = land.current.prev;
       const dPrev = land.current.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
+      land.current.ownVer = (land.current.ownVer || 0) + 1;
       if (!prev || !dSame || !land.current.over) { land.current.over = paintOwners(grid, s, land.current.base.sc); }
       else {
         const changed = [];
@@ -467,6 +474,30 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#3f7598';
     ctx.fillRect(0, 0, cw, ch);
+    // 선명한 조각 관리: 확대 배율이 바탕 그림보다 1.6배 넘게 크면, 멈춘 뒤 잠깐 있다가 보이는 범위만 새로 그림
+    {
+      const B0 = land.current.base, want = k * dpr, vx0 = view.current.x, vw = cw / k, vh = ch / k;
+      const CH = land.current.chunk;
+      const fits = (c) => c && c.x <= vx0 && c.y <= vy && c.x + c.w >= vx0 + vw && c.y + c.h >= vy + vh && c.sc >= want * 0.75 && c.sc <= want * 2.5 && c.ver === land.current.ownVer;
+      const need = want > B0.sc * 1.6 && !(grid.wrap && vx0 + vw > grid.period);
+      land.current.dbg = { want, base: B0.sc, need, vx0, vw, P: grid.period };
+      if (CH) CH.ok = need && fits(CH);
+      if (need && !fits(CH) && !land.current.chunkT) {
+        land.current.chunkT = setTimeout(() => {
+          land.current.chunkT = null;
+          const v = view.current, s2 = gameRef.current, el2 = wrap.current; if (!v || !el2) return;
+          const w2 = el2.clientWidth / v.k, h2 = el2.clientHeight / v.k;
+          const r = { x: v.x - w2 * 0.25, y: v.y - h2 * 0.25, w: w2 * 1.5, h: h2 * 1.5 };
+          r.sc = Math.min(v.k * (window.devicePixelRatio || 1), 4096 / Math.max(r.w, r.h));
+          const T = paintTerrain(grid, world, r);
+          const oc = document.createElement('canvas'); oc.width = T.cv.width; oc.height = T.cv.height; const ox = oc.getContext('2d'); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y);
+          const m = grid.size * 3, tiles = []; for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); if (x > r.x - m && x < r.x + r.w + m && y > r.y - m && y < r.y + r.h + m) tiles.push(i); }
+          drawOwnerTiles(grid, s2, ox, tiles);
+          land.current.chunk = { ...r, cv: T.cv, rcv: T.rcv, over: oc, ver: land.current.ownVer, ok: true };
+          draw();
+        }, 180);
+      }
+    }
     const passes = [view.current.x];
     if (grid.wrap) for (let n = 1; view.current.x + cw / k > n * grid.period; n++) passes.push(view.current.x - n * grid.period);
     // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (화면 폭 전체, 한 번만)
@@ -481,6 +512,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
     ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+    // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
+    const CH = land.current.chunk;
+    if (CH && CH.ok) { ctx.drawImage(CH.cv, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.over, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.rcv, CH.x, CH.y, CH.w, CH.h); }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
       const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(63,117,152,';
@@ -832,6 +866,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
+      chunk: () => { const c = land.current.chunk; if (!c) return land.current.dbg; return c ? { x: c.x, y: c.y, w: c.w, h: c.h, sc: c.sc, ok: c.ok, ver: c.ver, now: land.current.ownVer, base: land.current.base?.sc, k: view.current?.k } : null; },
       probe: (lon, lat) => { const [x, y] = world.geo.toPx(lon, lat); const t = pixelToCell(grid.size, grid.cols, grid.rows, x, y); return { t, terrain: grid.terrain[t], pass: grid.passable(t), N: grid.N, cols: grid.cols, W: world.W, H: world.H, wc: world.cols, wr: world.rows }; },
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],

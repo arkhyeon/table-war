@@ -50,6 +50,26 @@ export function buildGrid(world) {
     const r = world.region[f];
     if (r >= 0 && !world.regions[r].sea && terrain[i] !== T.SEA && terrain[i] !== T.PEAK) region[i] = r;
   }
+  // 실제 해안선으로 칸마다 땅·바다를 다시 판정 (굵은 지역 격자에서 옮겨 오며 해안이 한 칸씩 어긋나지 않게)
+  if (world.isLand) {
+    const isL = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      const [x, y] = cellCenter(size, cols, i);
+      let n = world.isLand(x, y) ? 1 : 0;
+      for (let d = 0; d < 6; d++) { const a = (Math.PI / 3) * d + Math.PI / 6; if (world.isLand(x + Math.cos(a) * size * 0.55, y + Math.sin(a) * size * 0.55)) n++; }
+      isL[i] = n >= 4 ? 1 : 0;
+    }
+    const nbs = (i) => { const o = []; for (let d = 0; d < 6; d++) { const j = neighborIndex(cols, rows, i, d); if (j >= 0) o.push(j); } return o; };
+    // 바다로 옮겨졌지만 실제로는 땅인 칸: 옆 땅 칸의 지형·지역을 이어받음
+    for (let pass = 0; pass < 3; pass++) {
+      const fix = [];
+      for (let i = 0; i < N; i++) if (isL[i] && terrain[i] === T.SEA) { const j = nbs(i).find((x) => terrain[x] !== T.SEA); if (j !== undefined) fix.push([i, j]); }
+      for (const [i, j] of fix) { terrain[i] = terrain[j] === T.PEAK ? T.MOUNTAIN : terrain[j]; region[i] = region[j]; outside[i] = outside[j]; }
+      if (!fix.length) break;
+    }
+    // 땅으로 옮겨졌지만 실제로는 바다인 칸: 바다로
+    for (let i = 0; i < N; i++) if (!isL[i] && terrain[i] !== T.SEA) { terrain[i] = T.SEA; region[i] = -1; outside[i] = 0; river[i] = 0; }
+  }
   // 세계 지도: 북극·날짜변경선에서 땅이 일직선으로 잘려 보이지 않게 가장자리를 들쭉날쭉한 바다로
   const bb = getScenario(world.scenarioId)?.bbox;
   if (bb && bb[2] - bb[0] >= 359) {
@@ -178,7 +198,7 @@ function pickCities(world, grid, base, tileOwner = null) {
   // 삼국지: 정해진 도시 사이 빈 곳(한반도·북방·남방 등)을 메우고, 가까운 실제 지명 + 방위로 이름을 붙임
   if (/^threekingdoms/.test(base.scenarioId) && world.geo) {
     const before = out.length;
-    fillGaps(1.6);
+    fillGaps(1.45);
     const pts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: p.name, t: pixelToCell(grid.size, grid.cols, grid.rows, x, y) }; }).filter((p) => p.t >= 0);
     const used = new Set(out.map((c) => c.name));
     const D8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
@@ -249,7 +269,6 @@ function pickCities(world, grid, base, tileOwner = null) {
         }
       }
     }
-    fillGaps(world.geo?.whole ? 1.7 : 1.3);
     // 성 이름: 지역 이름('○○ 남서부' 같은 방위 이름 포함) 대신, 성 자리에서 가까운 그 시대의 실제 지명을 씀
     if (world.geo) {
       const year = getScenario(base.scenarioId)?.startYear ?? 1;
@@ -275,6 +294,14 @@ function pickCities(world, grid, base, tileOwner = null) {
         const c = out[k];
         if (done.has(c) || c.capitalOf !== undefined) continue;
         if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !c.fill && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
+      }
+      // 이름 없는 빈 땅 성을 뺀 다음에 빈 곳 메우기 (먼저 메우면 나중에 빠진 자리가 다시 텅 빔) — 새 성은 가까운 실제 지명으로
+      const nBefore = out.length;
+      fillGaps(world.geo.whole ? 1.7 : 1.3);
+      for (const c of out.slice(nBefore)) {
+        let best = null, bd = Infinity;
+        for (const p of free) { if (used.has(p.name)) continue; const d = grid.dist(c.tile, p.t); if (d <= Rfree * 1.5 && d < bd) { bd = d; best = p; } }
+        if (best) { c.name = best.name; used.add(best.name); done.add(c); }
       }
       // 지명 사전에 없는 지어낸 지역 이름(예: '국벌')이 남은 성은 가장 가까운 실제 지명 + 방위로
       // 남겨도 되는 이름: 그 시대에 있던 실제 고을·부족 이름 (강·초원 같은 넓은 땅 이름이나 후대 이름은 바꿈)
@@ -732,14 +759,14 @@ export function queueOrder(s, grid, u, kind, id) {
 }
 
 // ── 하루 진행 ──
-// 땅따먹기 마무리: 어떤 나라 땅이 그 나라 성과 이어지지 않고 떨어져 나가면(적이 앞뒤를 막음), 둘러싼 나라 땅이 됨
+// 땅따먹기 마무리: 어떤 나라 땅이 그 나라 성·부대와 이어지지 않고 떨어져 나가 3순(30일) 지나면, 둘러싼 나라 땅이 됨
 export function encloseLand(s, grid) {
   const N = grid.N, own = s.owner;
   const reach = new Uint8Array(N), q = new Int32Array(N);
   let n = 0;
   for (const c of s.castles) if (c.owner !== null && c.owner >= 0 && own[c.tile] === c.owner && !reach[c.tile]) { reach[c.tile] = 1; q[n++] = c.tile; }
   for (let k = 0; k < n; k++) { const t = q[k], o = own[t]; for (const j of grid.nb[t]) if (!reach[j] && own[j] === o) { reach[j] = 1; q[n++] = j; } }
-  const seen = new Uint8Array(N);
+  const seen = new Uint8Array(N), next = {};
   for (let i = 0; i < N; i++) {
     const o = own[i];
     if (o < 0 || reach[i] || seen[i] || !grid.passable(i)) continue;
@@ -752,9 +779,18 @@ export function encloseLand(s, grid) {
     }
     let best = -1, bc = 0;
     for (const [x, v] of around) if (v > bc && s.nations[x]?.alive) { bc = v; best = x; }
-    if (best >= 0) for (const t of comp) if (!s.castles.some((c) => c.tile === t)) own[t] = best;
+    if (best < 0) continue;
+    // 그 나라 부대(장수)가 그 땅 안이나 바로 옆에 있으면 아직 이어진 것으로 봄
+    const set = new Set(comp);
+    if (s.units.some((u) => u.nation === o && (set.has(u.tile) || grid.nb[u.tile].some((j) => set.has(j))))) continue;
+    // 3순(30일) 동안 계속 떨어져 있으면 둘러싼 나라 땅이 됨
+    const age = Math.max(0, ...comp.map((x) => s.orphan?.[x] || 0)) + 1;
+    if (age >= ORPHAN_DAYS) { for (const x of comp) if (!s.castles.some((c) => c.tile === x)) own[x] = best; }
+    else for (const x of comp) next[x] = age;
   }
+  s.orphan = next;
 }
+export const ORPHAN_DAYS = 30;
 
 export function stepDay(s, grid) {
   s.day += 1;

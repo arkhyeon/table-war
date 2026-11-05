@@ -200,18 +200,30 @@ function buildHistorical(scn, g) {
       }
       if (edge || !touch) for (const x of comp) out[x] = 1;
     }
-    // 수도가 하나도 없는 큰 섬·땅덩어리(예: 삼국지의 규슈)는 어느 나라 강역 상자에도 안 들면 외지
+    // 수도가 하나도 없는 섬·땅덩어리: 어느 나라 강역 상자에 들지 않고, 수도가 있는 땅에서 바다로 110km 넘게 떨어져 있으면 외지
+    // (제주·쓰시마처럼 가까운 섬은 남고, 삼국지의 규슈·시코쿠처럼 먼 섬은 빠짐)
     {
       const capCells = new Set((scn.nations || []).map((n) => { const [x, y] = geo.toPx(n.lon, n.lat); return pixelToCell(size, g.cols, g.rows, x, y); }));
       const inArea = (i) => { const [lon, lat] = geo.toLL(...center(i)); const inB = ([a, b, e, f]) => lon >= a && lon <= e && lat >= b && lat <= f; return (scn.stageBoxes || []).some(inB) || (scn.nations || []).some((n) => (n.area || []).some(inB)); };
-      const seen = new Uint8Array(N);
+      const [w0, s0, e0, n0] = scn.bbox;
+      const cellKm = ((e0 - w0) * 111.32 * Math.cos((((s0 + n0) / 2) * Math.PI) / 180)) / g.cols;
+      const mass = new Int32Array(N).fill(-1), masses = [];
       for (let i = 0; i < N; i++) {
-        if (seen[i] || terrain[i] === T.SEA) continue;
-        const qq = [i]; seen[i] = 1; let hasCap = false;
-        for (let k = 0; k < qq.length; k++) { if (capCells.has(qq[k])) hasCap = true; for (const j of nbOf(qq[k])) if (!seen[j] && terrain[j] !== T.SEA) { seen[j] = 1; qq.push(j); } }
-        if (hasCap || qq.length < 40) continue;
-        if (qq.some((x) => !out[x] && inArea(x))) continue;
-        for (const x of qq) out[x] = 1;
+        if (mass[i] >= 0 || terrain[i] === T.SEA) continue;
+        const qq = [i]; mass[i] = masses.length; let hasCap = false;
+        for (let k = 0; k < qq.length; k++) { if (capCells.has(qq[k])) hasCap = true; for (const j of nbOf(qq[k])) if (mass[j] < 0 && terrain[j] !== T.SEA) { mass[j] = masses.length; qq.push(j); } }
+        masses.push({ cells: qq, hasCap });
+      }
+      // 수도 있는 땅에서 바다 건너 거리 (칸 수)
+      const sd = new Int32Array(N).fill(-1), q2 = [];
+      for (let i = 0; i < N; i++) if (mass[i] >= 0 && masses[mass[i]].hasCap && !out[i]) { sd[i] = 0; q2.push(i); }
+      const maxSteps = Math.ceil(110 / Math.max(1, cellKm));
+      for (let k = 0; k < q2.length; k++) { const x = q2[k]; if (sd[x] >= maxSteps) continue; for (const j of nbOf(x)) if (sd[j] < 0) { sd[j] = sd[x] + 1; if (terrain[j] === T.SEA) q2.push(j); } }
+      for (const m of masses) {
+        if (m.hasCap) continue;
+        if (m.cells.some((x) => sd[x] >= 0)) continue; // 가까운 섬
+        if (m.cells.some((x) => !out[x] && inArea(x))) continue; // 어느 나라 강역
+        for (const x of m.cells) out[x] = 1;
       }
     }
     // 나라 수도 칸들이 땅으로 이어지는지 확인 → 외지 때문에 끊긴 곳은 이어 줌

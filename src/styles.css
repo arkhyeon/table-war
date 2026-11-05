@@ -486,7 +486,8 @@ tr.clickable:hover, tr.sel { background: var(--panel3); }
 /* 왼쪽 위: 내 명령 + 이번 순 소식 */
 .h14-left { position: absolute; left: 10px; top: 10px; z-index: 6; display: flex; flex-direction: column; gap: 8px; width: min(340px, calc(100% - 80px)); max-height: calc(100% - 100px); pointer-events: none; }
 .h14-left > * { pointer-events: auto; }
-.h14-left.below-hint { top: 84px; } /* 지도 위 안내(부대 명령·장수 보내기 등)와 겹치지 않게 */
+.h14-left.below-hint { display: none; } /* 지도 위 안내(부대 명령·장수 보내기 등)가 뜨면 숨김 — 겹치지 않게 */
+.h14-map:has(.h14-over) .h14-left, .h14-map:has(.h14-peek) .h14-left, body:has(.modal-bg) .h14-left { display: none; } /* 확인 창·사신 창이 뜨면 숨김 */
 .h14-left .h14-report { position: static; width: 100%; max-height: 30vh; }
 .h14-orders { background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid var(--line2); border-radius: 14px; padding: 6px 10px; font-size: 12px; overflow: auto; max-height: 40vh; box-shadow: var(--shadow); }
 .h14-orders > summary { cursor: pointer; list-style: none; padding: 2px 0; }
