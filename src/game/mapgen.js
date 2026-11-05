@@ -187,35 +187,59 @@ function buildHistorical(scn, g) {
     const nbOf = (i) => { const out = []; for (let d = 0; d < 6; d++) { const j = neighborIndex(g.cols, g.rows, i, d); if (j >= 0) out.push(j); } return out; };
     const cand = new Uint8Array(N);
     for (let i = 0; i < N; i++) { if (terrain[i] === T.SEA) continue; const [lon, lat] = geo.toLL(...center(i)); if (!scn.keepLand(lon, lat)) cand[i] = 1; }
-    const out = new Uint8Array(N), q = [];
-    for (let i = 0; i < N; i++) { const c = i % g.cols, r = Math.floor(i / g.cols); if (cand[i] && (c === 0 || r === 0 || c === g.cols - 1 || r === g.rows - 1)) { out[i] = 1; q.push(i); } }
-    for (let k = 0; k < q.length; k++) for (const j of nbOf(q[k])) if (cand[j] && !out[j]) { out[j] = 1; q.push(j); }
+    // 바깥 땅 덩어리마다: 지도 가장자리에 닿거나, 무대 땅과 맞닿지 않은 따로 떨어진 땅(다른 섬·대륙)이면 외지
+    const out = new Uint8Array(N), seenC = new Uint8Array(N);
+    for (let i = 0; i < N; i++) {
+      if (!cand[i] || seenC[i]) continue;
+      const comp = [i]; seenC[i] = 1;
+      let edge = false, touch = false;
+      for (let k = 0; k < comp.length; k++) {
+        const x = comp[k], c = x % g.cols, r = Math.floor(x / g.cols);
+        if (c === 0 || r === 0 || c === g.cols - 1 || r === g.rows - 1) edge = true;
+        for (const j of nbOf(x)) { if (cand[j]) { if (!seenC[j]) { seenC[j] = 1; comp.push(j); } } else if (terrain[j] !== T.SEA) touch = true; }
+      }
+      if (edge || !touch) for (const x of comp) out[x] = 1;
+    }
     // 나라 수도 칸들이 땅으로 이어지는지 확인 → 외지 때문에 끊긴 곳은 이어 줌
     const caps = (scn.nations || []).map((n) => { const [x, y] = geo.toPx(n.lon, n.lat); return pixelToCell(size, g.cols, g.rows, x, y); }).filter((c) => c >= 0 && terrain[c] !== T.SEA);
     // 수도 말고도, 무대 안 땅덩어리(20칸 넘는 것)는 모두 이어지게
-    { const seen = new Uint8Array(N); for (let i = 0; i < N; i++) { if (seen[i] || terrain[i] === T.SEA || out[i]) continue; const qq = [i]; seen[i] = 1; for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) if (!seen[j] && terrain[j] !== T.SEA && !out[j]) { seen[j] = 1; qq.push(j); } if (qq.length >= 20) caps.push(i); } }
-    for (let round = 0; round < 12 && caps.length > 1; round++) {
-      const comp = new Int32Array(N).fill(-1);
-      let nc = 0;
-      for (const s0 of caps) {
-        if (comp[s0] >= 0 || out[s0]) continue;
-        const qq = [s0]; comp[s0] = nc;
-        for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) if (comp[j] < 0 && terrain[j] !== T.SEA && !out[j]) { comp[j] = nc; qq.push(j); }
-        nc++;
+    { const seen = new Uint8Array(N); for (let i = 0; i < N; i++) { if (seen[i] || terrain[i] === T.SEA || out[i]) continue; const qq = [i]; seen[i] = 1; for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) if (!seen[j] && terrain[j] !== T.SEA && !out[j]) { seen[j] = 1; qq.push(j); } if (qq.length >= 30) caps.push(i); } }
+    // 무대 땅끼리 걸어서나 얕은 바다(뭍에서 3칸)로 이어지지 않으면, 가장 큰 무대 땅에서 그곳까지 가장 짧은 길의 외지를 엶
+    const shallow = new Uint8Array(N);
+    { const dq = [], dd = new Int8Array(N).fill(-1); for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA) { dd[i] = 0; dq.push(i); } for (let k = 0; k < dq.length; k++) { const x = dq[k]; if (dd[x] >= 3) continue; for (const j of nbOf(x)) if (dd[j] < 0 && terrain[j] === T.SEA) { dd[j] = dd[x] + 1; shallow[j] = 1; dq.push(j); } } }
+    const walk = (j) => (terrain[j] === T.SEA ? shallow[j] : !out[j]);
+    for (let round = 0; round < 40; round++) {
+      const comp = new Int32Array(N).fill(-1), info = [];
+      for (let i = 0; i < N; i++) {
+        if (comp[i] >= 0 || terrain[i] === T.SEA || out[i]) continue;
+        const id = info.length, qq = [i]; comp[i] = id;
+        let land = 0;
+        for (let k = 0; k < qq.length; k++) { if (terrain[qq[k]] !== T.SEA) land++; for (const j of nbOf(qq[k])) if (comp[j] < 0 && walk(j)) { comp[j] = id; qq.push(j); } }
+        info.push({ size: land, cap: false });
       }
-      if (nc <= 1) break;
-      // 0번 무리에서 바다 아닌 땅(외지 포함)으로 넓혀 다른 무리에 닿는 가장 짧은 길을 찾아 그 길의 외지를 엶
+      for (const c of caps) if (comp[c] >= 0) info[comp[c]].cap = true;
+      const main = info.map((x, k) => [x, k]).filter(([x]) => x.cap || x.size >= 30).sort((p, q) => q[0].size - p[0].size)[0]?.[1];
+      if (main === undefined) break;
+      const need = new Set(info.map((x, k) => [x, k]).filter(([x, k]) => k !== main && (x.cap || x.size >= 30)).map(([, k]) => k));
+      if (!need.size) break;
       const prev = new Int32Array(N).fill(-2), qq = [];
-      for (let i = 0; i < N; i++) if (comp[i] === 0) { prev[i] = -1; qq.push(i); }
+      for (let i = 0; i < N; i++) if (comp[i] === main) { prev[i] = -1; qq.push(i); }
       let hit = -1;
       for (let k = 0; k < qq.length && hit < 0; k++) for (const j of nbOf(qq[k])) {
-        if (prev[j] !== -2 || terrain[j] === T.SEA) continue;
+        if (prev[j] !== -2 || (terrain[j] === T.SEA && !shallow[j])) continue;
         prev[j] = qq[k];
-        if (comp[j] > 0) { hit = j; break; }
+        if (need.has(comp[j])) { hit = j; break; }
         qq.push(j);
       }
-      if (hit < 0) break; // 바다로 떨어진 나라 (배로 감)
-      for (let x = hit; x >= 0; x = prev[x]) { out[x] = 0; for (const j of nbOf(x)) out[j] = 0; } // 길과 그 양옆
+      if (hit < 0) break; // 깊은 바다 건너 (항구에서 배로)
+      for (let x = hit; x >= 0; x = prev[x]) { if (terrain[x] === T.SEA) continue; out[x] = 0; for (const j of nbOf(x)) out[j] = 0; }
+    }
+    // 그래도 큰 무대와 땅으로 이어지지 않는 작은 무대 땅 조각(30칸 미만, 바다 건너 섬 제외)은 외지로 — 갈 수 없는 성이 생기지 않게
+    {
+      const seen = new Uint8Array(N), comps = [];
+      for (let i = 0; i < N; i++) { if (seen[i] || terrain[i] === T.SEA || out[i]) continue; const qq = [i]; seen[i] = 1; let byOut = false; for (let k = 0; k < qq.length; k++) for (const j of nbOf(qq[k])) { if (terrain[j] === T.SEA) continue; if (out[j]) byOut = true; else if (!seen[j]) { seen[j] = 1; qq.push(j); } } comps.push({ cells: qq, byOut }); }
+      const big = Math.max(0, ...comps.map((c) => c.cells.length));
+      for (const c of comps) if (c.cells.length < 30 && c.cells.length < big && c.byOut) for (const x of c.cells) out[x] = 1;
     }
     g.outside = new Uint8Array(N); g.outsideT = new Uint8Array(N);
     for (let i = 0; i < N; i++) if (out[i]) { g.outside[i] = 1; g.outsideT[i] = terrain[i] === T.PEAK ? T.MOUNTAIN : terrain[i]; terrain[i] = T.PEAK; }

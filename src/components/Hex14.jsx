@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { uiConfirm } from '../dialog.js';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
@@ -340,13 +341,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sel, setSel] = useState(null); // {type:'castle'|'unit', id}
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
+  const [sheetH, setSheetH] = useState(() => { try { return +localStorage.getItem('tw-sheetH') || 40; } catch { return 40; } }); // 폰 바텀시트 높이(vh)
+  useEffect(() => { try { localStorage.setItem('tw-sheetH', String(Math.round(sheetH))); } catch { /* 무시 */ } }, [sheetH]);
   const [pickG, setPickG] = useState([]);
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [peek, setPeek] = useState(false);
   const withSiege = false; // 공성병기는 들판에서 부대로 만듦
-  const [autoRet, setAutoRet] = useState(true); // 출진 부대: 약해지면 자동 귀환
   const [stopIdle, setStopIdle] = useState(() => { try { return localStorage.getItem('h14.stopIdle') === '1'; } catch { return false; } }); // 순 끝까지 중 내 부대가 도착하면 멈춤 (기본 끔)
   const [callAmt, setCallAmt] = useState(1000); // 장수 부를 때 데려올 병력
   const [showAllCall, setShowAllCall] = useState(false);
@@ -957,9 +959,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (founding) {
       const why = foundCheck(game, grid, t, pid);
       if (why) return toast(why);
-      const nm = window.prompt(`새 도시 이름 (금 ${fmtGold(FOUND_COST)}, ${FOUND_TURNS}턴)`, '');
-      if (nm === null) return;
-      act((s) => foundCity(s, grid, t, pid, nm.trim() || undefined));
+      act((s) => foundCity(s, grid, t, pid)); // 이름은 가까운 성 이름으로 자동 (샌드박스에서는 이름 입력 창이 막힘)
       setFounding(false);
       return;
     }
@@ -1252,14 +1252,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     <button className="sm" onClick={() => act((s) => summonGeneral(s, grid, g.id, selCastle.id, Math.min(callAmt, s.castles[g.castle].troops - 500)))}>부르기</button>
                   </div>
                 ))}
-                {!showAllCall && <button className="xs" style={{ marginTop: 4 }} onClick={() => setShowAllCall(true)}>모든 장수 보기</button>}
+                <button className="xs" style={{ marginTop: 4 }} onClick={() => setShowAllCall((v) => !v)}>{showAllCall ? "접기" : "모든 장수 보기"}</button>
               </details>
             );
           })()}
           {selCastle.owner === pid && freeIn(selCastle).length > 0 && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
               <b>🧑‍🎓 재야 인재</b>
-              {freeIn(selCastle).map((g) => (
+              {freeIn(selCastle).filter((g) => !castleGens.length || Math.round(recruitChance(game, g, pid, selCastle.id) * 100) >= 1).map((g) => (
                 <div key={g.id} className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
                   <span><Face g={g} /> {g.name} <small className="muted"><Stats g={g} /></small></span>
                   <button className="sm" disabled={playing || g.tried === game.turn || !castleGens.length} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid, selCastle.id) * 100)}%</button>
@@ -1340,14 +1340,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     );
                   })()}
                   <Slider min={0} max={maxAmt} step={1000} value={Math.min(amt, maxAmt)} onChange={(v) => setAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
-                  <label style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
-                    <input type="checkbox" checked={autoRet} onChange={(e) => setAutoRet(e.target.checked)} /> 🏠 약해지면 알아서 돌아오기 <span className="muted">(병력 30% 아래 또는 사기 25 아래면 가까운 내 성으로)</span>
-                  </label>
                   
                   <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
                     <button onClick={() => setSortieOpen(false)}>취소</button>
                     <button className="primary" disabled={!pickG.length || Math.min(amt, maxAmt) < 1000} onClick={() => {
-                      const r = act((s) => { const r = sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt)); if (r.ok && autoRet) r.unit.autoRet = true; return r; });
+                      const r = act((s) => { const r = sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt)); return r; });
                       if (r?.ok) { setSortieOpen(false); setSel({ type: 'unit', id: r.unit.id }); setSheet(false); toast('부대가 나왔습니다. 지도에서 목적지·공격할 곳을 누르세요.'); }
                     }}>출진</button>
                   </div>
@@ -1578,17 +1575,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       <span style={{ marginLeft: 'auto' }} />
                       {giftSizes(game, pid, n.id).map((amt, i) => <button key={i} className="sm" disabled={playing || me.gold < amt} title={`우호 +${giftGain(game, pid, n.id, amt)}`} onClick={() => act((s) => gift(s, pid, n.id, amt))}>🎁 {fmtGold(amt)} (+{giftGain(game, pid, n.id, amt)})</button>)}
                       {p && p.type !== 'vassal' && p.until - game.turn <= RENEW_WINDOW && <button className="sm primary" disabled={playing || me.lastAsk?.[n.id] === game.turn} title="끝나기 전에 같은 약조를 이어 감" onClick={() => act((s) => renewPact(s, pid, n.id))}>🔁 연장 요청 {Math.round(renewChance(game, pid, n.id) * 100)}% ({p.until - game.turn}순 남음)</button>}
-                      {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
-                      {!p && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
+                      {!p && Math.round(acceptChance(game, pid, n.id, 'ally') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
+                      {!p && Math.round(acceptChance(game, pid, n.id, 'truce') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
                       {(() => {
                         // 속국·항복: 힘 차이가 클 때만 버튼이 나옴
                         const asked = playing || me.lastAsk?.[n.id] === game.turn;
                         const vc = vassalChance(game, pid, n.id), pc = protectChance(game, pid, n.id), sc = surrenderChance(game, pid, n.id);
                         return <>
-                          {!p && vc > 0 && <button className="sm" disabled={asked} title="받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다" onClick={() => act((s) => demandVassal(s, pid, n.id))}>👑 속국 요구 {Math.round(vc * 100)}%</button>}
-                          {sc > 0 && <button className="sm" disabled={asked} title="받아들이면 도시·장수·부대가 모두 우리 것이 됩니다" onClick={() => act((s) => urgeSurrender(s, pid, n.id))}>🏳️ 항복 권유 {Math.round(sc * 100)}%</button>}
-                          {!p && pc > 0 && lordOf(game, pid) === null && <button className="sm" disabled={asked} title="그 나라가 우리를 치지 않게 되고, 순마다 금 수입의 15%를 바칩니다" onClick={() => { if (window.confirm(`${n.name}의 속국이 될까요? 순마다 금 수입의 15%를 바칩니다.`)) act((s) => askProtection(s, pid, n.id)); }}>🙇 속국 되기 {Math.round(pc * 100)}%</button>}
-                          {p?.type === 'vassal' && p.b === pid && <button className="sm danger" disabled={playing} onClick={() => { if (window.confirm('독립을 선언할까요? 우호가 크게 떨어집니다.')) act((s) => declareIndependence(s, pid)); }}>⚔️ 독립 선언</button>}
+                          {!p && vc >= 0.005 && <button className="sm" disabled={asked} title="받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다" onClick={() => act((s) => demandVassal(s, pid, n.id))}>👑 속국 요구 {Math.round(vc * 100)}%</button>}
+                          {sc >= 0.005 && <button className="sm" disabled={asked} title="받아들이면 도시·장수·부대가 모두 우리 것이 됩니다" onClick={() => act((s) => urgeSurrender(s, pid, n.id))}>🏳️ 항복 권유 {Math.round(sc * 100)}%</button>}
+                          {!p && pc >= 0.005 && lordOf(game, pid) === null && <button className="sm" disabled={asked} title="그 나라가 우리를 치지 않게 되고, 순마다 금 수입의 15%를 바칩니다" onClick={async () => { if (await uiConfirm(`${n.name}의 속국이 될까요? 순마다 금 수입의 15%를 바칩니다.`)) act((s) => askProtection(s, pid, n.id)); }}>🙇 속국 되기 {Math.round(pc * 100)}%</button>}
+                          {p?.type === 'vassal' && p.b === pid && <button className="sm danger" disabled={playing} onClick={async () => { if (await uiConfirm('독립을 선언할까요? 우호가 크게 떨어집니다.')) act((s) => declareIndependence(s, pid)); }}>⚔️ 독립 선언</button>}
                         </>;
                       })()}
                     </div>
@@ -1606,7 +1603,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <div key={g.id} style={{ padding: '4px 0', borderBottom: '1px solid var(--line)' }}>
                   <div><Face g={g} /> {g.name} <small className="muted">({game.nations[g.nation]?.name || '재야'}) <Stats g={g} /></small></div>
                   <div className="row" style={{ gap: 4 }}>
-                    {isRuler(g) ? <small className="muted">군주라 등용 불가</small> : <button className="sm" disabled={playing || g.tried === game.turn} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid) * 100)}%</button>}
+                    {isRuler(g) ? <small className="muted">군주라 등용 불가</small> : Math.round(recruitChance(game, g, pid) * 100) >= 1 && <button className="sm" disabled={playing || g.tried === game.turn} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid) * 100)}%</button>}
                     <button className="sm" disabled={playing} onClick={() => act((s) => release(s, g.id))}>{isRuler(g) && !game.nations[g.nation]?.alive ? '석방 (은거)' : '그냥 석방 (우호+)'}</button>
                     <button className="sm danger" disabled={playing} onClick={() => act((s) => execute(s, g.id))}>처단</button>
                   </div>
@@ -1789,13 +1786,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
             const convoys = (game.convoys || []).filter((v) => v.nation === pid);
             const builds = game.castles.filter((c) => c.owner === pid && (c.build || c.founding));
             const forts = (game.forts || []).filter((f) => f.owner === pid && f.left > 0);
-            const caught = Object.values(game.generals).filter((g) => g.status === 'prisoner' && g.captor === pid);
-            const lostG = Object.values(game.generals).filter((g) => g.status === 'prisoner' && g.nation === pid);
-            const n = units.length + convoys.length + builds.length + forts.length + caught.length + lostG.length;
-            if (!n) return null;
+            const n = units.length + convoys.length + builds.length + forts.length;
+            // 사신·확인 창이 떠 있으면 겹치지 않게 숨김
+            if (!n || (!playing && !game.over && game.inbox?.length > 0 && !peek)) return null;
             return (
               <details className="h14-orders" open={ordersOpen} onToggle={(e) => setOrdersOpen(e.currentTarget.open)}>
-                <summary><b>📋 내 명령</b> <small className="muted">부대 {units.length}{convoys.length ? ` · 수송 ${convoys.length}` : ''}{builds.length + forts.length ? ` · 공사 ${builds.length + forts.length}` : ''}{caught.length + lostG.length ? ` · 포로 ${caught.length + lostG.length}` : ''}</small></summary>
+                <summary><b>📋 내 명령</b> <small className="muted">부대 {units.length}{convoys.length ? ` · 수송 ${convoys.length}` : ''}{builds.length + forts.length ? ` · 공사 ${builds.length + forts.length}` : ''}</small></summary>
                 {units.map((u) => { const d = etaOf(u); return (
                   <button key={'u' + u.id} className="ord-row" onClick={() => { setSel({ type: 'unit', id: u.id }); window.__h14?.focus(u.tile); }}>
                     <span>{u.routed ? '🏳️' : '⚑'} {gensOf(game, u.gens)[0]?.name} <small className="muted">{fmtTroops(u.troops)}</small></span>
@@ -1805,8 +1801,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 {convoys.map((v, i) => <div key={'v' + i} className="ord-row"><span>🚚 {fmtTroops(v.troops)}</span><span className="muted">{game.castles[v.from]?.name} → {game.castles[v.to]?.name}</span><span className="ord-eta">{Math.max(0, v.arrive - absDay(game))}일</span></div>)}
                 {builds.map((c) => <button key={'b' + c.id} className="ord-row" onClick={() => goTo(c)}><span>🔨 {c.name}</span><span className="muted">{c.founding ? '새 도시' : BUILDINGS[c.build.type]?.name}</span><span className="ord-eta">{c.founding || c.build.left}턴</span></button>)}
                 {forts.map((f) => <div key={'f' + f.id} className="ord-row"><span>{FORTS[f.kind].icon} {FORTS[f.kind].name}</span><span className="muted">공사 중</span><span className="ord-eta">{f.left}일</span></div>)}
-                {caught.map((g) => <div key={'p' + g.id} className="ord-row"><span>⛓️ {g.name}</span><span className="muted">{game.nations[g.nation]?.name || '재야'} 장수 · 인재 탭에서 처우</span><span className="ord-eta">포로</span></div>)}
-                {lostG.map((g) => <div key={'l' + g.id} className="ord-row bad"><span>⛓️ {g.name}</span><span className="muted">{game.nations[g.captor]?.name}에 사로잡힘</span><span className="ord-eta">잡힘</span></div>)}
               </details>
             );
           })()}
@@ -1851,8 +1845,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
           )}
         </div>
-        <div className={'h14-panel' + (sheet ? ' open' : '')}>
-          <div className="h14-grip" onClick={() => { setSheet(false); }} />
+        <div className={'h14-panel' + (sheet ? ' open' : '')} style={{ '--sheet-h': `${sheetH}vh` }}>
+          {/* 폰: 손잡이를 위아래로 끌어 높이 조절 (짧게 누르면 작게↔크게), 아주 내리면 닫힘 */}
+          <div
+            className="h14-grip"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture?.(e.pointerId);
+              const y0 = e.clientY, h0 = sheetH;
+              let moved = false;
+              const mv = (ev) => { const dy = ev.clientY - y0; if (Math.abs(dy) > 4) moved = true; setSheetH(Math.max(15, Math.min(88, h0 - (dy / window.innerHeight) * 100))); };
+              const up = (ev) => {
+                window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up);
+                const h = h0 - ((ev.clientY - y0) / window.innerHeight) * 100;
+                if (!moved) setSheetH(h0 > 40 ? 28 : 60);
+                else if (h < 12) { setSheet(false); setSheetH(h0); }
+              };
+              window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+            }}
+          />
           <button className="sm h14-close" title="닫고 선택 해제" onClick={() => { setSheet(false); setSel(null); setSortieOpen(false); }}>✕</button>
           {panel}
         </div>

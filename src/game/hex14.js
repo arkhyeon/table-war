@@ -100,7 +100,7 @@ export function buildGrid(world) {
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
 const BIG = new Set(['낙양', '장안', '업', '허창', '성도', '건업', '양양', '계', '남피', '하비', '수춘', '오', '강릉', '완', '진류', '북해', '복양', '여남']);
-const EDGE = new Set(['양평', '북평', '무위', '서평', '천수', '안정', '운남', '건녕', '교지', '남해', '계양', '영릉', '무릉', '회계', '시상', '상용', '영안', '재동', '강주', '한중']);
+const EDGE = new Set(['건안', '후관', '여릉', '창오', '울림', '합포', '구진', '장가', '영창', '월수', '금성', '장액', '주천', '무도', '구원', '운중', '대', '상곡', '탄한산', '유성', '현도', '낙랑', '대방', '국내성', '부여성', '목지국', '사로', '구야', '양평', '북평', '무위', '서평', '천수', '안정', '운남', '건녕', '교지', '남해', '계양', '영릉', '무릉', '회계', '시상', '상용', '영안', '재동', '강주', '한중']);
 const TK_CITIES = [
   ['양평', 123.17, 41.27], ['북평', 118.5, 40.9], ['계', 116.4, 39.9], ['남피', 116.7, 38.05], ['평원', 116.45, 37.1], ['업', 114.35, 36.33],
   ['진양', 112.55, 37.87], ['북해', 119.1, 36.7], ['복양', 115.0, 35.75], ['진류', 114.6, 34.6], ['허창', 113.85, 34.03], ['여남', 114.6, 33.0],
@@ -110,7 +110,12 @@ const TK_CITIES = [
   ['계양', 113.0, 25.8], ['여강', 117.0, 31.4], ['건업', 118.78, 32.06], ['오', 120.62, 31.3], ['회계', 120.58, 30.0], ['시상', 115.98, 29.7],
   ['한중', 107.03, 33.07], ['재동', 105.2, 31.6], ['성도', 104.06, 30.66], ['강주', 106.5, 29.55], ['영안', 109.5, 31.05], ['건녕', 103.8, 25.5],
   ['운남', 100.6, 25.5], ['교지', 105.85, 21.03], ['남해', 113.26, 23.13], ['서평', 101.78, 36.62],
-  ['호로관', 113.25, 34.8, 'pass'], ['동관', 110.25, 34.55, 'pass'], ['무관', 110.8, 33.6, 'pass'], ['양평관', 106.3, 33.2, 'pass'], ['검각', 105.55, 32.1, 'pass'],
+  // 변방·남방·한반도 (손권 땅 남쪽, 북방 이민족, 한반도 나라들이 성 없이 비지 않게)
+  ['건안', 118.32, 27.05], ['후관', 119.3, 26.08], ['예장', 115.89, 28.68], ['여릉', 114.98, 27.11], ['단양', 118.75, 30.95], ['창오', 111.28, 23.48],
+  ['울림', 109.6, 23.1], ['합포', 109.2, 21.48], ['구진', 105.77, 19.8], ['장가', 106.7, 26.6], ['영창', 99.17, 25.1], ['월수', 102.27, 27.9],
+  ['금성', 103.8, 36.06], ['장액', 100.45, 38.93], ['주천', 98.5, 39.73], ['무도', 105.9, 33.4], ['구원', 109.8, 40.6], ['운중', 111.6, 40.6],
+  ['대', 114.6, 39.8], ['상곡', 115.5, 40.4], ['탄한산', 112.5, 41.8], ['유성', 120.45, 41.57], ['현도', 123.9, 41.9], ['낙랑', 125.75, 39.02],
+  ['대방', 126.2, 38.0], ['국내성', 126.18, 41.13], ['부여성', 126.55, 43.84], ['목지국', 127.15, 36.8], ['사로', 129.22, 35.84], ['구야', 128.88, 35.23],
 ];
 
 // 도시 자리 고르기: 삼국지면 위 목록, 아니면 지역 4곳당 도시 1곳(큰 지역·실제 지명·수도 우선, 서로 떨어지게)
@@ -133,9 +138,14 @@ function pickCities(world, grid, base, tileOwner = null) {
       out.push({ name, tile: t, kind: kind || 'city', pop: BIG.has(name) ? 90 : EDGE.has(name) ? 35 : 55 });
     }
   }
+  // 삼국지: 시나리오에 적힌 수도 이름의 도시가 그 나라 수도
+  if (/^threekingdoms/.test(base.scenarioId)) {
+    const sn = getScenario(base.scenarioId)?.nations || [];
+    base.nations.forEach((n, i) => { if (!n.alive) return; const c = out.find((x) => x.name === sn[i]?.capital && x.capitalOf === undefined); if (c) c.capitalOf = n.id; });
+  }
   // 나라 수도는 꼭 도시로
   for (const n of base.nations) {
-    if (!n.alive) continue;
+    if (!n.alive || out.some((c) => c.capitalOf === n.id)) continue;
     const t = grid.castleTile[n.capital];
     if (t < 0) continue;
     if (out.some((c) => grid.region[c.tile] === n.capital)) continue;
@@ -293,7 +303,8 @@ export function createHex14(world, base) {
   // 역사 강역(상자)이 있는 판: 칸 하나하나를 그 칸 경위도가 든 가장 작은 상자의 나라로 — 지역(큰 덩어리) 단위보다 국경이 실제에 가깝게
   const scnN = getScenario(base.scenarioId)?.nations || [];
   const boxes = [];
-  base.nations.forEach((n, i) => { if (n.alive) for (const b of scnN[i]?.area || []) boxes.push([b, (b[2] - b[0]) * (b[3] - b[1]), i]); });
+  // 세계 지도만 (지역사는 지역 단위 경계가 더 자연스러움 — 칸 단위로 하면 상자 모양 국경이 됨)
+  if (world.geo?.whole) base.nations.forEach((n, i) => { if (n.alive) for (const b of scnN[i]?.area || []) boxes.push([b, (b[2] - b[0]) * (b[3] - b[1]), i]); });
   const tileOwn = new Int16Array(grid.N).fill(-2);
   const regOwner = (t) => {
     if (!boxes.length || !world.geo) return regOwner0(t);
@@ -310,8 +321,12 @@ export function createHex14(world, base) {
     return (tileOwn[t] = best);
   };
   const picks = pickCities(world, grid, base, boxes.length && world.geo ? regOwner : null);
+  const capTaken = new Set(picks.filter((x) => x.capitalOf !== undefined).map((x) => x.capitalOf));
   const castles = picks.map((p, id) => {
-    const capOf = p.capitalOf ?? base.nations.findIndex((n) => n.alive && n.capital === grid.region[p.tile]);
+    // 수도는 나라마다 하나만 (같은 지역에 성이 여럿이어도 ♛가 여러 개 붙지 않게)
+    let capOf = p.capitalOf ?? -1;
+    if (capOf < 0 && !picks.some((x) => x.capitalOf !== undefined && base.nations[x.capitalOf]?.capital === grid.region[p.tile])) capOf = base.nations.findIndex((n) => n.alive && n.capital === grid.region[p.tile] && !capTaken.has(n.id));
+    if (capOf >= 0) capTaken.add(capOf);
     const owner = capOf >= 0 ? capOf : regOwner(p.tile);
     const pass = p.kind === 'pass';
     return { id, tile: p.tile, region: grid.region[p.tile], name: p.name, kind: p.kind, owner: owner === -1 ? null : owner, troops: 0, dur: pass ? 6000 : 3000, maxDur: pass ? 6000 : 3000, pop: 0, capital: capOf >= 0, bandit: null };
@@ -337,6 +352,7 @@ export function createHex14(world, base) {
       c.pop = picks[c.id].pop ?? Math.round(Math.min(130, 25 + c.pop * 0.35));
       if (c.capital) c.pop += 15;
       if (c.owner === null) c.troops = Math.min(8000, Math.max(c.troops, 3000));
+      else c.troops = Math.max(c.troops, c.capital ? 8000 : 3000); // 지역 병력이 다른 성으로 모여 빈 성이 되지 않게
     }
   }
   // 땅: 그 칸이 속한 도시의 주인 (삼국지14처럼 시작할 때 관할 구역이 통째로 그 나라 땅)
@@ -660,17 +676,36 @@ export function queueOrder(s, grid, u, kind, id) {
 }
 
 // ── 하루 진행 ──
+// 땅따먹기 마무리: 어떤 나라 땅이 그 나라 성과 이어지지 않고 떨어져 나가면(적이 앞뒤를 막음), 둘러싼 나라 땅이 됨
+export function encloseLand(s, grid) {
+  const N = grid.N, own = s.owner;
+  const reach = new Uint8Array(N), q = new Int32Array(N);
+  let n = 0;
+  for (const c of s.castles) if (c.owner !== null && c.owner >= 0 && own[c.tile] === c.owner && !reach[c.tile]) { reach[c.tile] = 1; q[n++] = c.tile; }
+  for (let k = 0; k < n; k++) { const t = q[k], o = own[t]; for (const j of grid.nb[t]) if (!reach[j] && own[j] === o) { reach[j] = 1; q[n++] = j; } }
+  const seen = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    const o = own[i];
+    if (o < 0 || reach[i] || seen[i] || !grid.passable(i)) continue;
+    // 떨어져 나간 한 덩어리
+    const comp = [i]; seen[i] = 1;
+    const around = new Map();
+    for (let k = 0; k < comp.length; k++) for (const j of grid.nb[comp[k]]) {
+      if (own[j] === o && !reach[j] && !seen[j] && grid.passable(j)) { seen[j] = 1; comp.push(j); }
+      else if (own[j] !== o && own[j] >= 0) around.set(own[j], (around.get(own[j]) || 0) + 1);
+    }
+    let best = -1, bc = 0;
+    for (const [x, v] of around) if (v > bc && s.nations[x]?.alive) { bc = v; best = x; }
+    if (best >= 0) for (const t of comp) if (!s.castles.some((c) => c.tile === t)) own[t] = best;
+  }
+}
+
 export function stepDay(s, grid) {
   s.day += 1;
+  encloseLand(s, grid);
   s.fx = [];
   s.duels = [];
   dropLeaderless(s, grid);
-  // 「약해지면 알아서 돌아오기」를 켠 부대: 병력 30%·사기 25 아래면 가까운 내 성으로
-  for (const u of s.units) {
-    if (!u.autoRet || (u.troops >= u.max * 0.3 && u.morale >= 25) || u.order?.kind === 'castle' && s.castles[u.order.id]?.owner === u.nation) continue;
-    const home = nearestCastle(s, grid, u.tile, u.nation);
-    if (home && order(s, grid, u, 'castle', home.id).ok) log(s, `🏠 ${gensOf(s, u.gens)[0]?.name} 부대가 약해져 ${home.name}(으)로 돌아갑니다.`, 'info', [u.nation]);
-  }
   // 컴퓨터 부대(플레이어 군단 포함): 2칸 안 적 망루에 맞고 있으면 먼저 부수고 원래 명령으로 돌아감
   for (const u of s.units) {
     if (u.dead || u.routed || (u.nation === s.playerId && !s.spectator && !u.corps) || u.order?.kind === 'fort') continue;

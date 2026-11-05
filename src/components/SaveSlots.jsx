@@ -1,3 +1,4 @@
+import { uiConfirm, uiAlert } from '../dialog.js';
 import { useEffect, useState } from 'react';
 import { SLOT_COUNT, loadSlot, writeSlot, deleteSlot } from '../storage.js';
 import { cloudList, cloudLoad, cloudSave, cloudDelete } from '../cloud.js';
@@ -52,8 +53,8 @@ export default function SaveSlots({ current, onLoad, onSaved }) {
             {current && k > 0 && (
               <button
                 className="sm"
-                onClick={() => {
-                  if (has && !window.confirm(`슬롯 ${k}에 덮어쓸까요?`)) return;
+                onClick={async () => {
+                  if (has && !(await uiConfirm(`슬롯 ${k}에 덮어쓸까요?`))) return;
                   const ok = writeSlot(k, current);
                   cloudSave(k, current, describe({ ...current, savedAt: Date.now() }));
                   bump((v) => v + 1);
@@ -75,7 +76,7 @@ export default function SaveSlots({ current, onLoad, onSaved }) {
                   setBusy(false);
                   if (cd) onLoad(cd);
                   else if (d) onLoad(d);
-                  else window.alert('클라우드 저장을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+                  else uiAlert('클라우드 저장을 불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
                 }}
               >
                 {busy ? '불러오는 중…' : '불러오기'}
@@ -86,7 +87,7 @@ export default function SaveSlots({ current, onLoad, onSaved }) {
                 className="sm"
                 title="슬롯 비우기"
                 onClick={async () => {
-                  if (!window.confirm(`슬롯 ${k}를 지울까요?`)) return;
+                  if (!(await uiConfirm(`슬롯 ${k}를 지울까요?`))) return;
                   deleteSlot(k);
                   await cloudDelete(k);
                   bump((v) => v + 1);
