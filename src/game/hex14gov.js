@@ -100,8 +100,8 @@ export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === 
 const sizeF = (s, b) => Math.max(1, Math.min(3, Math.sqrt(s.castles.filter((c) => c.owner === b && c.kind !== 'pass').length / 4)));
 export const giftSizes = () => [10000, 30000];
 export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round(((amt / 10000) * 10 * envoyOf(s, a).mult) / sizeF(s, b))));
-// 약소국 결속: 도시 4개 이하면 자원병 +50%·징병비 −25%·재야 등용 +10%p·성 수비 피해 −15%
-export const isSmall = (s, nid) => nid !== null && nid !== undefined && nid >= 0 && s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length <= 4;
+// 약소국 결속·대국 영토 관리 감점은 없앰 (크든 작든 같은 규칙) — 예전 호출과 저장을 깨지 않게 함수만 남김
+export const isSmall = () => false;
 
 // 받아들일 확률 (b가 a의 제안을)
 // 패권국: 전체 도시의 30%를 넘고 2등보다 1.5배 넘게 큰 나라 (다른 나라들이 견제함)
@@ -344,11 +344,7 @@ export const jobGen = (s, c, role) => {
 // 금 수입: 상업 × 관할 땅 비율, 병량 수확: 농업 × 관할 땅 비율 (가을에 한 해 몫)
 // 금 수입: 도시 기본 세금 1,200(인구와 상관없이, 작은 나라도 움직일 수 있게) + 상업×5 × 관할 땅 비율
 // 넓은 영토 관리: 도시 15개를 넘으면 1개마다 수입·수확·자원병 −1.2% (최대 −45%) — 큰 나라가 끝없이 불어나지 않게
-export const sprawlOf = (s, nid) => {
-  if (nid === null || nid === undefined) return 1;
-  const n = s.castles.reduce((a, c) => a + (c.owner === nid && c.kind !== 'pass' ? 1 : 0), 0);
-  return Math.max(0.55, Math.min(1, 1 - (n - 15) * 0.012));
-};
+export const sprawlOf = () => 1;
 export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildGrid, iceRow, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
 import { aiTurn14, STRATS } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
-import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, sprawlOf, envoyOf, giftSizes, giftGain, isSmall } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
@@ -57,7 +57,7 @@ function paintTerrain(grid, world) {
   ctx.fillStyle = '#3f7598';
   ctx.fillRect(0, 0, grid.W, grid.H);
   // 둥근 세계 지도: 북극 얼음 띠 바탕을 먼저 깔아 칸 사이 틈(지그재그)이 바다색 점선으로 보이지 않게
-  if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 4); }
+  if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 2); }
   const isLand = (i) => i !== undefined && grid.terrain[i] !== 0;
   for (let i = 0; i < grid.N; i++) {
     if (grid.terrain[i] !== 0) continue;
@@ -81,13 +81,16 @@ function paintTerrain(grid, world) {
   if (bb && bb[2] - bb[0] >= 359) {
     for (let i = 0; i < grid.N; i++) {
       if (grid.terrain[i] !== 0) continue;
-      const c = i % grid.cols, r = Math.floor(i / grid.cols), lim = iceRow(c, getScenario(world.scenarioId)?.worldScale || 1, grid.wrap ? grid.cols : 0);
-      if (r > lim + 1) continue;
-      // 가장자리 한 줄만 깨진 얼음(옅게), 안쪽은 두꺼운 얼음 — 둥근 지도는 이음매 쪽 칸을 반대편에도 한 번 더 (틈이 안 보이게)
-      ctx.fillStyle = r >= lim ? `rgba(226,238,244,${0.6 + hash(i, 78) * 0.25})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
-      hexPath(i, 1.06); ctx.fill();
+      const c = i % grid.cols;
+      const edge = grid.ice[i] && grid.nb[i].some((j) => !grid.ice[j]);
+      // 얼음 가장자리 밖 바다: 떠다니는 유빙 몇 개
+      const floe = !grid.ice[i] && grid.nb[i].some((j) => grid.ice[j]) && hash(i, 83) < 0.45;
+      if (!grid.ice[i] && !floe) continue;
+      // 가장자리는 깨진 얼음(옅게), 안쪽은 두꺼운 얼음 — 둥근 지도는 이음매 쪽 칸을 반대편에도 한 번 더 (틈이 안 보이게)
+      ctx.fillStyle = floe ? `rgba(226,238,244,${0.35 + hash(i, 84) * 0.3})` : edge ? `rgba(226,238,244,${0.75 + hash(i, 78) * 0.2})` : shade('#e6eef2', 0.95 + hash(i, 79) * 0.08);
+      hexPath(i, floe ? 0.6 + hash(i, 85) * 0.3 : 1.06); ctx.fill();
       if (grid.wrap && (c === 0 || c === grid.cols - 1)) { ctx.save(); ctx.translate(c === 0 ? grid.period : -grid.period, 0); hexPath(i, 1.06); ctx.fill(); ctx.restore(); }
-      if (r <= lim && hash(i, 80) < 0.25) { ctx.strokeStyle = 'rgba(150,180,200,0.6)'; ctx.lineWidth = sz * 0.06; const [cx, cy] = grid.center(i); ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + (hash(i, 81) - 0.5) * sz); ctx.lineTo(cx + sz * 0.1, cy); ctx.lineTo(cx + sz * 0.5, cy + (hash(i, 82) - 0.5) * sz); ctx.stroke(); }
+      if (grid.ice[i] && !edge && hash(i, 80) < 0.25) { ctx.strokeStyle = 'rgba(150,180,200,0.6)'; ctx.lineWidth = sz * 0.06; const [cx, cy] = grid.center(i); ctx.beginPath(); ctx.moveTo(cx - sz * 0.5, cy + (hash(i, 81) - 0.5) * sz); ctx.lineTo(cx + sz * 0.1, cy); ctx.lineTo(cx + sz * 0.5, cy + (hash(i, 82) - 0.5) * sz); ctx.stroke(); }
     }
   }
   // 모래톱: 바다와 맞닿은 땅
@@ -205,11 +208,11 @@ function paintTerrain(grid, world) {
 }
 
 // ── 영토 덧칠 (주인이 바뀔 때만): 나라 색을 옅게 + 관할 경계(점선) + 나라 경계(굵게) ──
-function paintOwners(grid, s, sc) {
-  const [cv, ctx] = newLayer(grid, sc);
+// 나라 땅 색·경계 그리기 (tiles: 그릴 칸 목록)
+function drawOwnerTiles(grid, s, ctx, tiles) {
   const sz = grid.size;
   const byColor = new Map();
-  for (let i = 0; i < grid.N; i++) {
+  for (const i of tiles) {
     if (!grid.passable(i)) continue;
     const col = ownerColor(s, s.owner[i]);
     if (!byColor.has(col)) byColor.set(col, []);
@@ -231,7 +234,7 @@ function paintOwners(grid, s, sc) {
   };
   ctx.lineCap = 'round';
   ctx.beginPath();
-  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) for (const j of grid.nb[i]) if (j > i && grid.passable(j) && s.owner[j] === s.owner[i] && s.district[j] !== s.district[i]) edge(i, j);
+  for (const i of tiles) if (grid.passable(i)) for (const j of grid.nb[i]) if (grid.passable(j) && s.owner[j] === s.owner[i] && s.district[j] !== s.district[i]) edge(i, j);
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = sz * 0.1;
   ctx.setLineDash([sz * 0.3, sz * 0.25]);
@@ -239,9 +242,9 @@ function paintOwners(grid, s, sc) {
   ctx.setLineDash([]);
   // 나라 경계: 바깥은 나라 색, 안쪽은 짙은 선
   const borders = new Map();
-  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) for (const j of grid.nb[i]) if (grid.passable(j) && s.owner[j] !== s.owner[i]) { const c = ownerColor(s, s.owner[i]); if (!borders.has(c)) borders.set(c, []); borders.get(c).push([i, j]); }
+  for (const i of tiles) if (grid.passable(i)) for (const j of grid.nb[i]) if (grid.passable(j) && s.owner[j] !== s.owner[i]) { const c = ownerColor(s, s.owner[i]); if (!borders.has(c)) borders.set(c, []); borders.get(c).push([i, j]); }
   ctx.beginPath();
-  for (const list of borders.values()) for (const [i, j] of list) if (j > i) edge(i, j);
+  for (const list of borders.values()) for (const [i, j] of list) edge(i, j);
   ctx.strokeStyle = 'rgba(20,14,10,0.85)';
   ctx.lineWidth = sz * 0.22;
   ctx.stroke();
@@ -260,8 +263,35 @@ function paintOwners(grid, s, sc) {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+}
+function paintOwners(grid, s, sc) {
+  const [cv, ctx] = newLayer(grid, sc);
+  drawOwnerTiles(grid, s, ctx, Array.from({ length: grid.N }, (_, i) => i));
   seamFix(grid, cv, sc);
   return cv;
+}
+// 바뀐 칸이 있는 구역(블록)만 지우고 다시 그림 — 세계 지도처럼 칸이 많을 때 매일 전체를 다시 칠하지 않게
+const BLK = 24;
+function repaintOwners(grid, s, cv, sc, changed) {
+  const ctx = cv.getContext('2d');
+  const blocks = new Set();
+  for (const i of changed) blocks.add(Math.floor((i % grid.cols) / BLK) + ',' + Math.floor(Math.floor(i / grid.cols) / BLK));
+  let edgeTouched = false;
+  const hw = grid.size * Math.sqrt(3);
+  for (const key of blocks) {
+    const [bc, br] = key.split(',').map(Number);
+    const c0 = bc * BLK, c1 = Math.min(grid.cols - 1, c0 + BLK - 1), r0 = br * BLK, r1 = Math.min(grid.rows - 1, r0 + BLK - 1);
+    if (c0 === 0 || c1 === grid.cols - 1) edgeTouched = true;
+    const x0 = c0 * hw, x1 = (c1 + 1.5) * hw, y0 = r0 * grid.size * 1.5, y1 = (r1 + 1) * grid.size * 1.5 + grid.size;
+    const tiles = [];
+    for (let r = Math.max(0, r0 - 2); r <= Math.min(grid.rows - 1, r1 + 2); r++) for (let c = Math.max(0, c0 - 2); c <= Math.min(grid.cols - 1, c1 + 2); c++) tiles.push(r * grid.cols + c);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+    ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
+    drawOwnerTiles(grid, s, ctx, tiles);
+    ctx.restore();
+  }
+  if (edgeTouched) seamFix(grid, cv, sc);
 }
 
 // 일기토 장면: 두 장수 초상이 부딪치며 합마다 체력이 깎이고 승자가 남음
@@ -402,12 +432,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
     if (!land.current.base) land.current.base = paintTerrain(grid, world);
     if (land.current.ref !== s.owner) {
-      const key = s.owner.join(',');
-      if (land.current.key !== key) { land.current.key = key; land.current.over = paintOwners(grid, s, land.current.base.sc); }
+      const prev = land.current.prev;
+      const dPrev = land.current.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
+      if (!prev || !dSame || !land.current.over) { land.current.over = paintOwners(grid, s, land.current.base.sc); }
+      else {
+        const changed = [];
+        for (let i = 0; i < grid.N; i++) if (prev[i] !== s.owner[i]) changed.push(i);
+        if (changed.length > grid.N * 0.2) land.current.over = paintOwners(grid, s, land.current.base.sc);
+        else if (changed.length) repaintOwners(grid, s, land.current.over, land.current.base.sc, changed);
+      }
+      land.current.prev = Int16Array.from(s.owner);
+      land.current.dprev = Int32Array.from(s.district);
       land.current.ref = s.owner;
     }
     // 둥근 세계 지도: 화면 x를 한 바퀴 안으로 감고, 화면 오른쪽이 지도 끝을 넘으면 지도를 한 번 더 이어 그림
     if (grid.wrap) view.current.x = ((view.current.x % grid.period) + grid.period) % grid.period;
+    // 세계 지도는 위·아래 끝 너머로 너무 멀리 끌려가지 않게 (북극 위 빈 하늘이 일자 띠로 보이지 않게)
+    if (grid.wrap) view.current.k = Math.max(view.current.k, ch / grid.H); // 세계 지도는 위아래가 화면을 꽉 채우는 데까지만 축소
+    if (grid.wrap) { const vh = ch / view.current.k; view.current.y = vh >= grid.H ? (grid.H - vh) / 2 : Math.max(0, Math.min(grid.H - vh, view.current.y)); }
     const { k, y: vy } = view.current;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -868,7 +910,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const zoomAt = (px, py, f) => {
     const v = view.current;
     const [wx, wy] = toWorld(px, py);
-    const nk = Math.max(0.5, Math.min(14, v.k * f));
+    const nk = Math.max(0.5, grid.wrap ? wrap.current.clientHeight / grid.H : 0, Math.min(14, v.k * f));
     const r = wrap.current.getBoundingClientRect();
     v.k = nk; v.x = wx - (px - r.left) / nk; v.y = wy - (py - r.top) / nk;
     draw();
@@ -1427,8 +1469,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   const low = gs.filter((g) => loyalOf(g) < 40);
                   return <><span>충성</span><span style={{ color: low.length ? 'var(--danger)' : undefined }}>평균 {avg}{low.length ? ` · 불만 ${low.length}명 (${low.slice(0, 3).map((g) => g.name).join(', ')}${low.length > 3 ? '…' : ''})` : ''}</span></>;
                 })()}
-                {isSmall(game, pid) && <><span>약소국 결속</span><span style={{ color: '#6fd37f' }}>도시 4개 이하: 자원병 +50% · 징병비 −25% · 재야 등용 +10%p · 성 수비 피해 −15%</span></>}
-                {sprawlOf(game, pid) < 1 && <><span>영토 관리</span><span className="muted">도시가 15개를 넘어 수입·수확·자원병 −{Math.round((1 - sprawlOf(game, pid)) * 100)}%</span></>}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6 }}>
                 <button className="sm" disabled={playing || me.gold < rewardCost(game, pid)} title="충성 35 아래면 다른 나라로 떠날 수 있습니다. 금이 바닥나면 충성이 떨어집니다." onClick={() => act((s) => rewardAll(s, pid))}>🎁 전체 포상 (금 {fmtGold(rewardCost(game, pid))}, 충성 +12)</button>
@@ -1636,7 +1676,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
-                <li>🛡️ 도시 4개 이하 약소국은 결속 보너스(자원병 +50%, 징병비 −25%, 재야 등용 +10%p, 성 수비 피해 −15%)를 받습니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>

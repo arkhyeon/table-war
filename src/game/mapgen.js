@@ -27,16 +27,22 @@ function landPolygons() {
 
 // 세계 지도(경도 360도)는 대서양 한가운데(서경 26도)에서 자름 — 베링 해협(시베리아-알래스카)이 지도 가운데서 붙어 있게
 // 경도는 지도 범위 안으로 ±360 옮겨서 놓고, 돌려줄 때는 늘 -180~180으로
+// 세계 지도는 밀러 도법: 고위도로 갈수록 세로도 늘려 땅 모양(일본·한반도 등)이 옆으로 퍼져 보이지 않게
+export const millerY = (lat) => 1.25 * Math.log(Math.tan(Math.PI / 4 + (0.4 * lat * Math.PI) / 180));
+const millerLat = (y) => ((Math.atan(Math.exp(y / 1.25)) - Math.PI / 4) / 0.4) * (180 / Math.PI);
 function makeGeo(bbox, W, H) {
   const [lon0, lat0, lon1, lat1] = bbox;
   const whole = lon1 - lon0 >= 359;
   const wrap = (lon) => (whole ? (lon < lon0 ? lon + 360 : lon > lon1 ? lon - 360 : lon) : lon);
   const norm = (lon) => (lon > 180 ? lon - 360 : lon < -180 ? lon + 360 : lon);
+  const Y0 = millerY(lat0), Y1 = millerY(lat1);
+  const yOf = whole ? (lat) => ((Y1 - millerY(Math.max(-85, Math.min(85, lat)))) / (Y1 - Y0)) * H : (lat) => ((lat1 - lat) / (lat1 - lat0)) * H;
+  const latOf = whole ? (y) => millerLat(Y1 - (y / H) * (Y1 - Y0)) : (y) => lat1 - (y / H) * (lat1 - lat0);
   return {
     whole,
-    toPxRaw: (lon, lat) => [((lon - lon0) / (lon1 - lon0)) * W, ((lat1 - lat) / (lat1 - lat0)) * H],
-    toPx: (lon, lat) => [((wrap(lon) - lon0) / (lon1 - lon0)) * W, ((lat1 - lat) / (lat1 - lat0)) * H],
-    toLL: (x, y) => [norm(lon0 + (x / W) * (lon1 - lon0)), lat1 - (y / H) * (lat1 - lat0)],
+    toPxRaw: (lon, lat) => [((lon - lon0) / (lon1 - lon0)) * W, yOf(lat)],
+    toPx: (lon, lat) => [((wrap(lon) - lon0) / (lon1 - lon0)) * W, yOf(lat)],
+    toLL: (x, y) => [norm(lon0 + (x / W) * (lon1 - lon0)), latOf(y)],
     pxPerDeg: W / (lon1 - lon0),
   };
 }
@@ -120,7 +126,7 @@ function buildHistorical(scn, g) {
       const [cx, cy] = corner(x, y, size * 0.6, k);
       if (isLand(cx, cy)) n++;
     }
-    terrain[i] = n >= 4 ? T.PLAINS : T.SEA;
+    terrain[i] = n >= (geo.whole ? 3 : 4) ? T.PLAINS : T.SEA; // 세계 지도는 칸이 굵어 반도·해안이 깎이지 않게 뭍을 조금 너그럽게
   }
   // 세계 지도: 일본·영국·필리핀·뉴질랜드처럼 가는 섬은 칸이 굵어 실제보다 훨씬 작아 보이므로 한 겹 두껍게
   if (scn.bbox[2] - scn.bbox[0] >= 300) {

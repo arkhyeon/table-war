@@ -487,6 +487,33 @@ export const SCENARIOS = [
       N('코만치', 'americas', -99.5, 33.5, 3, '코만체리아', '코만치 대추장|85|80|60|55|기마'),
       N('라코타', 'americas', -102.5, 44.0, 3, '파하 사파', '라코타 대추장|80|80|65|60|기마'),
       N('마푸체', 'americas', -72.6, -38.7, 2, '아라우카니아', '마푸체 토키|80|80|65|60|기마'),
+      N('덴마크-노르웨이', 'nordic', 12.57, 55.68, 3, '코펜하겐', '프레데리크 6세|60|65|65|70|정치'),
+      N('포르투갈', 'iberian', -9.14, 38.72, 2, '리스본', '주앙 6세|40|50|60|65|정치'),
+      N('나폴리', 'italian', 14.25, 40.85, 2, '나폴리', '페르디난도 4세|45|50|50|55|정치'),
+      N('바이에른', 'german', 11.58, 48.14, 2, '뮌헨', '막시밀리안 요제프|55|60|70|75|정치'),
+      N('네덜란드', 'dutch', 4.9, 52.37, 2, '암스테르담', '바타비아 집정부|50|60|70|75|교역'),
+      N('알제', 'north_african', 3.06, 36.75, 3, '알제', '무스타파 파샤|70|70|60|60|수군'),
+      N('튀니스', 'north_african', 10.18, 36.8, 2, '튀니스', '함무다 파샤|65|70|70|75|정치'),
+      N('트리폴리', 'north_african', 13.19, 32.89, 2, '트리폴리', '유수프 카라만리|75|70|65|65|수군'),
+      N('오요', 'west_african', 4.15, 8.95, 3, '오요', '아올레|65|70|60|60|기마'),
+      N('보르누', 'west_african', 13.35, 13.42, 3, '은가자르가무', '아흐마드 알가지|60|65|65|65|수성'),
+      N('센나르', 'east_african', 33.62, 13.55, 2, '센나르', '센나르 술탄|55|60|60|60|수성'),
+      N('다르푸르', 'east_african', 25.35, 13.63, 2, '엘파셰르', '압드 알라흐만|70|70|65|65|기마'),
+      N('부간다', 'east_african', 32.57, 0.3, 2, '멩고', '카망가|60|65|60|60|수군'),
+      N('콩고', 'west_african', 14.24, -6.27, 2, '음반자콩고', '콩고 왕|50|55|60|60|교역'),
+      N('룬다', 'east_african', 22.5, -8.5, 3, '무숨바', '므와안트 야브|60|65|60|60|교역'),
+      N('메리나', 'east_african', 47.5, -18.9, 2, '안타나나리보', '안드리아남포이니메리나|75|80|85|85|명장'),
+      N('오만', 'arab', 58.4, 23.6, 2, '무스카트', '술탄 빈 아흐마드|70|75|70|75|수군'),
+      N('디리야', 'arab', 46.57, 24.73, 3, '디리야', '압둘아지즈 빈 무함마드|80|80|75|70|기마'),
+      N('부하라', 'persia', 64.42, 39.77, 3, '부하라', '샤 무라드|60|65|70|70|정치'),
+      N('히바', 'persia', 60.36, 41.38, 2, '히바', '아왈리 이나크|55|60|60|60|수성'),
+      N('코칸드', 'turk', 70.94, 40.53, 2, '코칸드', '알림 칸|80|80|60|55|맹장'),
+      N('하이데라바드', 'india', 78.47, 17.38, 3, '하이데라바드', '니잠 알리 칸|55|60|70|70|정치'),
+      N('네팔', 'india', 85.32, 27.7, 2, '카트만두', '바하두르 샤|70|75|70|70|책략'),
+      N('하와이', 'southeast_asian', -155.99, 19.64, 1, '카일루아', '카메하메하 1세|90|90|75|80|명장'),
+      N('바타비아', 'dutch', 106.8, -6.2, 3, '바타비아', '오버르스트라턴|50|60|70|75|교역'),
+      N('누에바 그라나다', 'iberian', -74.07, 4.6, 4, '보고타', '페드로 멘디누에타|50|60|65|65|수성'),
+      N('리오데라플라타', 'iberian', -58.38, -34.6, 4, '부에노스아이레스', '아빌레스 후작|50|60|65|65|수성'),
       N('아샨티', 'west_african', -1.62, 6.69, 3, '쿠마시', '오세이 콰메|80|80|75|75|명장'),
       N('에티오피아', 'east_african', 37.47, 12.6, 3, '곤다르', '테클레 기요르기스|70|70|60|60|산악'),
       N('이집트', 'arab', 31.25, 30.05, 3, '카이로', '무라드 베이|85|80|60|55|기마'),
@@ -1037,14 +1064,16 @@ for (const scn of SCENARIOS) if (scn.id === 'later_three900') scn.keepLand = NOT
 const NAT_POOL = { 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
 for (const scn of SCENARIOS) for (const n of scn.nations || []) if (NAT_POOL[n.name] && !n.pools) n.pools = [NAT_POOL[n.name]];
 
-// ── 세계 지도 칸: 약 1.4배 촘촘하게 (칸 하나 약 70km — 서울~부산 5칸쯤). 지역 수는 그대로 (지역 크기도 같은 비율로)
+// ── 세계 지도 칸: 2배 촘촘하게 (칸 하나 적도 약 83km·한반도 위도 약 60km — 서울~부산 5~6칸). 지역 수는 그대로 (지역 크기도 같은 비율로)
 // worldScale: 칸이 작아진 만큼 부대가 하루에 더 많은 칸을 감 (실제 거리로는 같은 빠르기)
-const WORLD_K = 1.4;
+const WORLD_K = 2;
+// 밀러 도법(mapgen)으로 세로가 늘어난 비율 — 칸이 정사각에 가깝게 행 수를 그만큼 늘림
+const MILLER_RATIO = ([, s, , n]) => { const m = (l) => 1.25 * Math.log(Math.tan(Math.PI / 4 + (0.4 * l * Math.PI) / 180)); return (m(n) - m(s)) / (((n - s) * Math.PI) / 180); };
 for (const scn of SCENARIOS) {
   if (scn.group !== 'world' || !scn.bbox || scn.procedural) continue;
   scn.cols = Math.round(scn.cols * WORLD_K);
-  scn.rows = Math.round(scn.rows * WORLD_K);
-  scn.regionSize = Math.round(scn.regionSize * WORLD_K * WORLD_K);
+  scn.rows = Math.round(scn.rows * WORLD_K * MILLER_RATIO(scn.bbox));
+  scn.regionSize = Math.round(scn.regionSize * WORLD_K * WORLD_K * MILLER_RATIO(scn.bbox));
   scn.worldScale = WORLD_K;
 }
 
@@ -1243,7 +1272,7 @@ const eraFor = (year) => {
 // 세계판이 되는 지역사 (좁은 무대는 worldGrid로 격자를 촘촘히)
 export const canWorld = (scn) => scn.group === 'region';
 
-const WORLD_BASE = { bbox: [-26, -56, 334, 83], cols: 216, rows: 111, regionSize: 13, seaReach: 5 };
+const WORLD_BASE = { bbox: [-26, -56, 334, 83], cols: 216, rows: Math.round(111 * MILLER_RATIO([-26, -56, 334, 83])), regionSize: Math.round(13 * MILLER_RATIO([-26, -56, 334, 83])), seaReach: 5 };
 const variants = {};
 export function worldVariant(base) {
   if (variants[base.id]) return variants[base.id];

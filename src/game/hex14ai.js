@@ -35,7 +35,16 @@ export function frontier(s, grid, nid, c) {
   }
   return mineD <= otherD + 2 * grid.k ? mineD : Infinity;
 }
+// 하루 안에서는 같은 답이라 한 번만 계산 (세계 지도는 성이 많아 무거움)
+const nbCache = new WeakMap();
 function neighbors(s, grid, nid) {
+  const key = `${s.turn}:${s.day}`;
+  let m = nbCache.get(s);
+  if (!m || m.key !== key) nbCache.set(s, (m = { key, v: new Map() }));
+  if (!m.v.has(nid)) m.v.set(nid, neighbors0(s, grid, nid));
+  return m.v.get(nid);
+}
+function neighbors0(s, grid, nid) {
   const d = new Map();
   for (const c of s.castles) {
     if (c.owner === null || c.owner === nid || !s.nations[c.owner]?.alive) continue;

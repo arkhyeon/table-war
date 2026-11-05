@@ -24,9 +24,13 @@ const kmOf = (scn) => scn?.kmPerHex || 30 / (scn?.worldScale || 1);
 // 세계 지도 북극 얼음 경계: 이 줄보다 위는 땅이든 바다든 모두 얼음 (들쭉날쭉한 한 줄 경계 — 땅·얼음이 얼룩덜룩 섞이지 않게)
 // 둥근 지도에서 이음매가 맞게, 물결 주기를 열 수(cols)로 나누어떨어지게 맞춤
 export const iceRow = (c, k = 1, cols = 0) => {
+  // 바다 얼음 경계: 큰 물결 + 작은 물결 여러 겹 (위도 약 81~67도 사이를 들쭉날쭉하게)
   const w = (f) => (cols ? (2 * Math.PI * Math.max(1, Math.round((f * cols) / k / (2 * Math.PI)))) / cols : f / k);
-  return k * (7 + Math.sin(c * w(0.21)) * 1.6 + Math.sin(c * w(0.07) + 1.3) * 2.2 + Math.sin(c * w(0.53) + 0.7) * 0.6);
+  const n = Math.sin(c * w(0.045) + 0.4) * 2.6 + Math.sin(c * w(0.13) + 1.3) * 1.8 + Math.sin(c * w(0.31) + 0.7) * 1.1 + Math.sin(c * w(0.71) + 2.1) * 0.6 + Math.sin(c * w(1.37) + 0.2) * 0.35;
+  return k * (8 + n);
 };
+// 땅 위 얼음(만년설로 덮여 못 감): 바다 얼음보다 훨씬 위쪽만
+export const landIceRow = (c, k = 1, cols = 0) => Math.max(1.5 * k, iceRow(c, k, cols) * 0.35);
 // ── 칸 지도 (저장하지 않고 world에서 매번 만듦) ──
 export function buildGrid(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
@@ -35,7 +39,7 @@ export function buildGrid(world) {
   const wrapX = !!bb0 && bb0[2] - bb0[0] >= 359;
   const cols = wrapX ? Math.floor(world.W / (size * SQRT3)) : Math.ceil(world.W / (size * SQRT3)), rows = Math.ceil((world.H - size) / (1.5 * size)) + 1;
   const N = cols * rows;
-  const terrain = new Uint8Array(N), region = new Int16Array(N).fill(-1), river = new Uint8Array(N), outside = new Uint8Array(N);
+  const terrain = new Uint8Array(N), region = new Int16Array(N).fill(-1), river = new Uint8Array(N), outside = new Uint8Array(N), ice = new Uint8Array(N); // ice: 북극 얼음(배도 못 감)
   for (let i = 0; i < N; i++) {
     const [x, y] = cellCenter(size, cols, i);
     const f = pixelToCell(world.size, world.cols, world.rows, x, y);
@@ -52,7 +56,8 @@ export function buildGrid(world) {
     const ws = getScenario(world.scenarioId)?.worldScale || 1;
     for (let i = 0; i < N; i++) {
       const c = i % cols, r = Math.floor(i / cols);
-      if (r < iceRow(c, ws, wrapX ? cols : 0)) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; }
+      const lim = iceRow(c, ws, wrapX ? cols : 0);
+      if (r < landIceRow(c, ws, wrapX ? cols : 0) || (r < lim && terrain[i] === T.SEA)) { terrain[i] = T.SEA; river[i] = 0; region[i] = -1; outside[i] = 0; ice[i] = 1; }
     }
   }
   const nb = [];
@@ -86,10 +91,11 @@ export function buildGrid(world) {
   }
   // 바다 전체 (깊은 바다 포함): 항구에서 나온 부대만 깊은 바다를 건넘, 얕은 바다(water)는 누구나
   const sea = new Uint8Array(N);
-  for (let i = 0; i < N; i++) if (terrain[i] === T.SEA) sea[i] = 1;
+  for (let i = 0; i < N; i++) if (terrain[i] === T.SEA && !ice[i]) sea[i] = 1;
+  for (let i = 0; i < N; i++) if (ice[i]) water[i] = 0;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, outside, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
+  return { size, cols, rows, N, terrain, region, river, outside, ice, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -108,7 +114,7 @@ const TK_CITIES = [
 ];
 
 // 도시 자리 고르기: 삼국지면 위 목록, 아니면 지역 4곳당 도시 1곳(큰 지역·실제 지명·수도 우선, 서로 떨어지게)
-function pickCities(world, grid, base) {
+function pickCities(world, grid, base, tileOwner = null) {
   const near = (t0) => {
     if (t0 >= 0 && grid.passable(t0)) return t0;
     let best = -1, bd = Infinity;
@@ -151,7 +157,7 @@ function pickCities(world, grid, base) {
     const allWant = ownedGroups.reduce((a, [, regs]) => a + Math.max(2, Math.round(regs.length / per)), 0);
     const tpc = allTiles / Math.max(1, allWant); // 성 하나당 평균 칸 수
     for (const [o, regs] of groups) {
-      const byArea = Math.round((tilesOfRegs(regs) / tpc) * 1.2);
+      const byArea = Math.round((tilesOfRegs(regs) / tpc) ** 0.8 * 1.2); // 아주 넓은 나라(시베리아 등)는 덜 늘림
       const want = o === -1 ? Math.round(regs.length / per) : Math.max(2, Math.round(regs.length / per), byArea);
       let have = out.filter((c) => (base.regions[grid.region[c.tile]]?.owner ?? -1) === o).length;
       const order = regs.slice().sort((a, b) => (base.regions[b.id].pop || 0) - (base.regions[a.id].pop || 0));
@@ -169,6 +175,22 @@ function pickCities(world, grid, base) {
           let bt = -1, bd = -1;
           for (let k = 0; k < cand.length; k += 3) { const i = cand[k]; let m = Infinity; for (const c of out) { const d = grid.dist(c.tile, i); if (d < m) m = d; if (m <= bd) break; } if (m > bd) { bd = m; bt = i; } }
           if (bt < 0 || bd < Math.max(3, gap * 0.8)) break;
+          out.push({ name: base.regions[grid.region[bt]].name, tile: bt, kind: 'city' });
+          have += 1;
+        }
+      }
+    }
+    // 역사 강역(칸 단위) 기준으로 다시: 나라마다 그 땅 넓이만큼 성이 있게 (지역 단위로는 작게 잡히는 나라 보충)
+    if (tileOwner) {
+      const ownT = new Map();
+      for (let i = 0; i < grid.N; i++) { if (!grid.passable(i) || grid.terrain[i] === T.MOUNTAIN || grid.terrain[i] === T.PEAK) continue; const o = tileOwner(i); if (o < 0) continue; if (!ownT.has(o)) ownT.set(o, []); ownT.get(o).push(i); }
+      for (const [o, tiles] of ownT) {
+        const want = Math.max(2, Math.round((tiles.length / tpc) ** 0.8 * 1.1));
+        let have = out.filter((c) => tileOwner(c.tile) === o).length;
+        while (have < want) {
+          let bt = -1, bd = -1;
+          for (let k = 0; k < tiles.length; k += 2) { const i = tiles[k]; let m = Infinity; for (const c of out) { const d = grid.dist(c.tile, i); if (d < m) m = d; if (m <= bd) break; } if (m > bd) { bd = m; bt = i; } }
+          if (bt < 0 || bd < Math.max(3, Math.min(gap * 0.6, Math.sqrt(tiles.length) * 0.6))) break;
           out.push({ name: base.regions[grid.region[bt]].name, tile: bt, kind: 'city' });
           have += 1;
         }
@@ -234,38 +256,70 @@ function pickCities(world, grid, base) {
 }
 
 // 관할 구역: 도시마다 가장 가까운(길 기준) 칸들
-function districts(grid, cities) {
-  const dist = new Float64Array(grid.N).fill(Infinity), own = new Array(grid.N).fill(-1);
+// landOwner(칸)가 있으면: 먼저 성마다 '같은 주인의 땅'으로만 넓히고(나라 땅은 그 나라 성이 맡음), 남은 칸을 가까운 성이 맡음
+function districts(grid, cities, landOwner = null) {
+  const own = new Array(grid.N).fill(-1);
   const q = [];
-  cities.forEach((c, i) => { if (c.kind !== 'city' || c.founding) return; dist[c.tile] = 0; own[c.tile] = i; q.push(c.tile); });
-  for (let k = 0; k < q.length; k++) {
-    const t = q[k];
-    for (const nx of grid.nb[t]) {
-      if (!grid.passable(nx) || own[nx] >= 0) continue;
-      own[nx] = own[t];
-      q.push(nx);
+  cities.forEach((c, i) => { if (c.kind !== 'city' || c.founding) return; own[c.tile] = i; q.push(c.tile); });
+  const spread = (ok) => {
+    for (let k = 0; k < q.length; k++) {
+      const t = q[k];
+      for (const nx of grid.nb[t]) {
+        if (!grid.passable(nx) || own[nx] >= 0 || (ok && !ok(nx, own[t]))) continue;
+        own[nx] = own[t];
+        q.push(nx);
+      }
     }
+  };
+  if (landOwner) {
+    spread((nx, ci) => landOwner(nx) === (cities[ci].owner ?? -1));
+    // 둘째 단계: 아직 아무도 안 맡은 칸을 이미 맡은 칸들에서 다시 넓힘
+    q.length = 0;
+    for (let i = 0; i < grid.N; i++) if (own[i] >= 0) q.push(i);
   }
+  spread(null);
   return own;
 }
 
 // 새 도시가 생기면 관할 구역을 다시 나눔
 export function redistrict(s, grid) {
-  s.district = districts(grid, s.castles);
+  s.district = districts(grid, s.castles, (i) => s.owner?.[i] ?? -1);
 }
 
 // ── 새 판: 기존 게임 설정(나라·장수·지역 병력)을 칸 지도와 도시로 옮김 ──
 export function createHex14(world, base) {
   const grid = buildGrid(world);
-  const picks = pickCities(world, grid, base);
-  const district = districts(grid, picks);
-  const regOwner = (t) => { const o = base.regions[grid.region[t]]?.owner; return o === null || o === undefined ? -1 : o; };
+  const regOwner0 = (t) => { const o = base.regions[grid.region[t]]?.owner; return o === null || o === undefined ? -1 : o; };
+  // 역사 강역(상자)이 있는 판: 칸 하나하나를 그 칸 경위도가 든 가장 작은 상자의 나라로 — 지역(큰 덩어리) 단위보다 국경이 실제에 가깝게
+  const scnN = getScenario(base.scenarioId)?.nations || [];
+  const boxes = [];
+  base.nations.forEach((n, i) => { if (n.alive) for (const b of scnN[i]?.area || []) boxes.push([b, (b[2] - b[0]) * (b[3] - b[1]), i]); });
+  const tileOwn = new Int16Array(grid.N).fill(-2);
+  const regOwner = (t) => {
+    if (!boxes.length || !world.geo) return regOwner0(t);
+    if (tileOwn[t] !== -2) return tileOwn[t];
+    const [lon0, lat0] = world.geo.toLL(...grid.center(t));
+    // 국경이 상자 모서리처럼 일직선이 되지 않게 살짝 흔들어서 판정
+    const jw = world.geo.whole ? 1 : 0.25; // 지역사(칸이 잘음)는 조금만
+    const lon = lon0 + (Math.sin(lat0 * 1.3 + lon0 * 0.4) * 0.7 + Math.sin(lat0 * 3.1 - lon0 * 2.2) * 0.35) * jw;
+    const lat = lat0 + (Math.sin(lon0 * 1.1 - lat0 * 0.7) * 0.5 + Math.sin(lon0 * 2.9 + lat0 * 1.9) * 0.25) * jw;
+    let best = -1, ba = Infinity;
+    for (const [[w, s0, e, nn], a, i] of boxes) if (a < ba && lon >= w && lon <= e && lat >= s0 && lat <= nn) { ba = a; best = i; }
+    // 상자 밖이면 지역 주인 (단, 그 지역 주인이 강역 상자를 가진 나라면 상자 밖 땅은 중립)
+    if (best < 0) { const r = regOwner0(t); best = r >= 0 && (scnN[r]?.area?.length) ? -1 : r; }
+    return (tileOwn[t] = best);
+  };
+  const picks = pickCities(world, grid, base, boxes.length && world.geo ? regOwner : null);
   const castles = picks.map((p, id) => {
     const capOf = p.capitalOf ?? base.nations.findIndex((n) => n.alive && n.capital === grid.region[p.tile]);
     const owner = capOf >= 0 ? capOf : regOwner(p.tile);
     const pass = p.kind === 'pass';
     return { id, tile: p.tile, region: grid.region[p.tile], name: p.name, kind: p.kind, owner: owner === -1 ? null : owner, troops: 0, dur: pass ? 6000 : 3000, maxDur: pass ? 6000 : 3000, pop: 0, capital: capOf >= 0, bandit: null };
   });
+  // 관할 구역: 나라 땅(역사 강역)은 그 나라 성이 먼저 맡음
+  const hasCastle = new Set(castles.map((c) => c.owner).filter((o) => o !== null));
+  const landOwner = (i) => { const o = regOwner(i); return hasCastle.has(o) ? o : -1; };
+  const district = districts(grid, castles, landOwner);
   // 지역의 병력·인구를 그 지역 성 칸이 속한 도시로 모음
   world.regions.forEach((wr, r) => {
     const t = grid.castleTile[r];
@@ -287,7 +341,8 @@ export function createHex14(world, base) {
   }
   // 땅: 그 칸이 속한 도시의 주인 (삼국지14처럼 시작할 때 관할 구역이 통째로 그 나라 땅)
   const owner = new Array(grid.N).fill(-1);
-  for (let i = 0; i < grid.N; i++) if (grid.passable(i) && district[i] >= 0) { const o = castles[district[i]].owner; owner[i] = o === null ? -1 : o; }
+  // 단, 그 칸의 지역이 실제로 그 나라 땅(역사 강역)일 때만 — 성이 드문 빈 땅(사막·초원)까지 통째로 칠해지지 않게. 나머지는 시간이 지나며 넓어짐
+  for (let i = 0; i < grid.N; i++) if (grid.passable(i)) owner[i] = landOwner(i);
   for (const c of castles) owner[c.tile] = c.owner === null ? -1 : c.owner;
   // 항구: 바닷길이 3칸 안에 닿는 도시
   for (const c of castles) c.port = c.kind !== 'pass' && grid.water.some((w, t) => w && grid.dist(t, c.tile) <= 3);
@@ -830,21 +885,26 @@ export function nearestCastle(s, grid, tile, nation) {
 
 // 보급망: 내 성에서 내 땅(칸)으로 이어진 칸들 (+그 옆 한 칸)
 export function supplyMap(s, grid, nation) {
-  const seen = new Set();
-  const q = s.castles.filter((c) => c.owner === nation).map((c) => c.tile).concat((s.forts || []).filter((f) => f.kind === 'camp' && f.owner === nation && !f.left).map((f) => f.tile));
-  for (const t of q) seen.add(t);
+  // 칸이 많은 세계 지도에서도 빠르게: 방문 표시는 숫자 배열, 나라끼리 적대 여부는 미리 한 번만
+  const seen = new Uint8Array(grid.N), q = new Int32Array(grid.N);
+  let n = 0;
+  const push = (t) => { if (!seen[t]) { seen[t] = 1; q[n++] = t; } };
+  for (const c of s.castles) if (c.owner === nation) push(c.tile);
+  for (const f of s.forts || []) if (f.kind === 'camp' && f.owner === nation && !f.left) push(f.tile);
   // 항구가 있으면 얕은 바다(뭍에서 3칸)로도 보급선이 이어짐 (바다 건너 섬 공략)
   const port = s.castles.some((c) => c.owner === nation && c.port);
-  for (let k = 0; k < q.length; k++) for (const nx of grid.nb[q[k]]) {
-    // 내 땅과 동맹·정전국 땅으로 이어지면 보급됨
-    if (seen.has(nx)) continue;
-    if (port && grid.water[nx] && !s.units.some((u) => u.tile === nx && enemy(s, nation, u.nation))) { seen.add(nx); q.push(nx); continue; }
-    if (s.owner[nx] !== nation && (s.owner[nx] < 0 || enemy(s, nation, s.owner[nx]))) continue;
-    seen.add(nx);
-    q.push(nx);
+  const foeAt = new Set(s.units.filter((u) => enemy(s, nation, u.nation)).map((u) => u.tile)); // 적 부대가 선 칸 (한 번만 모음)
+  // 내 땅과 동맹·정전국 땅으로 이어지면 보급됨
+  const okOwner = s.nations.map((m) => m.id === nation || !enemy(s, nation, m.id));
+  for (let k = 0; k < n; k++) for (const nx of grid.nb[q[k]]) {
+    if (seen[nx]) continue;
+    if (port && grid.water[nx] && !foeAt.has(nx)) { seen[nx] = 1; q[n++] = nx; continue; }
+    const o = s.owner[nx];
+    if (o !== nation && (o < 0 || !okOwner[o])) continue;
+    seen[nx] = 1; q[n++] = nx;
   }
-  for (const t of [...seen]) for (const nx of grid.nb[t]) seen.add(nx);
-  return seen;
+  // 보급선 바로 옆 한 칸까지는 보급됨
+  return { has: (t) => !!seen[t] || grid.nb[t].some((x) => seen[x]) };
 }
 
 // 성 함락: 그 지역 땅이 통째로 넘어감, 공격 부대는 성에 들어감
