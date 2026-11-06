@@ -15,7 +15,7 @@ import Slider from './Slider.jsx';
 import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
-import { weatherText, uniqueOf } from '../game/hex14extra.js';
+import { weatherText, weatherAt, uniqueOf } from '../game/hex14extra.js';
 import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
@@ -63,7 +63,7 @@ function paintTerrain(grid, world, chunk = null) {
     ctx.closePath();
   };
   // 바다: 뭍에서 멀수록 짙게 (10칸까지 부드럽게 단계), 먼바다 바탕
-  ctx.fillStyle = '#2a5d82';
+  ctx.fillStyle = '#1a4064';
   ctx.fillRect(0, 0, grid.W, grid.H);
   // 둥근 세계 지도: 북극 얼음 띠 바탕을 먼저 깔아 칸 사이 틈(지그재그)이 바다색 점선으로 보이지 않게
   if (grid.wrap) { ctx.fillStyle = '#e6eef2'; ctx.fillRect(0, 0, grid.W, grid.size * 1.5 * 2); }
@@ -74,7 +74,7 @@ function paintTerrain(grid, world, chunk = null) {
     for (let k = 0; k < q.length; k++) { const x = q[k]; if (dd[x] >= 10) continue; for (const j of grid.nb[x]) if (dd[j] === 255 && grid.terrain[j] === 0) { dd[j] = dd[x] + 1; q.push(j); } }
     grid.seaDepth = dd;
   }
-  const SEA_NEAR = [143, 208, 222], SEA_FAR = [42, 93, 130];
+  const SEA_NEAR = [92, 156, 182], SEA_FAR = [26, 64, 100]; // 얕은 바다 → 먼 바다 (너무 하늘색이지 않게)
   for (const i of (TILES || ALL)) {
     if (grid.terrain[i] !== 0) continue;
     const d = Math.min(10, grid.seaDepth[i]);
@@ -188,16 +188,6 @@ function paintTerrain(grid, world, chunk = null) {
       for (let k = 0; k < 2; k++) { if (hash(i, 90 + k) > 0.55) continue; const x = cx + (hash(i, 92 + k) - 0.5) * sz * 1.2, y = cy + (hash(i, 94 + k) - 0.5) * sz; ctx.beginPath(); ctx.arc(x, y + sz * 0.25, sz * 0.35, Math.PI * 1.15, Math.PI * 1.85); ctx.stroke(); }
       if (hash(i, 96) < 0.3) { ctx.strokeStyle = 'rgba(120,130,90,0.6)'; ctx.lineWidth = sz * 0.05; const x = cx + (hash(i, 97) - 0.5) * sz, y = cy + (hash(i, 98) - 0.5) * sz; ctx.beginPath(); ctx.moveTo(x - sz * 0.08, y); ctx.lineTo(x - sz * 0.04, y - sz * 0.14); ctx.moveTo(x + sz * 0.06, y); ctx.lineTo(x + sz * 0.05, y - sz * 0.15); ctx.stroke(); }
     }
-  }
-  // 실제 해안선을 가는 선으로 덧그림 (칸이 굵어도 한반도·일본 같은 땅 모양을 알아보기 쉽게)
-  if (world.geo && world.paths?.land) {
-    try {
-      const coast = new Path2D(world.paths.land);
-      ctx.strokeStyle = 'rgba(30,60,80,0.55)';
-      ctx.lineWidth = sz * 0.14;
-      ctx.lineJoin = 'round';
-      for (const ox of grid.wrap ? [0, -grid.period, grid.period] : [0]) { ctx.save(); ctx.translate(ox, 0); ctx.stroke(coast); ctx.restore(); }
-    } catch { /* 해안선 없이 */ }
   }
   // 칸 테두리 (아주 옅게)
   ctx.strokeStyle = 'rgba(0,0,0,0.07)';
@@ -407,39 +397,54 @@ function repaintOwners(grid, s, cv, sc, changed) {
   if (edgeTouched) seamFix(grid, cv, sc);
 }
 
-// 일기토 장면: 두 장수 초상이 부딪치며 합마다 체력이 깎이고 승자가 남음
-function DuelView({ d, game, pid }) {
-  const [step, setStep] = useState(0);
+// 일기토 장면: 소개 → 합마다 두 장수가 달려들어 부딪치고(피해 숫자·회심의 일격) → 승부 — 화면을 누르면 결과로 건너뜀
+export const DUEL_T = { intro: 1500, round: 1250, end: 2600 };
+export const duelMs = (d) => DUEL_T.intro + d.rounds.length * DUEL_T.round + DUEL_T.end;
+function DuelView({ d, game, pid, onSkip }) {
+  const [step, setStep] = useState(0); // 0 = 소개, 1..n = n합째, n+1 = 승부
+  const n = d.rounds.length;
   useEffect(() => {
-    holdSfx(d.rounds.length * 0.52 + 1.2);
-    const t = setInterval(() => setStep((v) => Math.min(v + 1, d.rounds.length + 1)), 520);
-    return () => clearInterval(t);
+    holdSfx(duelMs(d) / 1000);
+    const ts = [setTimeout(() => setStep(1), DUEL_T.intro)];
+    for (let r = 2; r <= n + 1; r++) ts.push(setTimeout(() => setStep(r), DUEL_T.intro + (r - 1) * DUEL_T.round));
+    return () => ts.forEach(clearTimeout);
   }, [d]);
   useEffect(() => {
-    if (step === 0) return;
-    if (step <= d.rounds.length) sfx('duelHit');
-    else if (step === d.rounds.length + 1) { if (!d.winner) sfx('duelLose'); else { const mineWon = (d.winner === d.a ? d.an : d.bn) === pid; sfx(mineWon ? 'duelWin' : 'duelLose'); } }
+    if (step >= 1 && step <= n) setTimeout(() => sfx('duelHit'), 380); // 부딪히는 순간
+    else if (step === n + 1) { if (!d.winner) sfx('duelLose'); else { const mineWon = (d.winner === d.a ? d.an : d.bn) === pid; sfx(mineWon ? 'duelWin' : 'duelLose'); } }
   }, [step]);
-  const g = (name) => Object.values(game.generals).find((x) => x.name === name) || { name, war: 80, lead: 70, intel: 50, pol: 50 };
-  const [ha, hb] = step === 0 ? [100, 100] : d.rounds[Math.min(step, d.rounds.length) - 1];
-  const done = step > d.rounds.length;
-  const side = (name, nat, hp, left) => (
-    <div className={'duel-side' + (step > 0 && !done && step % 2 === (left ? 1 : 0) ? ' hit' : '') + (done && d.winner && d.winner !== name ? ' lose' : '')}>
-      <img src={portraitURL(g(name), game.nations[nat]?.color || '#fff')} alt="" width={96} height={96} />
-      <b>{name}</b>
-      <small>무력 {g(name).war}</small>
-      <div className="duel-hp"><div style={{ width: `${hp}%`, background: hp > 40 ? '#6fd37f' : '#e2655a' }} /></div>
-    </div>
-  );
-  return (
-    <div className="duel">
-      <div className="duel-title">⚔️ 일기토!</div>
-      <div className="duel-row">
-        {side(d.a, d.an, ha, true)}
-        <div className="duel-vs">{done ? '🏆' : step % 2 ? '⚡' : '✦'}</div>
-        {side(d.b, d.bn, hb, false)}
+  const g = (name) => Object.values(game.generals).find((x) => x.name === name) || { name, war: 80, lead: 70, intel: 50, pol: 50, traits: [] };
+  const cur = step === 0 ? [100, 100] : d.rounds[Math.min(step, n) - 1];
+  const prev = step <= 1 ? [100, 100] : d.rounds[Math.min(step, n) - 2];
+  const done = step > n;
+  const fighting = step >= 1 && !done;
+  const dmgA = fighting ? prev[0] - cur[0] : 0, dmgB = fighting ? prev[1] - cur[1] : 0; // a가 받은 피해, b가 받은 피해
+  const crit = fighting && Math.max(dmgA, dmgB) >= 30;
+  const side = (name, nat, hp, left, dmg) => {
+    const gg = g(name);
+    const lost = done && d.winner && d.winner !== name, won = done && d.winner === name;
+    return (
+      <div key={`${name}-${step}`} className={`duel-side ${left ? 'L' : 'R'}${step === 0 ? ' intro' : ''}${fighting ? ' charge' : ''}${lost ? ' lose' : ''}${won ? ' win' : ''}${done && !d.winner ? ' draw' : ''}`}>
+        <div className="duel-face" style={{ borderColor: game.nations[nat]?.color || '#fff' }}>
+          <img src={portraitURL(gg, game.nations[nat]?.color || '#fff')} alt="" width={120} height={120} />
+          {fighting && dmg > 0 && <span className={`duel-dmg${dmg >= 30 ? ' big' : ''}`}>−{dmg}</span>}
+        </div>
+        <b className="duel-name">{name}</b>
+        <small>{game.nations[nat]?.name} · 무력 {gg.war}{(gg.traits || []).filter(([t]) => t === '맹장' || t === '무쌍').map(([t, l]) => ` · ${t}${'ⅠⅡⅢ'[l - 1] || ''}`).join('')}</small>
+        <div className="duel-hp"><div style={{ width: `${Math.max(0, hp)}%`, background: hp > 50 ? '#6fd37f' : hp > 25 ? '#f0c24b' : '#e2655a' }} /><span>{Math.max(0, Math.round(hp))}</span></div>
       </div>
-      <div className="duel-msg">{done ? (d.winner ? `${d.winner}의 승리!${d.fate || ''}` : `무승부!${d.fate || ''}`) : `${Math.min(step + 1, d.rounds.length)}합째…`}</div>
+    );
+  };
+  return (
+    <div className={`duel${crit ? ' shake' : ''}`} onClick={onSkip} title="누르면 건너뜀">
+      <div className="duel-title">{step === 0 ? '⚔️ 일기토!' : done ? (d.winner ? '승 부' : '무 승 부') : `제 ${step}합`}</div>
+      <div className="duel-row">
+        {side(d.a, d.an, cur[0], true, dmgA)}
+        <div className={`duel-vs${fighting ? ' clash' : ''}`} key={`vs-${step}`}>{done ? (d.winner ? '🏆' : '🤝') : fighting ? '💥' : 'VS'}</div>
+        {side(d.b, d.bn, cur[1], false, dmgB)}
+      </div>
+      <div className="duel-msg" key={`m-${step}`}>{done ? (d.winner ? `${d.winner}의 승리!${d.fate || ''}` : `무승부!${d.fate || ''}`) : crit ? `회심의 일격! ${dmgA > dmgB ? d.b : d.a}의 큰 한 방!` : fighting ? (dmgA === dmgB ? '팽팽하게 맞섭니다!' : `${dmgA > dmgB ? d.b : d.a}이(가) 몰아붙입니다!`) : `${d.a} 대 ${d.b}`}</div>
+      <small className="duel-skip">화면을 누르면 건너뜁니다</small>
     </div>
   );
 }
@@ -493,6 +498,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [tab, setTab] = useState('home');
   const [report, setReport] = useState(null);
   const [duel, setDuel] = useState(null);
+  const skipDuel = useRef(null);
   const [cutin, setCutin] = useState(null);
   const [corpsForm, setCorpsForm] = useState(null); // {cities: [], leader}
   const [placeFort, setPlaceFort] = useState(null); // 성 수비대가 지을 시설 {cid, kind} // 보낼 장수 (지도에서 내 성을 누르면 그리로) // 사신 창을 잠시 접고 그 나라를 지도에서 봄
@@ -573,7 +579,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const { k, y: vy } = view.current;
     const ctx = cv.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#2a5d82';
+    ctx.fillStyle = '#1a4064';
     ctx.fillRect(0, 0, cw, ch);
     // 선명한 조각 관리: 확대 배율이 바탕 그림보다 1.6배 넘게 크면, 멈춘 뒤 잠깐 있다가 보이는 범위만 새로 그림
     {
@@ -618,20 +624,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (CH && CH.ok) { ctx.drawImage(CH.cv, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.over, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.rcv, CH.x, CH.y, CH.w, CH.h); }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
-      const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(42,93,130,';
+      const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(26,64,100,';
       const edge = (x0, y0, x1, y1, rx, ry, rw, rh) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); g.addColorStop(0, sea + '1)'); g.addColorStop(1, sea + '0)'); ctx.fillStyle = g; ctx.fillRect(rx, ry, rw, rh); };
       edge(0, 0, 0, m, 0, 0, W, m);
       edge(0, Hh, 0, Hh - m, 0, Hh - m, W, m);
       edge(0, 0, m, 0, 0, 0, m, Hh);
       edge(W, 0, W - m, 0, W - m, 0, m, Hh);
     }
-    // 눈 덮인 북쪽
-    if (s.weather?.kind === 'snow') {
-      if (!land.current.snow) {
+    // 눈 덮인 곳: 눈이 내리는 구역의 땅만 하얗게 (순마다, 바탕 그림이 바뀌면 다시 만듦)
+    if ((s.wx || [s.weather?.kind]).includes('snow')) {
+      const key = `${s.turn}:${B.cv.width}:${B.sc}`;
+      if (!land.current.snow || land.current.snowKey !== key) {
         const [scv, sctx] = (() => { const c2 = document.createElement('canvas'); c2.width = B.cv.width; c2.height = B.cv.height; const x = c2.getContext('2d'); x.scale(B.sc, B.sc); return [c2, x]; })();
         sctx.fillStyle = '#ffffff';
-        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const [hx, hy] = grid.center(i); if (hy > grid.H * 0.55) continue; sctx.globalAlpha = Math.min(1, (grid.H * 0.55 - hy) / (grid.H * 0.12)); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
-        land.current.snow = scv;
+        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i) || weatherAt(s, grid, i) !== 'snow') continue; const [hx, hy] = grid.center(i); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
+        land.current.snow = scv; land.current.snowKey = key;
       }
       ctx.globalAlpha = 0.42;
       ctx.drawImage(land.current.snow, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
@@ -949,7 +956,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     ctx.fillStyle = land.current.vig.g; ctx.fillRect(0, 0, cw, ch);
     // 날씨 효과 (화면 기준): 비 줄기·눈송이·바람
-    const wk = s.weather?.kind;
+    // 날씨 효과는 화면 가운데 구역 날씨로
+    const wk = (() => { const v = view.current; if (!v || !s.wx) return s.weather?.kind; let x = v.x + cw / v.k / 2; if (grid.wrap) x = ((x % grid.period) + grid.period) % grid.period; const t = pixelToCell(grid.size, grid.cols, grid.rows, x, v.y + ch / v.k / 2); return t >= 0 ? weatherAt(s, grid, t) : s.weather?.kind; })();
     if (wk === 'rain' || wk === 'snow' || wk === 'wind') {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const n = wk === 'rain' ? 90 : wk === 'snow' ? 70 : 24;
@@ -986,6 +994,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
+      showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
       sfx: (k) => sfx(k),
       mood: (m) => { setMood(m); setMood(m); },
       grid: () => grid,
@@ -1246,19 +1255,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const ui = (s.fx || []).find((e) => e.type === 'tactic' && e.unique && (e.nation === pid || s.units.some((u) => u.nation === pid && u.tile === e.to)));
       if (ui) { setCutin(ui); sfx('cutin'); holdSfx(1.5); setTimeout(() => setCutin(null), 1500); }
       if (dl) setDuel(dl);
-      const wait = dl ? 3600 : 0;
+      const wait = dl ? duelMs(dl) : 0;
+      // 일기토 장면을 누르면 바로 다음으로 (기다리던 타이머를 당겨 실행)
+      const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; fn(); }; const id = setTimeout(run, ms); if (dl) skipDuel.current = () => { clearTimeout(id); run(); }; };
       const snap = clone(s);
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
       if (stopIdle && toEnd && !endOfTurn && idleNow.length) {
-        setTimeout(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
+        later(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
         return;
       }
       if (endOfTurn || !toEnd) {
-        setTimeout(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
+        later(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
         return;
       }
-      setTimeout(() => { setDuel(null); tick(); }, speed + wait);
+      later(() => { setDuel(null); tick(); }, speed + wait);
     };
     setTimeout(tick, 60);
   };
@@ -1812,7 +1823,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>⚓ 항구에서 나간 부대는 배로 바닷길(뭍에서 3칸 안 바다)을 갑니다. 물 위에선 수군 장수가 없으면 약합니다.</li>
                 <li>이름난 장수는 고유 전법(★)을 씁니다: 관우 「청룡언월」, 장비 「장판교 일갈」(주변 적 발 묶음), 제갈량 「팔진」(받는 피해 절반) …</li>
                 <li>무력 75 이상 대장끼리 붙으면 가끔 <b>일기토</b>. 지면 사기가 크게 꺾이고 사로잡히기도 합니다.</li>
-                <li>날씨: ❄️ 겨울 눈은 북쪽 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
+                <li>날씨: 지도를 여러 구역으로 나눠 구역마다 위도·계절에 맞게 따로 정해집니다(열대는 눈 없이 비가 잦고, 북쪽은 겨울이 길고 눈이 잦고, 남반구는 계절이 반대). 위쪽 표시줄은 내 도읍 날씨예요. ❄️ 눈 오는 곳은 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
                 <li>🕊️ 처음 석 달(9순, 도시 3개 이하 작은 나라면 1년)은 컴퓨터가 내 도시를 먼저 치지 않습니다. 그동안 친선·정전·동맹으로 외교를 다지세요.</li>
                 <li>💰 금 지출: 장수 녹봉 1명당 200/순, 시설 유지비 단계당 300/순, 징병 1명당 10금. 출진은 공짜예요. 국고가 「10만 + 도시당 1만」을 넘으면 넘는 금의 5%가 순마다 새어 나갑니다.</li>
                 <li>🎁 장수마다 충성이 있습니다. 금이 바닥나면 떨어지고, 35 아래면 가끔 다른 나라로 떠납니다. 세력 탭 「전체 포상」 한 번으로 챙기세요.</li>
@@ -1877,7 +1888,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         <b className="tb-nation"><span className="chip" style={{ background: me.color }} /> {me.name}</b>
         <div className="tb-stats">
           <span className="pill">📅 {dateOf(game, startYear)} {game.day + 1}일</span>
-          <span className="pill" title="눈: 북쪽 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
+          <span className="pill" title="내 도읍 날씨예요. 날씨는 지역마다 다릅니다(위도·계절). 눈: 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
           <span className="pill">💰 {fmtGold(me.gold)} <small style={{ color: inc < 0 ? 'var(--danger)' : 'var(--ok)' }}>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</small></span>
           <span className={'pill' + (food < use * 6 ? ' bad' : '')}>🍚 {fmtTroops(food)}</span>
           <span className="pill">🏯 {myCities}<small>/{cities.length}</small></span>
@@ -1912,7 +1923,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </button>
           </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
-          {duel && <DuelView d={duel} game={game} pid={pid} />}
+          {duel && <DuelView d={duel} game={game} pid={pid} onSkip={() => { setDuel(null); skipDuel.current?.(); }} />}
           {cutin && (() => {
             const [gname, tname] = cutin.text.split(' 「');
             const gg = Object.values(game.generals).find((x) => x.name === gname);

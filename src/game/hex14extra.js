@@ -10,25 +10,49 @@ import { makePact, powerOf } from './hex14gov.js';
 export const WEATHER = { clear: ['☀️', '맑음'], rain: ['🌧️', '비'], snow: ['❄️', '눈'], wind: ['🌬️', '바람'] };
 const WIND_NAME = ['동풍', '동남풍', '남서풍', '서풍', '서북풍', '북동풍'];
 export const monthOf = (s) => Math.floor((s.turn - 1) / 3) % 12; // 0 = 1월
-export function rollWeather(s) {
-  const rng = makeRng(`wx:${s.seed}:${s.turn}`);
-  const m = monthOf(s);
-  const winter = m === 11 || m <= 1, rainy = m === 5 || m === 6;
-  const r = rng();
-  const kind = winter ? (r < 0.45 ? 'snow' : r < 0.55 ? 'wind' : 'clear') : rainy ? (r < 0.55 ? 'rain' : r < 0.65 ? 'wind' : 'clear') : r < 0.15 ? 'wind' : r < 0.27 ? 'rain' : 'clear';
-  s.weather = { kind, wind: Math.floor(rng() * 6), winter };
+// 지역 날씨: 지도를 구역(가로 8 × 세로 5)으로 나눠 구역마다 위도·계절에 맞게 따로 굴림 — 온 세상이 같은 날씨가 아니게
+export const WX_C = 8, WX_R = 5;
+function climateRoll(rng, m0, lat) {
+  const m = lat < 0 ? (m0 + 6) % 12 : m0; // 남반구는 계절이 반대
+  const a = Math.abs(lat), r = rng();
+  const winter = m === 11 || m <= 1, rainy = m === 5 || m === 6, shoulder = m === 2 || m === 10;
+  if (a < 15) return r < (rainy ? 0.55 : 0.35) ? 'rain' : r < (rainy ? 0.62 : 0.45) ? 'wind' : 'clear'; // 열대: 눈 없음, 비 잦음
+  if (a < 28) return rainy ? (r < 0.5 ? 'rain' : r < 0.6 ? 'wind' : 'clear') : r < 0.15 ? 'rain' : r < 0.3 ? 'wind' : 'clear'; // 아열대: 눈 없음
+  if (a < 48) return winter ? (r < 0.45 ? 'snow' : r < 0.55 ? 'wind' : 'clear') : rainy ? (r < 0.55 ? 'rain' : r < 0.65 ? 'wind' : 'clear') : r < 0.15 ? 'wind' : r < 0.27 ? 'rain' : 'clear';
+  return winter ? (r < 0.7 ? 'snow' : r < 0.8 ? 'wind' : 'clear') : shoulder ? (r < 0.35 ? 'snow' : r < 0.5 ? 'wind' : 'clear') : r < 0.2 ? 'rain' : r < 0.35 ? 'wind' : 'clear'; // 한대: 눈 길고 잦음
 }
+const latOfZone = (grid, zx, zy) => (grid?.latAt ? grid.latAt(((zx + 0.5) / WX_C) * grid.W, ((zy + 0.5) / WX_R) * grid.H) : 45 - zy * 8);
+// 칸 → 구역 (구역 경계가 반듯한 네모가 되지 않게 살짝 물결치게)
+export function zoneOf(grid, tile) {
+  const [x, y] = grid.center(tile);
+  const jx = Math.sin((y / grid.H) * 13 + (x / grid.W) * 5) * 0.3, jy = Math.sin((x / grid.W) * 17 + (y / grid.H) * 3) * 0.3;
+  const zx = Math.max(0, Math.min(WX_C - 1, Math.floor((x / grid.W) * WX_C + jx))), zy = Math.max(0, Math.min(WX_R - 1, Math.floor((y / grid.H) * WX_R + jy)));
+  return zy * WX_C + zx;
+}
+export function rollWeather(s, grid) {
+  const m = monthOf(s);
+  const z = [];
+  for (let zy = 0; zy < WX_R; zy++) for (let zx = 0; zx < WX_C; zx++) z.push(climateRoll(makeRng(`wx:${s.seed}:${s.turn}:${zx}:${zy}`), m, latOfZone(grid, zx, zy)));
+  s.wx = z;
+  // 위쪽 표시줄 날씨 = 내 도읍(관전이면 지도 가운데) 날씨
+  const cap = s.castles?.find((c) => c.owner === s.playerId && c.capital) || s.castles?.find((c) => c.owner === s.playerId);
+  const kind = grid && cap ? z[zoneOf(grid, cap.tile)] : z[Math.floor(WX_R / 2) * WX_C + Math.floor(WX_C / 2)];
+  const rng = makeRng(`wx:${s.seed}:${s.turn}`);
+  s.weather = { kind, wind: Math.floor(rng() * 6), winter: m === 11 || m <= 1 };
+}
+// 그 칸의 날씨
+export const weatherAt = (s, grid, tile) => (s.wx && grid && tile !== undefined && tile >= 0 ? s.wx[zoneOf(grid, tile)] : s.weather?.kind) || 'clear';
 export const weatherText = (s) => { const w = s.weather || { kind: 'clear' }; return `${WEATHER[w.kind][0]} ${WEATHER[w.kind][1]}${w.kind === 'wind' ? `(${WIND_NAME[w.wind]})` : ''}`; };
-// 날씨에 따른 이동 비용: 눈 오는 겨울 북쪽(지도 위쪽 55%)은 1.6배, 비 오면 강 칸 +1·전체 +15%
+// 날씨에 따른 이동 비용: 눈 오는 곳 1.35배, 비 오면 강 칸 +1·전체 +15%
 export function weatherCost(s, grid, to, cost) {
-  const w = s.weather;
-  if (!w || grid.sea?.[to]) return cost;
-  if (w.kind === 'snow' && grid.center(to)[1] < grid.H * 0.55) return cost * 1.35;
-  if (w.kind === 'rain') return cost * 1.15 + (grid.river[to] ? 1 : 0);
+  if (grid.sea?.[to]) return cost;
+  const k = weatherAt(s, grid, to);
+  if (k === 'snow') return cost * 1.35;
+  if (k === 'rain') return cost * 1.15 + (grid.river[to] ? 1 : 0);
   return cost;
 }
 // 불(화계·화공) 배율
-export const fireMult = (s) => ({ wind: 1.6, rain: 0.5, snow: 0.8 })[s.weather?.kind] || 1;
+export const fireMult = (s, grid, tile) => ({ wind: 1.6, rain: 0.5, snow: 0.8 })[grid ? weatherAt(s, grid, tile) : s.weather?.kind] || 1;
 
 // ── 고유 전법: 이름난 장수만 쓰는 전법 ──
 // kind: atk(큰 피해) · fire(불, 옆 적까지·날씨 영향) · shout(주변 적 사기↓·발 묶음) · guard(이틀 동안 받는 피해 절반) · scare(적 사기 크게↓)

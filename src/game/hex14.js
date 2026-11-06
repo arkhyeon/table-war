@@ -117,7 +117,9 @@ export function buildGrid(world) {
   for (let i = 0; i < N; i++) if (ice[i]) water[i] = 0;
   const tilesOf = world.regions.map(() => []);
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
-  return { size, cols, rows, N, terrain, region, river, outside, ice, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
+  // 위도: 실제 지도면 지도 좌표에서, 무작위 지도면 위(북위 60)~아래(남위 10)로 셈 — 지역 날씨용
+  const latAt = world.geo ? (x, y) => world.geo.toLL(x, y)[1] : (x, y) => 60 - (y / world.H) * 70;
+  return { latAt, size, cols, rows, N, terrain, region, river, outside, ice, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -487,7 +489,7 @@ export function createHex14(world, base) {
     startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
   initGov(st, makeRng(`gov0:${base.seed}`)); ensureTraits(st);
-  rollWeather(st);
+  rollWeather(st, grid);
   // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
   st.kmScale = Math.min(2, 30 / kmOf(getScenario(base.scenarioId)));
   st.playerStart = castles.filter((c) => c.owner === base.playerId && c.kind !== 'pass').length; // 작은 나라로 시작하면 숨 돌릴 틈이 김
@@ -921,7 +923,7 @@ export function stepDay(s, grid) {
     }
     if (tac) {
       u.cd = tac.unique ? 4 : 3;
-      const fire = tac.kind === 'fire' ? fireMult(s) * (1 + t14([tac.g], '화공') / 2) : 1;
+      const fire = tac.kind === 'fire' ? fireMult(s, grid, tgt.tile) * (1 + t14([tac.g], '화공') / 2) : 1;
       if (tac.kind === 'guard') { u.guard = 2; }
       else dmg *= tac.mult * fire;
       tgt.morale -= tac.morale * (tac.kind === 'scare' ? 1.5 : 1);
@@ -1180,7 +1182,7 @@ export function endTurn14(s, grid) {
   s.duelDone = null;
   s.turn += 1;
   s.day = 0;
-  rollWeather(s);
+  rollWeather(s, grid);
   eventsTurn(s, grid);
   const alive = s.nations.filter((n) => n.alive && !n.horde);
   const cities = s.castles.filter((c) => c.kind !== 'pass');
