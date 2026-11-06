@@ -1198,7 +1198,17 @@ function linkStraits(g) {
   }
 }
 
+// 만든 지도를 잠깐 기억해 둠: 지역판↔세계판을 오가거나 설정 화면으로 돌아와도 다시 만들지 않게 (최근 4장)
+const worldCache = new Map();
 export function generateWorld(scn0, seed, detail = 'normal') {
+  const ck = `${scn0.id}|${scn0.scope || ''}|${seed}|${detail}`;
+  if (worldCache.has(ck)) return worldCache.get(ck);
+  const w = generateWorld0(scn0, seed, detail);
+  worldCache.set(ck, w);
+  if (worldCache.size > 4) worldCache.delete(worldCache.keys().next().value);
+  return w;
+}
+function generateWorld0(scn0, seed, detail = 'normal') {
   const dm = MAP_DETAIL[detail] || MAP_DETAIL.normal;
   // 보통은 예전 시드와 같은 지도가 나오도록 rng 키를 유지
   // 역사 지도는 시드와 상관없이 늘 같은 지도(그 시대의 고정된 지역 구획)

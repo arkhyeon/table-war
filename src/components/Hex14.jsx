@@ -35,12 +35,15 @@ const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) 
 function seamFix(grid, cv, sc) {
   if (!grid.wrap) return;
   const ctx = cv.getContext('2d'), hw = grid.size * Math.sqrt(3), P = grid.period;
+  const sx = P * sc, w = Math.ceil((hw / 2) * sc);
+  if (sx + w > cv.width) return;
+  // 같은 그림에 자기 자신을 줄마다 옮겨 그리면 매번 그림 전체를 복사해 몹시 느림 → 이음매 띠를 작은 그림에 한 번 떠 두고 거기서 옮김
+  const strip = document.createElement('canvas'); strip.width = w; strip.height = cv.height;
+  strip.getContext('2d').drawImage(cv, sx, 0, w, cv.height, 0, 0, w, cv.height);
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   for (let r = 1; r < grid.rows; r += 2) {
     const cy = grid.size * 1.5 * r + grid.size, y0 = (cy - grid.size * 0.75) * sc, h = grid.size * 1.5 * sc;
-    const sx = P * sc, w = (hw / 2) * sc;
-    if (sx + w > cv.width) continue;
-    ctx.drawImage(cv, sx, y0, w, h, 0, y0, w, h);
+    ctx.drawImage(strip, 0, y0, w, h, 0, y0, w, h);
   }
   ctx.restore();
 }
@@ -50,7 +53,8 @@ function seamFix(grid, cv, sc) {
 function paintTerrain(grid, world, chunk = null) {
   const sc = chunk ? chunk.sc : mapScale(grid);
   const layer = () => { if (!chunk) return newLayer(grid, sc); const c2 = document.createElement('canvas'); c2.width = Math.ceil(chunk.w * sc); c2.height = Math.ceil(chunk.h * sc); const x = c2.getContext('2d'); x.scale(sc, sc); x.translate(-chunk.x, -chunk.y); return [c2, x]; };
-  const [cv, ctx] = layer();
+  const [cv, ctx0] = layer();
+  let ctx = ctx0; // 나무 그림을 작은 그림(스프라이트)에 미리 그릴 때 잠깐 바꿔 씀
   const m = grid.size * 3;
   const TILES = chunk ? (() => { const out = []; for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); if (x > chunk.x - m && x < chunk.x + chunk.w + m && y > chunk.y - m && y < chunk.y + chunk.h + m) out.push(i); } return out; })() : null;
   const ALL = { [Symbol.iterator]: function* () { for (let i = 0; i < grid.N; i++) yield i; } };
@@ -62,6 +66,14 @@ function paintTerrain(grid, world, chunk = null) {
     for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * k, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); }
     ctx.closePath();
   };
+  // 같은 색 칸끼리 모아 칠함 (색 바꾸기를 줄임). 칸들을 한 경로로 합치면 겹친 가장자리 계산이 오히려 느려서 칸마다 칠함
+  const fillGroups = (groups, k) => {
+    for (const [col, list] of groups) {
+      ctx.fillStyle = col;
+      for (const i of list) { const [cx, cy] = grid.center(i); ctx.beginPath(); for (let e = 0; e < 6; e++) { const [px, py] = corner(cx, cy, sz * k, e); if (e) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.fill(); }
+    }
+  };
+  const add = (m, key, i) => { let l = m.get(key); if (!l) m.set(key, (l = [])); l.push(i); };
   // 바다: 뭍에서 멀수록 짙게 (10칸까지 부드럽게 단계), 먼바다 바탕
   ctx.fillStyle = '#1a4064';
   ctx.fillRect(0, 0, grid.W, grid.H);
@@ -75,14 +87,22 @@ function paintTerrain(grid, world, chunk = null) {
     grid.seaDepth = dd;
   }
   const SEA_NEAR = [92, 156, 182], SEA_FAR = [26, 64, 100]; // 얕은 바다 → 먼 바다 (너무 하늘색이지 않게)
-  for (const i of (TILES || ALL)) {
-    if (grid.terrain[i] !== 0) continue;
-    const d = Math.min(10, grid.seaDepth[i]);
-    if (d >= 10) continue;
-    const f = Math.pow((d - 1) / 9, 0.7), n = 0.97 + hash(i, 5) * 0.06;
-    hexPath(i, 1.06);
-    ctx.fillStyle = `rgb(${SEA_NEAR.map((a, k) => Math.round((a + (SEA_FAR[k] - a) * f) * n)).join(',')})`;
-    ctx.fill();
+  // 깊이·밝기 단계가 같은 칸끼리 모아 칠함 (색 바꾸기를 줄임)
+  {
+    const groups = new Map();
+    for (const i of (TILES || ALL)) {
+      if (grid.terrain[i] !== 0) continue;
+      const d = Math.min(10, grid.seaDepth[i]);
+      if (d >= 10) continue;
+      const key = d * 8 + Math.min(7, Math.floor(hash(i, 5) * 8));
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(i);
+    }
+    for (const [key, list] of groups) {
+      const d = key >> 3, f = Math.pow((d - 1) / 9, 0.7), n = 0.97 + ((key & 7) + 0.5) / 8 * 0.06;
+      ctx.fillStyle = `rgb(${SEA_NEAR.map((a, k) => Math.round((a + (SEA_FAR[k] - a) * f) * n)).join(',')})`;
+      for (const i of list) { hexPath(i, 1.06); ctx.fill(); }
+    }
   }
   // 파도 거품: 실제 해안선 바깥쪽에 흰 띠 (땅 칸이 안쪽을 덮음)
   if (world.geo && world.paths?.land) {
@@ -124,20 +144,9 @@ function paintTerrain(grid, world, chunk = null) {
     }
   }
   // 모래톱: 바다와 맞닿은 땅
-  for (const i of (TILES || ALL)) {
-    if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue;
-    hexPath(i, 1.18);
-    ctx.fillStyle = grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8'; // 동토 해안은 모래 대신 회색 자갈
-    ctx.fill();
-  }
+  { const g = new Map(); for (const i of (TILES || ALL)) { if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue; add(g, grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8', i); } fillGroups(g, 1.18); } // 동토 해안은 모래 대신 회색 자갈
   // 땅 바탕: 지형 색에 칸마다 살짝 다른 밝기
-  for (const i of (TILES || ALL)) {
-    const t = grid.terrain[i];
-    if (t === 0) continue;
-    hexPath(i, 1.04);
-    ctx.fillStyle = shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + hash(i, 4) * 0.1);
-    ctx.fill();
-  }
+  { const g = new Map(); for (const i of (TILES || ALL)) { const t = grid.terrain[i]; if (t === 0) continue; add(g, shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + (Math.floor(hash(i, 4) * 8) + 0.5) / 8 * 0.1), i); } fillGroups(g, 1.04); }
   // 입체감: 북서쪽에서 빛이 비친다고 보고, 높은 땅(산·구릉·숲) 둘레에 빛·그림자를 칠함
   {
     const HT = [0, 0, 0.6, 1.3, 0.1, 0.2, 2.4, 3.2];
@@ -156,13 +165,14 @@ function paintTerrain(grid, world, chunk = null) {
       }
       grid.relief = lit;
     }
+    const g = new Map();
     for (const i of (TILES || ALL)) {
       const l = grid.relief[i];
       if (!grid.terrain[i] || Math.abs(l) < 0.05) continue;
-      hexPath(i, 1.04);
-      ctx.fillStyle = l > 0 ? `rgba(255,248,225,${Math.min(0.22, l * 0.16)})` : `rgba(20,25,40,${Math.min(0.28, -l * 0.18)})`;
-      ctx.fill();
+      const a = l > 0 ? Math.min(0.22, l * 0.16) : Math.min(0.28, -l * 0.18), aq = (Math.round(a * 50) / 50).toFixed(2); // 투명도를 0.02 단위로 묶음
+      add(g, l > 0 ? `rgba(255,248,225,${aq})` : `rgba(20,25,40,${aq})`, i);
     }
+    fillGroups(g, 1.04);
   }
   // 풀·모래 무늬
   for (const i of (TILES || ALL)) {
@@ -271,6 +281,25 @@ function paintTerrain(grid, world, chunk = null) {
     ctx.beginPath(); ctx.arc(x, cy0 - h * 0.04, h * 0.38, 0, 7); ctx.fillStyle = g; ctx.fill();
     ctx.beginPath(); ctx.arc(x + h * 0.1, cy0 + h * 0.08, h * 0.3, 0.1, 2.2); ctx.strokeStyle = 'rgba(20,45,20,0.35)'; ctx.lineWidth = sz * 0.04; ctx.stroke();
   };
+  // 나무는 크기 5단계 × 모양별로 한 번만 작은 그림에 그려 두고 찍어 냄 (세계판은 나무가 수만 그루라 하나하나 그리면 몇 초 걸림)
+  const sprites = new Map();
+  const tree = (isPine, x, y, h, seed) => {
+    const hq = Math.max(0, Math.min(4, Math.round(((h / sz - 0.7) / 0.32) * 4)));
+    const v = isPine ? 0 : 1 + Math.floor(hash(seed, 1) * 4);
+    const key = v * 8 + hq;
+    let sp = sprites.get(key);
+    if (!sp) {
+      const H = sz * (0.7 + (hq / 4) * 0.32), W = H * 1.1, ox = W / 2, oy = H * 1.2, Ht = H * 1.45;
+      const c2 = document.createElement('canvas'); c2.width = Math.ceil(W * sc) + 2; c2.height = Math.ceil(Ht * sc) + 2;
+      const x2 = c2.getContext('2d'); x2.scale(sc, sc);
+      ctx = x2;
+      if (isPine) pine(ox, oy, H, seed); else leafy(ox, oy, H, seed);
+      ctx = ctx0;
+      sp = { cv: c2, ox, oy, w: c2.width / sc, h: c2.height / sc };
+      sprites.set(key, sp);
+    }
+    ctx.drawImage(sp.cv, x - sp.ox, y - sp.oy, sp.w, sp.h);
+  };
   // 구릉: 둥근 언덕 + 빛 + 풀 포기
   const mound = (x, y, w, h, seed) => {
     shadowBlob(x, y, w * 0.95, h * 0.18, 0.2);
@@ -298,7 +327,7 @@ function paintTerrain(grid, world, chunk = null) {
       const pts = [];
       for (let k = 0; k < 5; k++) pts.push([cx + (hash(i, 11 + k) - 0.5) * sz * 1.4, cy + (hash(i, 21 + k) - 0.3) * sz * 0.95, sz * (0.7 + hash(i, 31 + k) * 0.32), hash(i, 41 + k)]);
       pts.sort((a, b) => a[1] - b[1]);
-      for (const [x, y, h, rr] of pts) (rr < (north ? 0.75 : 0.25) ? pine : leafy)(x, y, h, i * 7 + Math.round(rr * 100));
+      for (const [x, y, h, rr] of pts) tree(rr < (north ? 0.75 : 0.25), x, y, h, i * 7 + Math.round(rr * 100));
     }
   }
   // 외지: 무대 밖 땅은 회색으로 흐리게 (지나갈 수 없음)
@@ -322,11 +351,14 @@ function drawOwnerTiles(grid, s, ctx, tiles) {
     byColor.get(col).push(i);
   }
   ctx.globalAlpha = 0.24; // 영토 색은 옅게 (지형 그림이 비쳐 보이게)
+  // 아주 큰 경로 하나(세계판은 칸 수만 개)는 그리기가 몹시 느려서 1,500칸씩 나눠 칠함
   for (const [col, list] of byColor) {
-    ctx.beginPath();
-    for (const i of list) { const [cx, cy] = grid.center(i); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); }
     ctx.fillStyle = col;
-    ctx.fill();
+    for (let b = 0; b < list.length; b += 1500) {
+      ctx.beginPath();
+      for (let q = b; q < Math.min(list.length, b + 1500); q++) { const [cx, cy] = grid.center(list[q]); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); }
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
   const edge = (i, j) => {
@@ -532,6 +564,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const anim = useRef({ prev: new Map(), t0: 0, dur: 1 }); // 부대 이동 보간
   const fx = useRef([]); // 떠오르는 글자 {x, y, text, color, size, t0, life}
   const raf = useRef(0);
+  const ambT = useRef(0); // 느린 다시 그리기 타이머
 
   const toast = (m) => { setToast(fixJosa(m)); setTimeout(() => setToast(null), 2200); };
   const unitById = (id) => game.units.find((u) => u.id === id);
@@ -556,7 +589,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
     // 처음 지도 그림은 큰 지도에서 몇 초 걸리므로 로딩 화면을 먼저 보여 준 뒤 그림
     if (!land.current.base) {
-      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { land.current.base = paintTerrain(grid, world); setBooted(true); }, 40); }
+      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { const t0 = performance.now(); land.current.base = paintTerrain(grid, world); land.current.paintMs = Math.round(performance.now() - t0); setBooted(true); }, 40); }
       return;
     }
     if (land.current.ref !== s.owner) {
@@ -619,11 +652,28 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.imageSmoothingEnabled = true;
     const B = land.current.base;
     // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (잘린 끝처럼 안 보이게)
-    ctx.drawImage(B.cv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
-    ctx.drawImage(land.current.over, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
-    ctx.drawImage(B.rcv, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
-    // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
+    // 큰 바탕 그림은 화면에 보이는 부분만 잘라서 그림 (통째로 그리면 세계판에서 매 장면 수천만 화소를 옮김)
+    const vx1 = vx + cw / k, vy1 = vy + ch / k;
+    const blit = (img, sc) => {
+      if (!img) return;
+      const x0 = Math.max(0, vx - 2), y0 = Math.max(0, vy - 2), x1 = Math.min(img.width / sc, vx1 + 2), y1 = Math.min(img.height / sc, vy1 + 2);
+      if (x1 <= x0 || y1 <= y0) return;
+      ctx.drawImage(img, x0 * sc, y0 * sc, (x1 - x0) * sc, (y1 - y0) * sc, x0, y0, x1 - x0, y1 - y0);
+    };
     const CH = land.current.chunk;
+    // 선명한 조각이 화면을 다 덮으면 흐린 바탕은 그릴 필요 없음
+    const chCovers = CH && CH.ok && CH.x <= vx && CH.y <= vy && CH.x + CH.w >= vx1 && CH.y + CH.h >= vy1;
+    // 지형·나라 색·강 세 겹을 한 장으로 합쳐 두고(나라 땅이 바뀔 때만 다시 합침) 매 장면엔 한 장만 그림
+    if (!chCovers) {
+      const L = land.current;
+      if (!L.comp || L.compVer !== L.ownVer || L.compBase !== B) {
+        if (!L.comp || L.comp.width !== B.cv.width || L.comp.height !== B.cv.height) { L.comp = document.createElement('canvas'); L.comp.width = B.cv.width; L.comp.height = B.cv.height; }
+        const cx2 = L.comp.getContext('2d'); cx2.clearRect(0, 0, L.comp.width, L.comp.height); cx2.drawImage(B.cv, 0, 0); cx2.drawImage(L.over, 0, 0); cx2.drawImage(B.rcv, 0, 0);
+        L.compVer = L.ownVer; L.compBase = B;
+      }
+      blit(L.comp, B.sc);
+    }
+    // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
     if (CH && CH.ok) { ctx.drawImage(CH.cv, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.over, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.rcv, CH.x, CH.y, CH.w, CH.h); }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
@@ -643,7 +693,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         land.current.snow = scv; land.current.snowKey = key;
       }
       ctx.globalAlpha = 0.42;
-      ctx.drawImage(land.current.snow, 0, 0, B.cv.width / B.sc, B.cv.height / B.sc);
+      blit(land.current.snow, B.sc);
       ctx.globalAlpha = 1;
     }
     // 고른 도시의 관할 땅: 옅게 칠하고, 아직 내 것이 아닌 칸은 빗금처럼 진하게
@@ -985,9 +1035,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
         else { const x = (x0 + now * sp) % cw; ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y0); ctx.quadraticCurveTo(x + 20, y0 - 5, x + 40, y0); ctx.stroke(); }
       }
     }
-    const busy = !!spotsRef.current || wk === 'rain' || wk === 'snow' || wk === 'wind' || f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash' || e.type === 'arrow') || s.units.length;
-    cancelAnimationFrame(raf.current);
-    if (busy) raf.current = requestAnimationFrame(draw);
+    // 움직임이 있을 때(부대 이동·글자·충돌)는 매 프레임, 가만히 있는 부대 깃발·날씨만 있을 땐 초당 약 12번만 다시 그림 (가만히 있어도 화면을 쉼 없이 그리지 않게)
+    const lively = !!spotsRef.current || f < 1 || fx.current.length || (s.fx || []).some((e) => e.type === 'clash' || e.type === 'arrow');
+    const ambient = !lively && (wk === 'rain' || wk === 'snow' || wk === 'wind' || s.units.length);
+    const busy = lively || ambient;
+    cancelAnimationFrame(raf.current); clearTimeout(ambT.current);
+    if (lively) raf.current = requestAnimationFrame(draw);
+    else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, 80);
   };
   useEffect(() => { draw(); });
   // Esc: 선택·새 도시 자리 고르기 취소
@@ -1011,6 +1065,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
       showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
+      paintMs: () => land.current.paintMs, // 시험용: 처음 지도 그림에 걸린 시간
       sfx: (k) => sfx(k),
       mood: (m) => { setMood(m); setMood(m); },
       grid: () => grid,
@@ -1019,7 +1074,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       gensAt: (cid) => Object.values(gameRef.current.generals).filter((g) => g.castle === cid && g.status === 'active').length,
     };
   });
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  useEffect(() => () => { cancelAnimationFrame(raf.current); clearTimeout(ambT.current); }, []);
   useEffect(() => {
     const onR = () => draw();
     window.addEventListener('resize', onR);

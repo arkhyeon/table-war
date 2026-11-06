@@ -34,7 +34,15 @@ export const iceRow = (c, k = 1, cols = 0) => {
 // 땅 위 얼음(만년설로 덮여 못 감): 바다 얼음보다 훨씬 위쪽만
 export const landIceRow = (c, k = 1, cols = 0) => Math.max(1.5 * k, iceRow(c, k, cols) * 0.35);
 // ── 칸 지도 (저장하지 않고 world에서 매번 만듦) ──
+// 같은 지도로 여러 번 부르면(게임 만들 때 · 화면 띄울 때) 한 번만 만듦
+const gridCache = new WeakMap();
 export function buildGrid(world) {
+  if (gridCache.has(world)) return gridCache.get(world);
+  const g = buildGrid0(world);
+  gridCache.set(world, g);
+  return g;
+}
+function buildGrid0(world) {
   const size = world.unit * 0.6; // 칸 크기 (기존 지역 지도보다 촘촘하게)
   // 세계 지도(경도 360도)는 동서가 이어진 둥근 지도: 열을 감고, 한 바퀴 폭(period)이 지도 폭을 넘지 않게 열 수를 내림
   const bb0 = getScenario(world.scenarioId)?.bbox;
