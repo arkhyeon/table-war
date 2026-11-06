@@ -169,15 +169,20 @@ function pickCities(world, grid, base, tileOwner = null) {
       if (near && near[1] <= 6 && out.every((c) => c === near[0] || grid.dist(c.tile, pt) >= 3)) near[0].tile = pt;
     }
   };
-  const fillGaps = (mult) => {
+  const fillGaps = (mult, minGap = 0) => {
     if (out.length < 3) return;
     const nn = out.map((c) => { let m = Infinity; for (const d of out) if (d !== c) m = Math.min(m, grid.dist(c.tile, d.tile)); return m; }).sort((a, b) => a - b);
-    const gapN = Math.max(4, nn[Math.floor(nn.length / 2)] * mult);
+    const gapN = Math.max(4, minGap, nn[Math.floor(nn.length / 2)] * mult);
     // 땅 덩어리 크기 (아주 작은 섬에는 안 둠)
     const comp = new Int32Array(grid.N).fill(-1), csize = [];
     for (let i = 0; i < grid.N; i++) { if (comp[i] >= 0 || !grid.passable(i)) continue; const q = [i]; comp[i] = csize.length; for (let k = 0; k < q.length; k++) for (const j of grid.nb[q[k]]) if (comp[j] < 0 && grid.passable(j)) { comp[j] = csize.length; q.push(j); } csize.push(q.length); }
+    // 실제 거리 보정: 세계 지도는 위도가 높을수록 칸이 실제보다 작음(지도가 옆으로 늘어남) → 칸 수로 같은 간격이면 북쪽에 성이 몇 배 빽빽해짐
+    // 칸 하나의 실제 길이 ∝ cos(위도). 주인 없는 땅(나라 땅 아님)은 조금 더 듬성듬성
+    const whole = !!world.geo?.whole;
+    const kOf = new Float32Array(grid.N).fill(1);
+    if (whole) for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const [x, y] = grid.center(i); const la = grid.latAt(x, y); const own = base.regions[grid.region[i]]?.owner; kOf[i] = Math.max(0.3, Math.min(1.15, Math.cos((la * Math.PI) / 180) / Math.cos((35 * Math.PI) / 180))) * (own === null || own === undefined || own < 0 ? 0.8 : 1); }
     const dist = new Float32Array(grid.N).fill(Infinity);
-    const spread = (src) => { const q = [src]; dist[src] = 0; for (let k = 0; k < q.length; k++) { const x = q[k], dx = dist[x] + 1; if (dx > gapN * 1.5) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < dist[j]) { dist[j] = dx; q.push(j); } } };
+    const spread = (src) => { const q = [src]; dist[src] = 0; for (let k = 0; k < q.length; k++) { const x = q[k], dx = dist[x] + kOf[x]; if (dx > gapN * 1.5) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < dist[j]) { dist[j] = dx; q.push(j); } } };
     for (const c of out) spread(c.tile);
     for (let it = 0; it < 400; it++) {
       let bt = -1, bd = gapN;
@@ -226,7 +231,8 @@ function pickCities(world, grid, base, tileOwner = null) {
   // 삼국지: 정해진 도시 사이 빈 곳(한반도·북방·남방 등)을 메우고, 가까운 실제 지명 + 방위로 이름을 붙임
   if (/^threekingdoms/.test(base.scenarioId) && world.geo) {
     const before = out.length;
-    fillGaps(1.45);
+    // 세계판: 중원 도시 간격으로 온 세상을 메우면 성이 너무 많아짐 → 땅 넓이로 최소 간격을 정함 (다른 세계판과 비슷한 성 수)
+    fillGaps(1.45, world.geo.whole ? Math.sqrt(grid.terrain.reduce((a, t, i) => a + (grid.passable(i) ? 1 : 0), 0) / 420) : 0);
     const pts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { name: p.name, t: pixelToCell(grid.size, grid.cols, grid.rows, x, y) }; }).filter((p) => p.t >= 0);
     const used = new Set(out.map((c) => c.name));
     const D8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
@@ -238,7 +244,10 @@ function pickCities(world, grid, base, tileOwner = null) {
         if (d > 2) { const [x0, y0] = grid.center(p.t), [x1, y1] = grid.center(c.tile); cand = `${p.name} ${D8[((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8]}`; }
         if (!used.has(cand)) { nm = cand; break; }
       }
-      c.name = nm || `${c.name || '변경'} ${out.indexOf(c)}`;
+      // 가까운 지명+방위가 다 쓰였으면: 더 먼 지명까지 보고, 그래도 없으면 '외곽·변방·벌판…'을 붙임 (번호는 붙이지 않음)
+      if (!nm) for (const p of pts.slice().sort((a, b) => grid.dist(a.t, c.tile) - grid.dist(b.t, c.tile)).slice(8, 30)) { const [x0, y0] = grid.center(p.t), [x1, y1] = grid.center(c.tile); const cand = `${p.name} ${D8[((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8]}`; if (!used.has(cand)) { nm = cand; break; } }
+      if (!nm) { const b0 = (c.name || '변경').replace(/ (동|남동|남|남서|서|북서|북|북동)부$/, ''); nm = ['외곽', '변방', '벌판', '오지', '나루', '고개', '들', '언덕'].map((x) => `${b0} ${x}`).find((x) => !used.has(x)) || `${b0} 변경`; }
+      c.name = nm;
       c.pop = 30;
       used.add(c.name);
     }

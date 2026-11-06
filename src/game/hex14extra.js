@@ -23,11 +23,20 @@ function climateRoll(rng, m0, lat) {
 }
 const latOfZone = (grid, zx, zy) => (grid?.latAt ? grid.latAt(((zx + 0.5) / WX_C) * grid.W, ((zy + 0.5) / WX_R) * grid.H) : 45 - zy * 8);
 // 칸 → 구역 (구역 경계가 반듯한 네모가 되지 않게 살짝 물결치게)
-export function zoneOf(grid, tile) {
-  const [x, y] = grid.center(tile);
-  const jx = Math.sin((y / grid.H) * 13 + (x / grid.W) * 5) * 0.3, jy = Math.sin((x / grid.W) * 17 + (y / grid.H) * 3) * 0.3;
-  const zx = Math.max(0, Math.min(WX_C - 1, Math.floor((x / grid.W) * WX_C + jx))), zy = Math.max(0, Math.min(WX_R - 1, Math.floor((y / grid.H) * WX_R + jy)));
+export function zoneAt(grid, x, y) {
+  const u = x / grid.W, v = y / grid.H;
+  const jx = Math.sin(v * 13 + u * 5) * 0.28 + Math.sin(v * 37 + u * 23) * 0.12, jy = Math.sin(u * 17 + v * 3) * 0.28 + Math.sin(u * 41 + v * 29) * 0.12;
+  const zx = Math.max(0, Math.min(WX_C - 1, Math.floor(u * WX_C + jx))), zy = Math.max(0, Math.min(WX_R - 1, Math.floor(v * WX_R + jy)));
   return zy * WX_C + zx;
+}
+export const zoneOf = (grid, tile) => zoneAt(grid, ...grid.center(tile));
+// 그 칸 둘레에서 같은 날씨인 비율 (0~1) — 구역 경계를 부드럽게 칠하려고
+export function weatherShare(s, grid, tile, kind) {
+  if (!s.wx) return s.weather?.kind === kind ? 1 : 0;
+  const [x, y] = grid.center(tile), rx = (grid.W / WX_C) * 0.32, ry = (grid.H / WX_R) * 0.32;
+  let n = 0;
+  for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) if (s.wx[zoneAt(grid, x + dx * rx, y + dy * ry)] === kind) n++;
+  return n / 9;
 }
 export function rollWeather(s, grid) {
   const m = monthOf(s);

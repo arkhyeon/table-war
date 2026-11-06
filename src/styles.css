@@ -322,7 +322,8 @@ details.more > .kv { margin-top: 6px; }
 @media (max-width: 760px) { .h14-menu { display: block; } .map-hint .h14-menu { display: inline-block; } }
 .h14-report { position: absolute; left: 10px; top: 10px; width: min(380px, calc(100% - 70px)); max-height: 40%; overflow: auto; background: #15171bee; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; z-index: 6; display: flex; flex-direction: column; gap: 3px; }
 .duel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 45%, #4a2410ee, #000f 75%); z-index: 12; color: #fff; gap: 14px; cursor: pointer; overflow: hidden; animation: duelIn 0.35s ease-out; }
-.duel.shake { animation: duelShake 0.45s 0.35s; }
+.duel-stage { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
+.duel-stage.shake { animation: duelShake 0.45s 0.35s; }
 .duel-title { font-size: 40px; font-weight: 900; color: #ffd36b; text-shadow: 0 4px 0 #000, 0 0 24px #ff7a1a; letter-spacing: 6px; animation: duelPop 0.4s ease-out; }
 .duel-row { display: flex; align-items: center; gap: 30px; }
 .duel-side { display: flex; flex-direction: column; align-items: center; gap: 5px; position: relative; }

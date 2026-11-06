@@ -15,7 +15,7 @@ import Slider from './Slider.jsx';
 import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
-import { weatherText, weatherAt, uniqueOf } from '../game/hex14extra.js';
+import { weatherText, weatherAt, weatherShare, uniqueOf } from '../game/hex14extra.js';
 import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
@@ -436,7 +436,9 @@ function DuelView({ d, game, pid, onSkip }) {
     );
   };
   return (
-    <div className={`duel${crit ? ' shake' : ''}`} onClick={onSkip} title="누르면 건너뜀">
+    <div className="duel" onClick={onSkip} title="누르면 건너뜀">
+      {/* 흔들림은 안쪽 판에만 (바깥 판의 나타나기 효과가 다시 돌며 깜빡이지 않게) */}
+      <div className={`duel-stage${crit ? ' shake' : ''}`} key={`st-${step}`}>
       <div className="duel-title">{step === 0 ? '⚔️ 일기토!' : done ? (d.winner ? '승 부' : '무 승 부') : `제 ${step}합`}</div>
       <div className="duel-row">
         {side(d.a, d.an, cur[0], true, dmgA)}
@@ -444,6 +446,7 @@ function DuelView({ d, game, pid, onSkip }) {
         {side(d.b, d.bn, cur[1], false, dmgB)}
       </div>
       <div className="duel-msg" key={`m-${step}`}>{done ? (d.winner ? `${d.winner}의 승리!${d.fate || ''}` : `무승부!${d.fate || ''}`) : crit ? `회심의 일격! ${dmgA > dmgB ? d.b : d.a}의 큰 한 방!` : fighting ? (dmgA === dmgB ? '팽팽하게 맞섭니다!' : `${dmgA > dmgB ? d.b : d.a}이(가) 몰아붙입니다!`) : `${d.a} 대 ${d.b}`}</div>
+      </div>
       <small className="duel-skip">화면을 누르면 건너뜁니다</small>
     </div>
   );
@@ -631,13 +634,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
       edge(0, 0, m, 0, 0, 0, m, Hh);
       edge(W, 0, W - m, 0, W - m, 0, m, Hh);
     }
-    // 눈 덮인 곳: 눈이 내리는 구역의 땅만 하얗게 (순마다, 바탕 그림이 바뀌면 다시 만듦)
-    if ((s.wx || [s.weather?.kind]).includes('snow')) {
+    // 날씨 칠: 눈 오는 구역의 땅은 하얗게, 비 오는 구역은 푸르스름하게 어둡게 (순마다, 바탕 그림이 바뀌면 다시 만듦)
+    if ((s.wx || [s.weather?.kind]).some((x) => x === 'snow' || x === 'rain')) {
       const key = `${s.turn}:${B.cv.width}:${B.sc}`;
       if (!land.current.snow || land.current.snowKey !== key) {
         const [scv, sctx] = (() => { const c2 = document.createElement('canvas'); c2.width = B.cv.width; c2.height = B.cv.height; const x = c2.getContext('2d'); x.scale(B.sc, B.sc); return [c2, x]; })();
-        sctx.fillStyle = '#ffffff';
-        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i) || weatherAt(s, grid, i) !== 'snow') continue; const [hx, hy] = grid.center(i); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
+        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const sn = weatherShare(s, grid, i, 'snow'), rn = sn ? 0 : weatherShare(s, grid, i, 'rain'); if (!sn && !rn) continue; sctx.fillStyle = sn ? `rgba(255,255,255,${sn.toFixed(2)})` : `rgba(30,48,80,${(rn * 0.55).toFixed(2)})`; const [hx, hy] = grid.center(i); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
         land.current.snow = scv; land.current.snowKey = key;
       }
       ctx.globalAlpha = 0.42;
@@ -727,6 +729,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 도시·관문
     const fs = Math.min(Math.max(sz * 0.9, 11 * px), 15 * px);
+    const labelJobs = [];
     for (const c of s.castles) {
       const [cx, cy] = grid.center(c.tile);
       if (!vis(cx, cy)) continue;
@@ -752,12 +755,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.fillStyle = '#e8c35a';
         ctx.fillRect(cx - S * 0.32, baseY + sz * 0.1, S * 0.64 * Math.max(0, c.dur / c.maxDur), sz * 0.28);
       }
-      // 이름판
-      if (k * sz > 2.2 || c.capital) {
+      // 이름판: 바로 그리지 않고 모아 두었다가, 중요한 것부터 겹치지 않게 그림 (멀리서 볼 때 이름표가 뒤엉키지 않게)
+      if (k * sz > 2.2 || c.capital) labelJobs.push({ c, cx, cy, col, pri: on ? 0 : c.capital ? 1 : c.owner === pid ? 2 : c.owner !== null && c.owner >= 0 ? 3 : 4 });
+    }
+    // 이름판 그리기: 선택 > 도읍 > 내 성 > 나라 성 > 주인 없는 성 순, 앞의 것과 겹치면 생략 (멀리서 볼 땐 주인 없는 성 이름은 숨김)
+    {
+      const placed = [];
+      labelJobs.sort((a, b) => a.pri - b.pri);
+      for (const { c, cx, cy, col, pri } of labelJobs) {
+        if (pri === 4 && k * sz < 3.2) continue;
         const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}${c.founding ? ` (공사 ${c.founding}턴)` : ''}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
         const ly = cy + sz * 2.6;
+        const bh = fs * (k * sz > 4.5 ? 2.3 : 1.2);
+        if (pri > 0 && placed.some(([x, y, w, h]) => Math.abs(x - cx) * 2 < w + tw && y < ly - fs * 0.85 + bh && ly - fs * 0.85 < y + h)) continue;
+        placed.push([cx, ly - fs * 0.85, tw, bh]);
         ctx.fillStyle = 'rgba(20,16,12,0.82)';
         ctx.fillRect(cx - tw / 2, ly - fs * 0.85, tw, fs * 1.2);
         ctx.fillStyle = col;
@@ -1823,6 +1836,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>⚓ 항구에서 나간 부대는 배로 바닷길(뭍에서 3칸 안 바다)을 갑니다. 물 위에선 수군 장수가 없으면 약합니다.</li>
                 <li>이름난 장수는 고유 전법(★)을 씁니다: 관우 「청룡언월」, 장비 「장판교 일갈」(주변 적 발 묶음), 제갈량 「팔진」(받는 피해 절반) …</li>
                 <li>무력 75 이상 대장끼리 붙으면 가끔 <b>일기토</b>. 지면 사기가 크게 꺾이고 사로잡히기도 합니다.</li>
+                <li>날씨 보는 법: 눈 오는 곳은 땅이 하얗게, 비 오는 곳은 푸르스름하게 어두워지고, 화면 가운데가 비·눈·바람이면 빗줄기·눈송이·바람결이 내립니다. 「불 세기」는 화계 같은 불 전법과 화공 특성의 위력이에요(바람 1.6배, 비 0.5배, 눈 0.8배).</li>
                 <li>날씨: 지도를 여러 구역으로 나눠 구역마다 위도·계절에 맞게 따로 정해집니다(열대는 눈 없이 비가 잦고, 북쪽은 겨울이 길고 눈이 잦고, 남반구는 계절이 반대). 위쪽 표시줄은 내 도읍 날씨예요. ❄️ 눈 오는 곳은 이동이 느림, 🌧️ 비는 강 건너기가 힘들고 불이 약함, 🌬️ 바람은 화계가 강함.</li>
                 <li>🕊️ 처음 석 달(9순, 도시 3개 이하 작은 나라면 1년)은 컴퓨터가 내 도시를 먼저 치지 않습니다. 그동안 친선·정전·동맹으로 외교를 다지세요.</li>
                 <li>💰 금 지출: 장수 녹봉 1명당 200/순, 시설 유지비 단계당 300/순, 징병 1명당 10금. 출진은 공짜예요. 국고가 「10만 + 도시당 1만」을 넘으면 넘는 금의 5%가 순마다 새어 나갑니다.</li>
