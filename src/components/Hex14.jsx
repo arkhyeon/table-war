@@ -121,6 +121,30 @@ function paintTerrain(grid, world, chunk = null) {
     }
   };
   const add = (m, key, i) => { let l = m.get(key); if (!l) m.set(key, (l = [])); l.push(i); };
+  // 아주 큰 지도(바탕에서 칸 반지름 3.5점 미만): 바다·땅 바탕색을 칸마다 육각형으로 칠하지 않고, 화면 점마다 어느 칸인지 셈해 색을 바로 씀
+  // (43만 칸을 하나하나 칠하면 몇 초 걸림 — 점마다 가장 가까운 칸 중심을 고르므로 육각형 모양은 그대로)
+  const raster = !chunk && sz * sc < 3.5;
+  const rasterLayer = (pick) => {
+    // pick(i) → [r, g, b] 또는 null(비움). 칸마다 자기 육각형이 덮는 점 줄(가로 구간)만 바로 채움 — 점마다 가장 가까운 칸을 찾는 것보다 훨씬 빠름
+    const out = document.createElement('canvas'); out.width = cv.width; out.height = cv.height;
+    const octx = out.getContext('2d'), Wp = cv.width, Hp = cv.height, R = sz, SQ = Math.sqrt(3);
+    const img = octx.createImageData(Wp, Hp), dd = img.data;
+    for (let i = 0; i < grid.N; i++) {
+      const v = pick(i); if (!v) continue;
+      const [cx, cy] = grid.center(i), r0 = v[0], g0 = v[1], b0 = v[2];
+      const pyA = Math.max(0, Math.floor((cy - R) * sc)), pyB = Math.min(Hp - 1, Math.ceil((cy + R) * sc));
+      for (let py = pyA; py <= pyB; py++) {
+        const dy = Math.abs((py + 0.5) / sc - cy); if (dy > R) continue;
+        const half = (dy <= R / 2 ? (R * SQ) / 2 : (R - dy) * SQ) + 0.6 / sc; // 0.6점 넉넉히 (이웃 칸 사이 틈 없게)
+        const pxA = Math.max(0, Math.ceil((cx - half) * sc - 0.5)), pxB = Math.min(Wp - 1, Math.floor((cx + half) * sc - 0.5));
+        for (let px = pxA, o = (py * Wp + pxA) * 4; px <= pxB; px++, o += 4) { dd[o] = r0; dd[o + 1] = g0; dd[o + 2] = b0; dd[o + 3] = 255; }
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    return out;
+  };
+  const drawRaster = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); };
+  const rgbOf = (str) => { const m = str.match(/\d+/g); return m ? [+m[0], +m[1], +m[2]] : [0, 0, 0]; };
   // 바다: 뭍에서 멀수록 짙게 (10칸까지 부드럽게 단계), 먼바다 바탕
   ctx.fillStyle = '#1a4064';
   ctx.fillRect(0, 0, grid.W, grid.H);
@@ -135,7 +159,8 @@ function paintTerrain(grid, world, chunk = null) {
   }
   const SEA_NEAR = [92, 156, 182], SEA_FAR = [26, 64, 100]; // 얕은 바다 → 먼 바다 (너무 하늘색이지 않게)
   // 깊이·밝기 단계가 같은 칸끼리 모아 칠함 (색 바꾸기를 줄임)
-  {
+  if (raster) drawRaster(rasterLayer((i) => { if (grid.terrain[i] !== 0) return null; const d = Math.min(10, grid.seaDepth[i]); if (d >= 10) return SEA_FAR; const f = Math.pow((d - 1) / 9, 0.7), n = 0.97 + ((Math.min(7, Math.floor(hash(i, 5) * 8))) + 0.5) / 8 * 0.06; return SEA_NEAR.map((a, k) => Math.round((a + (SEA_FAR[k] - a) * f) * n)); }));
+  else {
     const groups = new Map();
     for (const i of (TILES || ALL)) {
       if (grid.terrain[i] !== 0) continue;
@@ -169,7 +194,7 @@ function paintTerrain(grid, world, chunk = null) {
   // 물결
   ctx.strokeStyle = 'rgba(255,255,255,0.35)';
   ctx.lineWidth = sz * 0.07;
-  for (const i of (TILES || ALL)) {
+  for (const i of (raster ? [] : (TILES || ALL))) { // 칸이 아주 작으면 물결(1점 미만)은 안 보여 건너뜀
     if (grid.terrain[i] !== 0 || hash(i, 1) > 0.18) continue;
     const [cx, cy] = grid.center(i);
     const x = cx + (hash(i, 2) - 0.5) * sz, y = cy + (hash(i, 3) - 0.5) * sz;
@@ -193,9 +218,9 @@ function paintTerrain(grid, world, chunk = null) {
     }
   }
   // 모래톱: 바다와 맞닿은 땅
-  { const g = new Map(); for (const i of (TILES || ALL)) { if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue; add(g, grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8', i); } fillGroups(g, 1.18); } // 동토 해안은 모래 대신 회색 자갈
+  if (!raster) { const g = new Map(); for (const i of (TILES || ALL)) { if (!isLand(i) || !grid.nb[i].some((j) => grid.terrain[j] === 0)) continue; add(g, grid.terrain[i] === 5 ? '#cfd9de' : '#e8d9a8', i); } fillGroups(g, 1.18); } // 동토 해안은 모래 대신 회색 자갈
   // 땅 바탕: 지형 색에 칸마다 살짝 다른 밝기
-  { const g = new Map(); for (const i of (TILES || ALL)) { const t = grid.terrain[i]; if (t === 0) continue; add(g, shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + (Math.floor(hash(i, 4) * 8) + 0.5) / 8 * 0.1), i); } fillGroups(g, 1.04); }
+  if (!raster) { const g = new Map(); for (const i of (TILES || ALL)) { const t = grid.terrain[i]; if (t === 0) continue; add(g, shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + (Math.floor(hash(i, 4) * 8) + 0.5) / 8 * 0.1), i); } fillGroups(g, 1.04); }
   // 입체감: 북서쪽에서 빛이 비친다고 보고, 높은 땅(산·구릉·숲) 둘레에 빛·그림자를 칠함
   {
     const HT = [0, 0, 0.6, 1.3, 0.1, 0.2, 2.4, 3.2];
@@ -214,8 +239,18 @@ function paintTerrain(grid, world, chunk = null) {
       }
       grid.relief = lit;
     }
+    if (raster) {
+      // 땅 바탕색 + 빛·그림자를 한 번에 섞어 찍음
+      drawRaster(rasterLayer((i) => {
+        const t = grid.terrain[i]; if (t === 0) return null;
+        let c = rgbOf(shade(TERRAIN[t]?.color || '#d6dfa6', 0.94 + (Math.floor(hash(i, 4) * 8) + 0.5) / 8 * 0.1));
+        const l = grid.relief[i];
+        if (Math.abs(l) >= 0.05) { const a = Math.round((l > 0 ? Math.min(0.22, l * 0.16) : Math.min(0.28, -l * 0.18)) * 50) / 50, to = l > 0 ? [255, 248, 225] : [20, 25, 40]; c = c.map((v, k) => Math.round(v * (1 - a) + to[k] * a)); }
+        return c;
+      }));
+    }
     const g = new Map();
-    for (const i of (TILES || ALL)) {
+    for (const i of (raster ? [] : (TILES || ALL))) {
       const l = grid.relief[i];
       if (!grid.terrain[i] || Math.abs(l) < 0.05) continue;
       const a = l > 0 ? Math.min(0.22, l * 0.16) : Math.min(0.28, -l * 0.18), aq = (Math.round(a * 50) / 50).toFixed(2); // 투명도를 0.02 단위로 묶음
@@ -224,7 +259,7 @@ function paintTerrain(grid, world, chunk = null) {
     fillGroups(g, 1.04);
   }
   // 풀·모래 무늬 — 전체 바탕에서 칸이 아주 작으면(반지름 3.5점 미만, 아주 잘게 세계판) 풀잎·모래결은 1점도 안 돼 안 보이므로 건너뜀 (확대 타일엔 그대로 그림)
-  const tiny = !chunk && sz * sc < 3.5;
+  const tiny = raster;
   for (const i of (tiny ? [] : (TILES || ALL))) {
     const t = grid.terrain[i];
     const [cx, cy] = grid.center(i);
