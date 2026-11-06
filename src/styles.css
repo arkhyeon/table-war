@@ -545,3 +545,4 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .trait.t1 { background: rgba(176, 112, 60, 0.18); color: #d4935c; border: 1px solid rgba(176, 112, 60, 0.55); }
 .trait.t2 { background: rgba(200, 208, 220, 0.16); color: #d6dde8; border: 1px solid rgba(200, 208, 220, 0.55); }
 .trait.t3 { background: rgba(240, 194, 75, 0.2); color: #f5cc55; border: 1px solid rgba(240, 194, 75, 0.7); font-weight: 800; }
+.build-info { font-size: 11px; color: var(--muted); margin: 4px 0 8px; line-height: 1.5; word-break: keep-all; }

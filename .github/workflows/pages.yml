@@ -23,6 +23,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 판 번호(커밋 수)를 세려면 전체 기록이 필요
       - uses: actions/setup-node@v4
         with:
           node-version: 20
