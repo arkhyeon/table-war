@@ -41,6 +41,8 @@ function nearList(s, grid) {
   nearCache.set(grid, L);
   return L;
 }
+// 미리 데워 두기: 처음 지도를 그리는 동안(로딩 화면) 성 거리 목록을 만들어 둠 (첫 순에 멈칫하지 않게)
+export const warmAI = (s, grid) => { nearList(s, grid); };
 export function frontier(s, grid, nid, c) {
   // 가까운 순으로 보다가 우리 성을 만나면 끝 (예전엔 부를 때마다 모든 성을 훑었음)
   const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id], lim = 2 * grid.k;

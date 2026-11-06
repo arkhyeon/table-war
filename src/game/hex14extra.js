@@ -43,6 +43,8 @@ function samplesOf(grid) {
   sampleCache.set(grid, z);
   return z;
 }
+// 미리 데워 두기: 칸마다 날씨 표본 구역을 로딩 중에 만들어 둠
+export const warmWeather = (grid) => { samplesOf(grid); };
 export function weatherShare(s, grid, tile, kind) {
   if (!s.wx) return s.weather?.kind === kind ? 1 : 0;
   const z = samplesOf(grid), o = tile * 9;

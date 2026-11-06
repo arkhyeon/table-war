@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { uiConfirm } from '../dialog.js';
 import { BUILD, versionText } from '../version.js';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
-import { aiTurn14, STRATS } from '../game/hex14ai.js';
+import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
@@ -15,7 +15,7 @@ import Slider from './Slider.jsx';
 import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
-import { weatherText, weatherAt, weatherShare, uniqueOf } from '../game/hex14extra.js';
+import { weatherText, weatherAt, weatherShare, warmWeather, uniqueOf } from '../game/hex14extra.js';
 import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
@@ -455,7 +455,7 @@ function paintOwners(grid, s, sc) {
   return cv;
 }
 // 바뀐 칸이 있는 구역(블록)만 지우고 다시 그림 — 세계 지도처럼 칸이 많을 때 매일 전체를 다시 칠하지 않게
-const BLK = 24;
+const BLK = 8; // 작게 잡아야 바뀐 칸 몇 개 때문에 수백 칸을 다시 칠하지 않음
 // 바뀐 칸들이 든 구역(블록) 사각형들 (지도 좌표) — 영토 그림·합친 그림·확대 조각을 그 부분만 고칠 때 씀
 function ownerBlocks(grid, changed) {
   const blocks = new Set();
@@ -647,7 +647,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
     // 처음 지도 그림은 큰 지도에서 몇 초 걸리므로 로딩 화면을 먼저 보여 준 뒤 그림
     if (!land.current.base) {
-      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { const t0 = performance.now(); land.current.base = paintTerrain(grid, world); land.current.paintMs = Math.round(performance.now() - t0); setBooted(true); }, 40); }
+      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { const t0 = performance.now(); land.current.base = paintTerrain(grid, world); land.current.paintMs = Math.round(performance.now() - t0); warmAI(gameRef.current, grid); warmWeather(grid); setBooted(true); }, 40); }
       return;
     }
     if (land.current.ref !== s.owner) {
