@@ -1410,16 +1410,70 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
 
   // ── 진행: 하루씩(기본) 또는 순(10일) 끝까지. 순의 첫날에 컴퓨터가 명령을 내리고, 순이 끝나면 정산 ──
-  const runTurn = (toEnd = false) => {
-    if (playing || game.over) return;
-    if (game.inbox?.length) { setPeek(false); return; } // 사신에게 먼저 답해야 진행
-    const s = clone(game);
-    const startN = s.logN || 0;
-    if (s.day === 0) {
-      for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) aiTurn14(s, grid, n.id);
-      if (game.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid);
-      else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id });
+  // 하루 계산(화면과 상관없는 부분): 컴퓨터 판단 → 하루 진행. s를 그 자리에서 바꿈.
+  // 나라 하나씩 잘게 나눠 하고 그 사이 화면에 쉴 틈을 줌 (계산하는 동안에도 지도를 끌 수 있고, 「○○ 생각 중」을 보여 줌). 부르는 순서·내용은 예전과 같아 결과도 같음
+  const yieldNow = () => new Promise((res) => { const ch = new MessageChannel(); ch.port1.onmessage = () => res(); ch.port2.postMessage(0); });
+  const stepComputeAsync = async (s, first, onStep, alive = () => true) => {
+    const jobs = [];
+    const ai = (nid, scope, daily) => jobs.push([nid, () => aiTurn14(s, grid, nid, scope, daily)]);
+    if (first && s.day === 0) {
+      for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) ai(n.id, null, false);
+      if (s.spectator && s.nations[pid].alive) ai(pid, null, false);
+      else for (const c of s.corps || []) ai(pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, false);
     }
+    let t0 = performance.now(), k = 0;
+    const run = async (list) => { for (const [nid, f] of list) { if (!alive()) return false; f(); k++; if (performance.now() - t0 > 10) { onStep?.(nid, k, total); await yieldNow(); t0 = performance.now(); } } return true; };
+    let total = jobs.length;
+    if (!(await run(jobs))) return null;
+    const prevTiles = new Map(s.units.map((u) => [u.id, u.tile]));
+    // 하루마다 컴퓨터도 군사 판단 (내정·외교는 순 첫날에만)
+    const daily = [];
+    if (s.day > 0) {
+      for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) daily.push([n.id, () => aiTurn14(s, grid, n.id, null, true)]);
+      if (s.spectator && s.nations[pid].alive) daily.push([pid, () => aiTurn14(s, grid, pid, null, true)]);
+      else for (const c of s.corps || []) daily.push([pid, () => aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, true)]);
+    }
+    total += daily.length;
+    if (!(await run(daily))) return null;
+    const movingBefore = new Set(s.units.filter((u) => u.nation === pid && u.path.length).map((u) => u.id));
+    const ownBefore = s.castles.map((c) => c.owner);
+    if (performance.now() - t0 > 6) { await yieldNow(); if (!alive()) return null; }
+    stepDay(s, grid);
+    return { prevTiles, movingBefore, ownBefore };
+  };
+  // 생각 중 표시: 어느 나라가 다음 수를 생각하는지 (얼굴·이름), 0.15초 넘게 걸릴 때만 띄움
+  const [thinking, setThinking] = useState(null);
+  const thinkShow = useRef(0);
+  const thinkT0 = useRef(0);
+  const onThink = (nid, k, n) => { const now = performance.now(); if (now - thinkT0.current < 150 || now - thinkShow.current < 60) return; thinkShow.current = now; setThinking({ nid, k, n }); };
+  // 미리 계산: 하루가 끝나고 가만히 있으면 다음 하루를 뒤에서 (잘게 나눠) 계산해 둠.
+  // 「하루 진행」을 누를 때 그 사이 아무 명령도 없었으면(게임 상태가 그대로면) 그 결과를 씀 — 덜 끝났으면 이어서 끝냄. 명령을 내리면 게임 상태가 새로 바뀌므로 버리고 다시 계산
+  const spec = useRef(null);
+  const pendingNext = useRef(false), skipWait = useRef(null);
+  const startSpec = (base) => {
+    const s = clone(base), job = { base, s, D: null, startN: base.logN || 0, report: null };
+    spec.current = job; // 먼저 지금 일로 등록 (계산 첫 조각이 바로 돌면서 '아직 지금 일인가'를 확인하므로)
+    job.promise = stepComputeAsync(s, true, (nid, k, n) => job.report?.(nid, k, n), () => spec.current === job).then((D) => { job.D = D; return D; });
+    return job;
+  };
+  useEffect(() => {
+    if (playing || game.over || game.inbox?.length) return;
+    if (pendingNext.current) { pendingNext.current = false; setTimeout(() => runTurnRef.current?.(false), 0); return; }
+    if (spec.current?.base === game) return;
+    spec.current = null;
+    const id = setTimeout(() => { if (!spec.current) startSpec(game); }, 150);
+    return () => clearTimeout(id);
+  }, [game, playing]);
+  const runTurnRef = useRef(null);
+  const runTurn = (toEnd = false) => {
+    if (game.over) return;
+    // 하루씩 진행 중에 또 누르면: 지금 날의 남은 움직임을 건너뛰고 바로 다음 날로
+    if (playing) { if (!toEnd && skipWait.current && !duel) { pendingNext.current = true; skipWait.current(); } return; }
+    if (game.inbox?.length) { setPeek(false); return; } // 사신에게 먼저 답해야 진행
+    thinkT0.current = performance.now();
+    const job = spec.current && spec.current.base === game ? spec.current : startSpec(game);
+    const s = job.s;
+    const startN = game.logN || 0;
     setPlaying(true);
     setReport(null);
     const finish = (snap) => {
@@ -1436,21 +1490,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
       return snap;
     };
     const done = (snap) => {
+      skipWait.current = null;
       setGame(snap);
       setPlaying(false);
       setSel((v) => (v?.type === 'unit' && !snap.units.some((u) => u.id === v.id) ? null : v));
     };
-    const tick = () => {
-      const prevTiles = new Map(s.units.map((u) => [u.id, u.tile]));
-      // 하루마다 컴퓨터도 군사 판단 (내정·외교는 순 첫날에만)
-      if (s.day > 0) {
-        for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) aiTurn14(s, grid, n.id, null, true);
-        if (s.spectator && s.nations[pid].alive) aiTurn14(s, grid, pid, null, true);
-        else for (const c of s.corps || []) aiTurn14(s, grid, pid, { cities: new Set(c.cities.filter((id) => s.castles[id]?.owner === pid)), all: new Set(c.cities), corps: c.id }, true);
-      }
-      const movingBefore = new Set(s.units.filter((u) => u.nation === pid && u.path.length).map((u) => u.id));
-      const ownBefore = s.castles.map((c) => c.owner);
-      stepDay(s, grid);
+    const tick = (D) => {
+      setThinking(null);
+      const { prevTiles, movingBefore, ownBefore } = D;
       spawnFx(s);
       // 순 끝까지 넘기는 중에 내 부대가 도착해 할 일이 없어지면 그날 멈춤 (모르고 며칠을 흘려보내지 않게)
       const idleNow = s.spectator ? [] : s.units.filter((u) => u.nation === pid && !u.corps && movingBefore.has(u.id) && !u.path.length && !u.queue?.length);
@@ -1477,8 +1524,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (ui) { setCutin(ui); sfx('cutin'); holdSfx(1.5); setTimeout(() => setCutin(null), 1500); }
       if (dl) setDuel(dl);
       const wait = dl ? duelMs(dl) : 0;
-      // 일기토 장면을 누르면 바로 다음으로 (기다리던 타이머를 당겨 실행)
-      const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; fn(); }; const id = setTimeout(run, ms); if (dl) skipDuel.current = () => { clearTimeout(id); run(); }; };
+      // 일기토 장면을 누르면 바로 다음으로 (기다리던 타이머를 당겨 실행), 하루씩 진행 중 다시 누르면 남은 움직임 건너뜀
+      const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; skipWait.current = null; fn(); }; const id = setTimeout(run, ms); if (dl) skipDuel.current = () => { clearTimeout(id); run(); }; skipWait.current = () => { clearTimeout(id); run(); }; };
       const snap = clone(s);
       // 움직임은 계산이 끝난 뒤부터 셈 (계산하느라 걸린 시간만큼 앞부분이 잘려 순간이동하지 않게).
       // 순 끝까지는 하루 내내 같은 빠르기로 쭉 움직이고 바로 다음 날로 이어짐 (예전엔 날마다 천천히 멈췄다 다시 출발해 뚝뚝 끊겨 보였음)
@@ -1493,10 +1540,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
         later(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
         return;
       }
-      later(() => { setDuel(null); tick(); }, speed + wait);
+      later(() => { setDuel(null); thinkT0.current = performance.now(); stepComputeAsync(s, false, onThink).then(tick); }, speed + wait);
     };
-    setTimeout(tick, 60);
+    // 첫날: 미리 계산이 끝났으면 바로 움직이고, 덜 끝났으면 그 계산을 이어서 기다림 (그동안 「생각 중」 표시)
+    if (job.D) tick(job.D);
+    else { job.report = onThink; job.promise.then((D) => { spec.current = null; if (D) tick(D); else { setThinking(null); setPlaying(false); } }); }
+    if (job.D) spec.current = null;
   };
+  runTurnRef.current = runTurn;
 
   // 출진 창 기본값
   const castleGens = selCastle ? Object.values(game.generals).filter((g) => g.castle === selCastle.id && g.status === 'active').sort((a, b) => b.war + b.lead + b.intel + b.pol - (a.war + a.lead + a.intel + a.pol)) : [];
@@ -2143,11 +2194,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 <span className="lbl-long">({DAYS - game.day}일)</span></button>
-            <button className="primary end-turn" disabled={playing || !!game.over} onClick={() => runTurn(false)}>
+            <button className="primary end-turn" disabled={(playing && (!skipWait.current || !!duel || !!thinking)) || !!game.over} onClick={() => runTurn(false)}>
               {playing ? '⏳ 진행 중' : <>하루 진행 ▶ <span className="lbl-day">{game.day + 1}/{DAYS}일</span></>}
             </button>
           </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
+          {thinking && playing && (() => {
+            const n = game.nations[thinking.nid], g = Object.values(game.generals).find((x) => x.nation === thinking.nid && x.ruler);
+            return n ? (
+              <div className="h14-think">
+                {g && <img src={portraitURL(g, n.color)} alt="" width={40} height={40} />}
+                <div><b style={{ color: n.color }}>{n.name}</b>{g ? ` ${g.name}` : ''}<small>다음 수를 생각하는 중… {thinking.k}/{thinking.n}</small></div>
+                <div className="h14-think-bar"><div style={{ width: `${Math.round((thinking.k / Math.max(1, thinking.n)) * 100)}%` }} /></div>
+              </div>
+            ) : null;
+          })()}
           {duel && <DuelView d={duel} game={game} pid={pid} onSkip={() => { setDuel(null); skipDuel.current?.(); }} />}
           {cutin && (() => {
             const [gname, tname] = cutin.text.split(' 「');
