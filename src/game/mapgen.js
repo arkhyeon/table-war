@@ -157,7 +157,7 @@ function buildHistorical(scn, g) {
     for (const i of grow) terrain[i] = T.PLAINS;
   }
   const n1 = makeNoise(rng), n2 = makeNoise(rng);
-  const ranges = RANGES.map((r) => ({ ...r, px: r.pts.map(([lo, la]) => geo.toPx(lo, la)) }));
+  const ranges = RANGES.map((r) => ({ ...r, px: r.pts.map(([lo, la]) => geo.toPx(lo, la)), passPx: (r.passes || []).map(([lo, la]) => geo.toPx(lo, la)) }));
   for (let i = 0; i < N; i++) {
     if (terrain[i] === T.SEA) continue;
     const [x, y] = center(i);
@@ -165,9 +165,17 @@ function buildHistorical(scn, g) {
     let t = T.PLAINS;
     const m = n1.fbm(x / size / 5, y / size / 5, 3);
     const h = n2.fbm(x / size / 4, y / size / 4, 3);
-    if (lat > 66 || lat < -50) t = T.TUNDRA;
-    else if (Math.abs(lat) > 55 && m > 0.38) t = T.FOREST;
-    else if (m > 0.63) t = T.FOREST;
+    // 위도 경계가 일직선이 되지 않게 노이즈로 ±5도쯤 흔듦 (새 난수를 쓰지 않고 기존 노이즈를 다른 배율로)
+    const j = (n1.fbm(x / size / 9 + 37.1, y / size / 9 + 11.3, 3) - 0.5) * 11;
+    const la = lat + j;
+    // 동토 한계선: 북아메리카·동시베리아는 더 남쪽까지 춥고, 스칸디나비아는 난류로 더 북쪽까지 숲
+    const tundraLat = lon < -52 && lon > -170 ? (lon > -100 ? 59 : 62) : lon > 100 ? 66 : lon < 32 && lon > -12 ? 69 : 67.5;
+    const greenland = lon > -75 && lon < -10 && lat > 59.5;
+    const steppe = lat > 43 && lat < 53 && lon > 28 && lon < 95; // 유라시아 초원: 숲이 드묾
+    if (greenland || la > tundraLat || la < -50) t = T.TUNDRA;
+    else if (la > tundraLat - 4) t = m > 0.52 ? T.FOREST : m > 0.4 && la > tundraLat - 2 ? T.TUNDRA : T.PLAINS; // 삼림 툰드라: 숲과 동토가 섞임
+    else if (Math.abs(la) > 52 && !steppe && m > 0.32) t = T.FOREST; // 북방 침엽수림(타이가)
+    else if (m > (steppe ? 0.75 : 0.63)) t = T.FOREST;
     if (t === T.PLAINS && h > 0.66) t = T.HILLS;
     for (const z of ZONES) {
       if (((lon - z.c[0]) / z.rx) ** 2 + ((lat - z.c[1]) / z.ry) ** 2 < 1) t = z.t;
@@ -176,7 +184,7 @@ function buildHistorical(scn, g) {
       const d = polyDist(x, y, r.px);
       const w = Math.max(r.w * geo.pxPerDeg, g.unit * 1.6);
       if (d < w) t = T.MOUNTAIN;
-      if (r.peak && d < Math.max(r.w * 0.45 * geo.pxPerDeg, g.unit * 0.8)) t = T.PEAK;
+      if (r.peak && d < Math.max(r.w * 0.45 * geo.pxPerDeg, g.unit * 0.8) && !(r.passPx || []).some(([px, py]) => Math.hypot(px - x, py - y) < Math.max(0.45 * geo.pxPerDeg, g.unit * 1.3))) t = T.PEAK; // 고개는 험산이 아닌 산지로 남겨 넘어갈 수 있게
     }
     terrain[i] = t;
   }

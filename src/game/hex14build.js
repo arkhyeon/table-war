@@ -7,7 +7,7 @@ import { hasPolicy } from './hex14policy.js';
 // 도시 시설: 시장·농장(돈·병량, 유지비 없음), 성벽 증축, 조선소
 export const BUILDINGS = {
   market: { name: '시장', icon: '🏪', cost: 12000, turns: 4, max: 2, desc: '이 도시 금 수입 +25%/단계', eco: true },
-  farmland: { name: '농장', icon: '🌾', cost: 12000, turns: 4, max: 2, desc: '이 도시 수확 +25%/단계', eco: true },
+  farmland: { name: '농장', icon: '🌾', cost: 8000, turns: 4, max: 2, desc: '이 도시 수확 +100%/단계', eco: true },
   wall: { name: '성벽 증축', icon: '🧱', cost: 25000, turns: 6, max: 2, desc: '성벽 내구 +40%/단계' },
   shipyard: { name: '조선소', icon: '⛵', cost: 25000, turns: 6, max: 1, desc: '이 도시에서 나간 부대는 물 위에서도 약해지지 않음 (항구만)', port: true },
 };

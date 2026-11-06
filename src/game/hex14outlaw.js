@@ -33,13 +33,12 @@ const kindOf = (grid, t) => {
   return '도적';
 };
 
-// 순마다: 새 무리가 일어나고, 오래된 무리·잔당은 흩어짐
+// 순마다: 새 무리가 일어나고, 1천 아래로 줄어든 잔당은 흩어짐 (토벌하지 않으면 계속 남음)
 export function outlawTurn(s, grid, rng) {
   const oid = outlawId(s);
   for (const u of s.units) {
     if (u.nation !== oid) continue;
-    u.life = (u.life ?? 6) - 1;
-    if (u.life <= 0 || u.troops < 1000) {
+    if (u.troops < 1000) {
       u.dead = true;
       for (const g of gensOf(s, u.gens)) { g.status = 'gone'; g.unit = null; }
     }
@@ -73,14 +72,14 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   if (spot < 0) return false;
   const kind = kindOf(grid, spot);
   const avg = owned.reduce((a, c) => a + c.troops, 0) / owned.length;
-  const troops = Math.round(Math.max(4000, Math.min(20000, avg * (0.6 + rng() * 0.6))) / 1000) * 1000; // 꽤 아프게
+  const troops = Math.round(Math.max(5000, Math.min(25000, avg * (0.75 + rng() * 0.7))) / 1000) * 1000; // 꽤 아프게
   const gid = `out_${s.turn}_${spot}`;
   const boss = BOSS[Math.floor(rng() * BOSS.length)];
   const name = `${kind} ${rankOf(troops)} ${boss}`;
   const tier = troops >= 15000 ? 3 : troops >= 10000 ? 2 : 1;
-  s.generals[gid] = { id: gid, name, war: 68 + Math.floor(rng() * 20), lead: 55 + Math.floor(rng() * 20), intel: 20 + Math.floor(rng() * 20), pol: 10 + Math.floor(rng() * 15), traits: [['맹장', tier], [KIND_TRAIT[kind], tier]], boss, kind, nation: oid, castle: null, unit: null, status: 'active' };
+  s.generals[gid] = { id: gid, name, war: 72 + Math.floor(rng() * 20), lead: 62 + Math.floor(rng() * 20), intel: 20 + Math.floor(rng() * 20), pol: 10 + Math.floor(rng() * 15), traits: [['맹장', tier], [KIND_TRAIT[kind], tier]], boss, kind, nation: oid, castle: null, unit: null, status: 'active' };
   const uid = s.nextUnit++;
-  s.units.push({ id: uid, nation: oid, gens: [gid], troops, max: troops, morale: 90, tile: spot, path: [], order: null, mp: 0, home: null, wait: 0, cd: 0, navy: kind === '해적', ships: kind === '해적' || undefined, outlaw: kind, life: 5 + Math.floor(rng() * 5) });
+  s.units.push({ id: uid, nation: oid, gens: [gid], troops, max: troops, morale: 90, tile: spot, path: [], order: null, mp: 0, home: null, wait: 0, cd: 0, navy: kind === '해적', ships: kind === '해적' || undefined, outlaw: kind });
   s.generals[gid].unit = uid;
   const victims = owned.filter((c) => grid.dist(c.tile, spot) <= 8).map((c) => c.owner);
   log(s, `🏴 ${near.name} 근처에 ${name}의 ${kind} ${fmtTroops(troops)}이(가) 일어났습니다!`, 'bad', [...new Set(victims)]);

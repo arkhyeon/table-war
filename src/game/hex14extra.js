@@ -88,6 +88,14 @@ export function maybeDuel(s, u, t, rng) {
     ha = Math.max(0, ha - db);
     rounds.push([ha, hb]);
   }
+  // 둘 다 쓰러지면(체력 0 대 0) 무승부: 둘 다 물러나고 양쪽 사기만 조금 꺾임
+  if (ha <= 0 && hb <= 0) {
+    u.morale -= 10; t.morale -= 10;
+    const d = { a: a.name, b: b.name, an: u.nation, bn: t.nation, rounds, winner: null, fate: ' 둘 다 말에서 떨어져 무승부!', tile: t.tile };
+    s.duels = s.duels || []; s.duels.push(d);
+    log(s, `⚔️ 일기토! ${a.name} 대 ${b.name} — 둘 다 쓰러져 무승부.`, 'battle', [u.nation, t.nation]);
+    return d;
+  }
   const winA = ha === hb ? pa >= pb : ha > hb;
   const [W, Lo, wu, lu] = winA ? [a, b, u, t] : [b, a, t, u];
   // 이긴 쪽: 사기 크게 오르고 진 쪽 병사가 겁먹고 흩어짐, 이긴 장수는 무력이 자라기도 함

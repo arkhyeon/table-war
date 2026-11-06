@@ -366,9 +366,9 @@ export const sprawlOf = () => 1;
 const traitGold = (s, c) => { const g = castleGens(s, c); return 1 + t14(g, '정치') + (c.port ? t14(g, '교역') : 0) + nationT(s, c.owner, '상업'); };
 // 특성: 머무는 장수의 모병·인덕 (자원병 명/순)
 const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 100); };
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
-export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1 + (jobGen(s, c, 'farm') ? t14([jobGen(s, c, 'farm')], '농정') : 0)) * c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
-export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1 + (jobGen(s, c, 'farm') ? t14([jobGen(s, c, 'farm')], '농정') : 0)) * c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 2 : 1) * (1 + 1 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER * (hasPolicy(s, nid, 'farming') ? 0.7 : 1));
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
 // ── 한 턴 마무리의 내정 ──
@@ -390,7 +390,7 @@ export function govTurn(s, grid) {
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 + t14([d], '징병') : 0) + traitDraft(s, c)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 + t14([d], '징병') : 0) + traitDraft(s, c)) * (hasPolicy(s, c.owner, 'conscript') ? 1.1 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * ((hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05) + t14(castleGens(s, c), '축성')));
       c.popMax = c.popMax || c.pop * 1.2;

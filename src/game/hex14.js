@@ -1192,7 +1192,7 @@ export function endTurn14(s, grid) {
 }
 
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
-export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 8 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
+export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 9 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];

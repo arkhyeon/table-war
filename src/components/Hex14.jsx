@@ -418,13 +418,13 @@ function DuelView({ d, game, pid }) {
   useEffect(() => {
     if (step === 0) return;
     if (step <= d.rounds.length) sfx('duelHit');
-    else if (step === d.rounds.length + 1) { const mineWon = (d.winner === d.a ? d.an : d.bn) === pid; sfx(mineWon ? 'duelWin' : 'duelLose'); }
+    else if (step === d.rounds.length + 1) { if (!d.winner) sfx('duelLose'); else { const mineWon = (d.winner === d.a ? d.an : d.bn) === pid; sfx(mineWon ? 'duelWin' : 'duelLose'); } }
   }, [step]);
   const g = (name) => Object.values(game.generals).find((x) => x.name === name) || { name, war: 80, lead: 70, intel: 50, pol: 50 };
   const [ha, hb] = step === 0 ? [100, 100] : d.rounds[Math.min(step, d.rounds.length) - 1];
   const done = step > d.rounds.length;
   const side = (name, nat, hp, left) => (
-    <div className={'duel-side' + (step > 0 && !done && step % 2 === (left ? 1 : 0) ? ' hit' : '') + (done && d.winner !== name ? ' lose' : '')}>
+    <div className={'duel-side' + (step > 0 && !done && step % 2 === (left ? 1 : 0) ? ' hit' : '') + (done && d.winner && d.winner !== name ? ' lose' : '')}>
       <img src={portraitURL(g(name), game.nations[nat]?.color || '#fff')} alt="" width={96} height={96} />
       <b>{name}</b>
       <small>무력 {g(name).war}</small>
@@ -439,7 +439,7 @@ function DuelView({ d, game, pid }) {
         <div className="duel-vs">{done ? '🏆' : step % 2 ? '⚡' : '✦'}</div>
         {side(d.b, d.bn, hb, false)}
       </div>
-      <div className="duel-msg">{done ? `${d.winner}의 승리!${d.fate || ''}` : `${Math.min(step + 1, d.rounds.length)}합째…`}</div>
+      <div className="duel-msg">{done ? (d.winner ? `${d.winner}의 승리!${d.fate || ''}` : `무승부!${d.fate || ''}`) : `${Math.min(step + 1, d.rounds.length)}합째…`}</div>
     </div>
   );
 }
@@ -1834,9 +1834,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
-                <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
+                <li>⚖️ 밸런스 기준: 병사 1명 = 금 10 = 공격력 1(병사 1명이 내는 힘) = 병량 1.5. 정책·시설·특성은 모두 이 환율로 「한 순에 금 몇 어치」인지 따져 맞춥니다.</li>
+                <li>🏪🌾 시장은 그 도시 금 +25%씩, 농장은 그 도시 수확 +100%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>🎖️ 장수 특성: 장수 이름 옆 꼬리표(예: 맹장Ⅱ)가 특성이고, 마우스를 올리면 효과가 나옵니다. 등급은 브론즈(Ⅰ)·실버(Ⅱ)·골드(Ⅲ)이고, 병사 1명 = 금 10으로 쳐서 한 순에 브론즈 ≈ 금 200(장수 녹봉 하나)·실버 ≈ 400·골드 ≈ 700만큼 벌어 주도록 맞췄어요. 그래서 자주 쓰이는 특성(명장: 공격 +8~29%)은 수치가 작고, 가끔 쓰이는 특성(산악: 산·구릉 공격 +25~80%, 사막·화공 등)은 수치가 큽니다. 싸움 특성은 부대에 있을 때, 성 특성(수성·궁술·철벽·정치·교역·모병·인덕·축성·건축)은 그 성에 머물 때, 농정·징병은 그 일을 맡았을 때, 상업·외교는 나라에서 가장 높은 장수 하나가 적용돼요.</li>
-                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(4천~2만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 5~9순 지나거나 1천 아래로 줄면 흩어집니다.</li>
+                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(5천~2.5만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 토벌하지 않으면 사라지지 않고, 병력이 1천 아래로 줄어야 흩어집니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>
                 <li>🏳️ 패주: 사기가 꺾인 부대는 가까운 내 성으로 걸어서 물러납니다. 물러나는 동안은 싸우지 않고 받는 피해가 30% 늘어 쫓아가면 잡을 수 있습니다.</li>
