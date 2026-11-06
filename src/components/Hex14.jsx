@@ -223,8 +223,9 @@ function paintTerrain(grid, world, chunk = null) {
     }
     fillGroups(g, 1.04);
   }
-  // 풀·모래 무늬
-  for (const i of (TILES || ALL)) {
+  // 풀·모래 무늬 — 전체 바탕에서 칸이 아주 작으면(반지름 3.5점 미만, 아주 잘게 세계판) 풀잎·모래결은 1점도 안 돼 안 보이므로 건너뜀 (확대 타일엔 그대로 그림)
+  const tiny = !chunk && sz * sc < 3.5;
+  for (const i of (tiny ? [] : (TILES || ALL))) {
     const t = grid.terrain[i];
     const [cx, cy] = grid.center(i);
     if (t === 1) {
@@ -251,7 +252,7 @@ function paintTerrain(grid, world, chunk = null) {
   // 칸 테두리 (아주 옅게)
   ctx.strokeStyle = 'rgba(0,0,0,0.07)';
   ctx.lineWidth = sz * 0.05;
-  for (const i of (TILES || ALL)) if (grid.passable(i)) { hexPath(i, 0.98); ctx.stroke(); }
+  if (!tiny) for (const i of (TILES || ALL)) if (grid.passable(i)) { hexPath(i, 0.98); ctx.stroke(); }
   // 강: 실제 강줄기를 부드럽게 (짙은 테두리 + 밝은 물빛)
   const rivers = (world.rivers || []).filter((r) => r.pts?.length > 1);
   // 강은 영토 색에 덮이지 않게 따로 한 장에 그림
@@ -405,7 +406,7 @@ function drawOwnerTiles(grid, s, ctx, tiles) {
     ctx.fillStyle = col;
     for (let b = 0; b < list.length; b += 1500) {
       ctx.beginPath();
-      for (let q = b; q < Math.min(list.length, b + 1500); q++) { const [cx, cy] = grid.center(list[q]); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } ctx.closePath(); }
+      for (let q = b; q < Math.min(list.length, b + 1500); q++) { const [cx, cy] = grid.center(list[q]); for (let d = 0; d < 6; d++) { const [px, py] = corner(cx, cy, sz * 1.03, d); if (d) ctx.lineTo(px, py); else ctx.moveTo(px, py); } } // 칠하기는 열린 도형을 저절로 닫으므로 closePath 안 함 (세계판 아주 잘게에서 그것만 1.5초)
       ctx.fill();
     }
   }

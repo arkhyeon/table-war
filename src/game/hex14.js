@@ -137,7 +137,10 @@ function buildGrid0(world) {
   for (let i = 0; i < N; i++) if (region[i] >= 0) tilesOf[region[i]].push(i);
   // 위도: 실제 지도면 지도 좌표에서, 무작위 지도면 위(북위 60)~아래(남위 10)로 셈 — 지역 날씨용
   const latAt = world.geo ? (x, y) => world.geo.toLL(x, y)[1] : (x, y) => 60 - (y / world.H) * 70;
-  return { latAt, size, cols, rows, N, terrain, region, river, outside, ice, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
+  // 이웃 칸을 한 줄짜리 숫자 배열로도 둠 (칸마다 6칸, 없으면 -1): 날마다 지도 전체를 훑는 계산에서 작은 배열 수십만 개를 도는 것보다 빠름
+  const nbf = new Int32Array(N * 6).fill(-1);
+  for (let i = 0; i < N; i++) { const l = nb[i]; for (let d = 0; d < l.length && d < 6; d++) nbf[i * 6 + d] = l[d]; }
+  return { nbf, latAt, size, cols, rows, N, terrain, region, river, outside, ice, nb, center, passable, castleTile, tilesOf, water, sea, W: world.W, H: world.H, wrap: wrapX, period: cols * size * SQRT3, dist: wrapX ? (a, b) => hexDistanceWrap(cols, a, b) : (a, b) => hexDistance(cols, a, b), k: (world.unit / size) * (getScenario(world.scenarioId)?.worldScale || 1) }; // k: 거리 기준(칸) — 세계 지도는 칸이 촘촘해진 만큼 늘림
 }
 
 // 삼국지14의 도시(200년 무렵)와 관문: [이름, 경도, 위도, 종류] — 큰 도시(BIG)는 인구가 많고 변방(EDGE)은 적음
@@ -433,6 +436,9 @@ export function createHex14(world, base) {
   // 세계 지도만 (지역사는 지역 단위 경계가 더 자연스러움 — 칸 단위로 하면 상자 모양 국경이 됨)
   if (world.geo?.whole) base.nations.forEach((n, i) => { if (n.alive) for (const b of scnN[i]?.area || []) boxes.push([b, (b[2] - b[0]) * (b[3] - b[1]), i]); });
   const tileOwn = new Int16Array(grid.N).fill(-2);
+  // 강역 상자를 경위도 10도 칸에 나눠 담음 (칸마다 상자 전체를 훑지 않게, 순서는 그대로라 결과 같음)
+  const boxBins = new Map();
+  boxes.forEach(([[w, s0, e, nn]], bi) => { for (let x = Math.floor(w / 10); x <= Math.floor(e / 10); x++) for (let y = Math.floor(s0 / 10); y <= Math.floor(nn / 10); y++) { const k = x * 1000 + y; if (!boxBins.has(k)) boxBins.set(k, []); boxBins.get(k).push(bi); } });
   const regOwner = (t) => {
     if (!boxes.length || !world.geo) return regOwner0(t);
     if (tileOwn[t] !== -2) return tileOwn[t];
@@ -442,7 +448,7 @@ export function createHex14(world, base) {
     const lon = lon0 + (Math.sin(lat0 * 1.3 + lon0 * 0.4) * 0.7 + Math.sin(lat0 * 3.1 - lon0 * 2.2) * 0.35) * jw;
     const lat = lat0 + (Math.sin(lon0 * 1.1 - lat0 * 0.7) * 0.5 + Math.sin(lon0 * 2.9 + lat0 * 1.9) * 0.25) * jw;
     let best = -1, ba = Infinity;
-    for (const [[w, s0, e, nn], a, i] of boxes) if (a < ba && lon >= w && lon <= e && lat >= s0 && lat <= nn) { ba = a; best = i; }
+    for (const bi of boxBins.get(Math.floor(lon / 10) * 1000 + Math.floor(lat / 10)) || []) { const [[w, s0, e, nn], a, i] = boxes[bi]; if (a < ba && lon >= w && lon <= e && lat >= s0 && lat <= nn) { ba = a; best = i; } }
     // 상자 밖이면 지역 주인 (단, 그 지역 주인이 강역 상자를 가진 나라면 상자 밖 땅은 중립)
     if (best < 0) { const r = regOwner0(t); best = r >= 0 && (scnN[r]?.area?.length) ? -1 : r; }
     return (tileOwn[t] = best);
@@ -488,7 +494,9 @@ export function createHex14(world, base) {
   for (let i = 0; i < grid.N; i++) if (grid.passable(i)) owner[i] = landOwner(i);
   for (const c of castles) owner[c.tile] = c.owner === null ? -1 : c.owner;
   // 항구: 바닷길이 3칸 안에 닿는 도시
-  for (const c of castles) c.port = c.kind !== 'pass' && grid.water.some((w, t) => w && grid.dist(t, c.tile) <= 3);
+  // 둘레 n칸 안에 조건에 맞는 칸이 있나 (지도 전체를 훑지 않고 이웃을 따라 n겹만 봄)
+  const within = (t0, n, ok) => { let ring = [t0]; const seen = new Set(ring); if (ok(t0)) return 0; for (let d = 1; d <= n; d++) { const nx = []; for (const t of ring) for (const j of grid.nb[t]) if (!seen.has(j)) { seen.add(j); if (ok(j)) return d; nx.push(j); } ring = nx; } return Infinity; };
+  for (const c of castles) c.port = c.kind !== 'pass' && within(c.tile, 3, (t) => grid.water[t]) <= 3;
   // 항구가 하나도 없는 땅덩어리(큰 섬 등)는 바다에 가장 가까운 성을 항구로 — 배로 오갈 수 없는 고립된 성이 생기지 않게
   {
     const comp = new Int32Array(grid.N).fill(-1); let nc = 0;
@@ -496,7 +504,7 @@ export function createHex14(world, base) {
     for (let k = 0; k < nc; k++) {
       const cs = castles.filter((c) => comp[c.tile] === k && c.kind !== 'pass');
       if (!cs.length || cs.some((c) => c.port)) continue;
-      const coast = (c) => { let m = Infinity; for (let t = 0; t < grid.N; t++) if (grid.water[t]) { const d = grid.dist(t, c.tile); if (d < m) m = d; } return m; };
+      const coast = (c) => within(c.tile, 12, (t) => grid.water[t]); // 12칸 안에 바다가 있어야 항구로 쓰므로 그만큼만
       const best = cs.map((c) => [c, coast(c)]).sort((a, b) => a[1] - b[1])[0];
       if (best && best[1] < 12) best[0].port = true;
     }
@@ -840,7 +848,8 @@ export function encloseLand(s, grid) {
   const reach = new Uint8Array(N), q = new Int32Array(N);
   let n = 0;
   for (const c of s.castles) if (c.owner !== null && c.owner >= 0 && own[c.tile] === c.owner && !reach[c.tile]) { reach[c.tile] = 1; q[n++] = c.tile; }
-  for (let k = 0; k < n; k++) { const t = q[k], o = own[t]; for (const j of grid.nb[t]) if (!reach[j] && own[j] === o) { reach[j] = 1; q[n++] = j; } }
+  const F = grid.nbf;
+  for (let k = 0; k < n; k++) { const t = q[k], o = own[t]; for (let e = t * 6, e1 = e + 6; e < e1; e++) { const j = F[e]; if (j >= 0 && !reach[j] && own[j] === o) { reach[j] = 1; q[n++] = j; } } }
   const seen = new Uint8Array(N), next = {};
   for (let i = 0; i < N; i++) {
     const o = own[i];
@@ -1103,7 +1112,7 @@ export function nearestCastle(s, grid, tile, nation) {
 // 보급망: 내 성에서 내 땅(칸)으로 이어진 칸들 (+그 옆 한 칸)
 // 보급용 땅 덩어리: 같은 주인끼리 이어진 땅을 한 덩어리로, 얕은 바다(부대가 없는 칸)도 덩어리로 묶고, 덩어리끼리 맞닿은 관계를 셈
 export function supplyComps(s, grid) {
-  const N = grid.N, comp = new Int32Array(N).fill(-1), cls = [];
+  const N = grid.N, comp = new Int32Array(N).fill(-1), cls = [], F = grid.nbf;
   const unitOn = new Map(); for (const u of s.units) { if (!unitOn.has(u.tile)) unitOn.set(u.tile, []); unitOn.get(u.tile).push(u.nation); }
   // -2 = 바다, -3 = 부대가 선 바다 칸(그 칸 하나만, 적 부대가 있으면 그 나라는 못 지나감), -9 = 못 지나감
   const clsOf = (i) => (grid.water[i] ? (unitOn.has(i) ? -3 : -2) : s.owner[i] >= 0 ? s.owner[i] : -9);
@@ -1114,10 +1123,10 @@ export function supplyComps(s, grid) {
     const id = cls.length; cls.push(c);
     if (c === -3) { comp[i] = id; onTile[id] = unitOn.get(i); continue; }
     let n = 0; q[n++] = i; comp[i] = id;
-    for (let k = 0; k < n; k++) for (const j of grid.nb[q[k]]) if (comp[j] < 0 && clsOf(j) === c) { comp[j] = id; q[n++] = j; }
+    for (let k = 0; k < n; k++) for (let e = q[k] * 6, e1 = e + 6; e < e1; e++) { const j = F[e]; if (j >= 0 && comp[j] < 0 && clsOf(j) === c) { comp[j] = id; q[n++] = j; } }
   }
   const adj = cls.map(() => new Set());
-  for (let i = 0; i < N; i++) { const a = comp[i]; if (a < 0) continue; for (const j of grid.nb[i]) { const b = comp[j]; if (b >= 0 && b !== a) adj[a].add(b); } }
+  for (let i = 0; i < N; i++) { const a = comp[i]; if (a < 0) continue; for (let e = i * 6, e1 = e + 6; e < e1; e++) { const j = F[e]; if (j < 0) continue; const b = comp[j]; if (b >= 0 && b !== a) adj[a].add(b); } }
   return { comp, cls, onTile, adj: adj.map((x) => [...x]) };
 }
 export function supplyMap(s, grid, nation, SC = null) {

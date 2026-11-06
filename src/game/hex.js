@@ -17,9 +17,11 @@ export function cellCenter(size, cols, idx) {
   return [size * SQRT3 * (c + 0.5 * (r & 1)) + (size * SQRT3) / 2, size * 1.5 * r + size];
 }
 
+// 육각형 꼭짓점: 각도 여섯 개의 cos·sin을 미리 계산해 둠 (그림 그릴 때 수백만 번 불려서)
+const CORNER_COS = [0, 1, 2, 3, 4, 5].map((i) => Math.cos((Math.PI / 180) * (60 * i - 30)));
+const CORNER_SIN = [0, 1, 2, 3, 4, 5].map((i) => Math.sin((Math.PI / 180) * (60 * i - 30)));
 export function corner(cx, cy, size, i) {
-  const a = (Math.PI / 180) * (60 * i - 30);
-  return [cx + size * Math.cos(a), cy + size * Math.sin(a)];
+  return [cx + size * CORNER_COS[i], cy + size * CORNER_SIN[i]];
 }
 
 export function mapSize(size, cols, rows) {

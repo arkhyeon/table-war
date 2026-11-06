@@ -43,6 +43,13 @@ function nearList(s, grid) {
 }
 // 미리 데워 두기: 처음 지도를 그리는 동안(로딩 화면) 성 거리 목록을 만들어 둠 (첫 순에 멈칫하지 않게)
 export const warmAI = (s, grid) => { nearList(s, grid); };
+// 그 성에서 r칸 안 적 성 가운데 가장 센 수비병 (가까운 순 목록을 따라가다 r을 넘으면 멈춤)
+function foeCastleNear(s, grid, nid, c, r) {
+  const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id];
+  let m = 0;
+  for (let k = 0; k < ids.length && ds[k] <= r; k++) { const x = s.castles[ids[k]]; if (x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner)) m = Math.max(m, x.troops); }
+  return m;
+}
 export function frontier(s, grid, nid, c) {
   // 가까운 순으로 보다가 우리 성을 만나면 끝 (예전엔 부를 때마다 모든 성을 훑었음)
   const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id], lim = 2 * grid.k;
@@ -78,21 +85,31 @@ function neighbors(s, grid, nid) {
 }
 function neighbors0(s, grid, nid) {
   const d = new Map();
-  for (const c of s.castles) {
+  // 우리 성에서 14칸 안의 남의 성만 후보 (국경 판정은 우리 성까지 거리가 14칸 넘으면 어차피 안 됨) — 성 번호 순서는 그대로
+  const L = nearList(s, grid), lim = 14 * grid.k, cand = new Set();
+  for (const m of s.castles) if (m.owner === nid) { const ids = L.ids[m.id], ds = L.ds[m.id]; if (!ids) { for (const c of s.castles) cand.add(c.id); break; } for (let k = 0; k < ids.length && ds[k] <= lim; k++) cand.add(ids[k]); }
+  for (const c of [...cand].sort((a, b) => a - b).map((i) => s.castles[i])) {
     if (c.owner === null || c.owner === nid || !s.nations[c.owner]?.alive) continue;
     const m = frontier(s, grid, nid, c);
     if (m <= 14 * grid.k && (!d.has(c.owner) || m < d.get(c.owner))) d.set(c.owner, m);
   }
   return [...d.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
 }
-const citiesOf = (s, nid) => s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length;
+// 나라별 도시 수: 자주 불려서 같은 상태·같은 날이면 한 번만 셈 (성 주인이 바뀌면 다시)
+let cityMemo = null;
+const citiesOf = (s, nid) => {
+  const key = `${s.turn}:${s.day}:${s.castles.length}`; // 컴퓨터가 생각하는 동안엔 성 주인이 안 바뀜 (함락은 하루 진행 중에만)
+  if (!cityMemo || cityMemo.s !== s || cityMemo.key !== key) { const m = new Map(); for (const c of s.castles) if (c.kind !== 'pass' && c.owner !== null) m.set(c.owner, (m.get(c.owner) || 0) + 1); cityMemo = { s, key, m }; }
+  return cityMemo.m.get(nid) || 0;
+};
 
 export function chooseStrategy(s, grid, nid) {
   const n = s.nations[nid];
   const rng = makeRng(`strat:${s.seed}:${nid}:${Math.floor(s.turn / 36)}:${n.stratN || 0}`);
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
-  const ranked = alive.slice().sort((a, b) => citiesOf(s, b.id) - citiesOf(s, a.id) || powerOf(s, b.id) - powerOf(s, a.id));
+  const cnt0 = new Map(alive.map((m) => [m.id, [citiesOf(s, m.id), powerOf(s, m.id)]])); // 정렬 비교마다 다시 세지 않게
+  const ranked = alive.slice().sort((a, b) => cnt0.get(b.id)[0] - cnt0.get(a.id)[0] || cnt0.get(b.id)[1] - cnt0.get(a.id)[1]);
   const top = ranked[0], mineN = citiesOf(s, nid);
   const nb = neighbors(s, grid, nid);
   const topShare = citiesOf(s, top.id) / total;
@@ -349,7 +366,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const maxUnits = Math.max(3, Math.ceil(mine.length * 1.6 * P.units));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
     if (nUnits() >= maxUnits) break;
-    const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
+    const foeCastle = foeCastleNear(s, grid, nid, c, 8 * grid.k);
     const reserve = Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.3) + threatNear(s, grid, c) * 0.7;
     const spare = c.troops - reserve;
     if (spare < 4000) continue;
@@ -373,7 +390,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
       if (threatNear(s, grid, c) > 0) continue;
       const gs = fighters(s, c);
       if (!gs.length) continue;
-      const foeCastle = s.castles.filter((x) => x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && grid.dist(x.tile, c.tile) <= 8 * grid.k).reduce((a, x) => Math.max(a, x.troops), 0);
+      const foeCastle = foeCastleNear(s, grid, nid, c, 8 * grid.k);
       const spare = Math.floor((c.troops - Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.4)) / 1000) * 1000;
       const gids = gs.slice(0, Math.min(3, gs.length)).map((g) => g.id);
       const troops = Math.min(commandCap(s, gids), spare);

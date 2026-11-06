@@ -157,7 +157,7 @@ function buildHistorical(scn, g) {
     for (const i of grow) terrain[i] = T.PLAINS;
   }
   const n1 = makeNoise(rng), n2 = makeNoise(rng);
-  const ranges = RANGES.map((r) => ({ ...r, px: r.pts.map(([lo, la]) => geo.toPx(lo, la)), passPx: (r.passes || []).map(([lo, la]) => geo.toPx(lo, la)) }));
+  const ranges = RANGES.map((r) => { const px = r.pts.map(([lo, la]) => geo.toPx(lo, la)), w = Math.max(r.w * geo.pxPerDeg, g.unit * 1.6) + 2; return { ...r, px, passPx: (r.passes || []).map(([lo, la]) => geo.toPx(lo, la)), bx0: Math.min(...px.map((q) => q[0])) - w, bx1: Math.max(...px.map((q) => q[0])) + w, by0: Math.min(...px.map((q) => q[1])) - w, by1: Math.max(...px.map((q) => q[1])) + w }; });
   for (let i = 0; i < N; i++) {
     if (terrain[i] === T.SEA) continue;
     const [x, y] = center(i);
@@ -187,6 +187,7 @@ function buildHistorical(scn, g) {
       if (e < 1 + edgeN) t = z.mix && n1.fbm(x / size / 3 + 21.7, y / size / 3 + 3.3, 2) < (z.mixShare ?? 0.45) ? z.mix : z.t;
     }
     for (const r of ranges) {
+      if (x < r.bx0 || x > r.bx1 || y < r.by0 || y > r.by1) continue; // 산맥 상자 밖이면 볼 필요 없음
       const d = polyDist(x, y, r.px);
       const w = Math.max(r.w * geo.pxPerDeg, g.unit * 1.6);
       if (d < w) t = T.MOUNTAIN;
@@ -574,7 +575,7 @@ class Heap {
     while (i > 0) {
       const p = (i - 1) >> 1;
       if (a[p][0] <= a[i][0]) break;
-      [a[p], a[i]] = [a[i], a[p]];
+      const t = a[p]; a[p] = a[i]; a[i] = t; // 배열을 새로 만들지 않고 맞바꿈 (자주 불려서)
       i = p;
     }
   }
@@ -590,7 +591,7 @@ class Heap {
         if (l < a.length && a[l][0] < a[m][0]) m = l;
         if (r < a.length && a[r][0] < a[m][0]) m = r;
         if (m === i) break;
-        [a[m], a[i]] = [a[i], a[m]];
+        const t = a[m]; a[m] = a[i]; a[i] = t;
         i = m;
       }
     }
@@ -690,9 +691,22 @@ function buildRegions(scn, g) {
     for (const c of order) key[c] = scale[c] * (0.75 + rng() * 0.5);
     order.sort((a, b) => key[a] - key[b]);
   }
+  // 씨앗을 칸 묶음(바구니)에 나눠 담아, 가까운 씨앗만 비교 (예전엔 후보 칸마다 씨앗 전체와 비교해 아주 잘게 지도에서 몇 초 걸림)
+  const R = Math.ceil(minD * (scale ? 1.35 : 1)) + 1, bins = new Map();
+  const binKey = (c) => Math.floor((c % cols) / R) * 65536 + Math.floor(Math.floor(c / cols) / R);
+  const addSeed = (c) => { seeds.push(c); const k = binKey(c); let l = bins.get(k); if (!l) bins.set(k, (l = [])); l.push(c); };
+  const tooNear = (c) => {
+    const bc = Math.floor((c % cols) / R), br = Math.floor(Math.floor(c / cols) / R);
+    for (let dc = -2; dc <= 2; dc++) for (let dr = -1; dr <= 1; dr++) {
+      const l = bins.get((bc + dc) * 65536 + (br + dr)); if (!l) continue;
+      for (const s0 of l) if (scale ? near(s0, c) : hexDistance(cols, s0, c) < minD) return true;
+    }
+    return false;
+  };
+  { const pre = seeds.splice(0); for (const c of pre) addSeed(c); }
   for (const c of order) {
     if (seeds.length >= maxK) break;
-    if (scale ? !seeds.some((s) => near(s, c)) : seeds.every((s) => hexDistance(cols, s, c) >= minD)) seeds.push(c);
+    if (!tooNear(c)) addSeed(c);
   }
   const heap = new Heap();
   seeds.forEach((c, k) => heap.push([0, c, k]));

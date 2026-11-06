@@ -39,7 +39,11 @@ function samplesOf(grid) {
   if (z) return z;
   z = new Uint8Array(grid.N * 9);
   const rx = (grid.W / WX_C) * 0.32, ry = (grid.H / WX_R) * 0.32;
-  for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); for (let k = 0; k < 9; k++) z[i * 9 + k] = zoneAt(grid, x + OFFS[k][0] * rx, y + OFFS[k][1] * ry); }
+  // 구역 번호를 128×80 격자점에 미리 구해 두고 가장 가까운 점으로 찾음 (칸마다 삼각함수 36번 → 0번). 화면 칠하기에만 쓰여 조금 어긋나도 티 안 남
+  const LX = 128, LY = 80, lat = new Uint8Array(LX * LY);
+  for (let b = 0; b < LY; b++) for (let a2 = 0; a2 < LX; a2++) lat[b * LX + a2] = zoneAt(grid, ((a2 + 0.5) / LX) * grid.W, ((b + 0.5) / LY) * grid.H);
+  const look = (x, y) => lat[Math.max(0, Math.min(LY - 1, Math.floor((y / grid.H) * LY))) * LX + Math.max(0, Math.min(LX - 1, Math.floor((x / grid.W) * LX)))];
+  for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); for (let k = 0; k < 9; k++) z[i * 9 + k] = look(x + OFFS[k][0] * rx, y + OFFS[k][1] * ry); }
   sampleCache.set(grid, z);
   return z;
 }
