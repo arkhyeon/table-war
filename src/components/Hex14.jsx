@@ -719,7 +719,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
         L.tileT = setTimeout(function pump() {
           L.tileT = null;
           const Q = L.tileQ; if (!Q || !Q.list.length) return;
-          const job = Q.list.shift(), r = { x: job.tx * Q.TW, y: job.ty * Q.TW, w: Q.TW, h: Q.TW, sc: Q.sc };
+          // 타일마다 가장자리를 4점씩 더 그려 이웃 타일과 겹치게 함: 딱 맞대면 점 아래 자리에서 맞닿아 바탕색 실선이 비쳐 보임
+          const pad = 4 / Q.sc;
+          const job = Q.list.shift(), r = { x: job.tx * Q.TW - pad, y: job.ty * Q.TW - pad, w: Q.TW + pad * 2, h: Q.TW + pad * 2, sc: Q.sc };
           const s2 = gameRef.current;
           const T = paintTerrain(grid, world, r);
           const oc = document.createElement('canvas'); oc.width = T.cv.width; oc.height = T.cv.height; const ox = oc.getContext('2d'); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y);
@@ -932,7 +934,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}${c.founding ? ` (공사 ${c.founding}턴)` : ''}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
-        const ly = cy + sz * 0.7 + S * 0.42; // 성 그림 바로 아래
+        const ly = cy + sz * 0.7 + sz * 0.38 + fs * 0.95; // 성벽 막대 바로 아래 (크게 확대해도 이름이 성에서 멀어지지 않게)
         const bh = fs * (k * sz > 4.5 ? 2.3 : 1.2);
         if (pri > 0 && placed.some(([x, y, w, h]) => Math.abs(x - cx) * 2 < w + tw && y < ly - fs * 0.85 + bh && ly - fs * 0.85 < y + h)) continue;
         placed.push([cx, ly - fs * 0.85, tw, bh]);
