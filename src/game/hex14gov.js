@@ -97,7 +97,20 @@ function addFree(s, d, c, id) {
 const key = (a, b) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 export const relOf = (s, a, b) => s.rel?.[key(a, b)] ?? 30;
 export const addRel = (s, a, b, d) => { if (a === b || a === null || b === null || a < 0 || b < 0) return; s.rel[key(a, b)] = Math.max(0, Math.min(100, relOf(s, a, b) + d)); };
-export const pactOf = (s, a, b) => (s.pacts || []).find((p) => ((p.a === a && p.b === b) || (p.a === b && p.b === a)) && p.until > s.turn) || null;
+// 약조 찾기: 아주 자주 불려서(적인지 따질 때마다) 나라 쌍 → 약조 목록을 기억해 둠. 약조 배열이 바뀌거나 늘면 다시 만듦
+const pactIdx = new WeakMap();
+let lastPs = null, lastIx = null;
+export const pactOf = (s, a, b) => {
+  const ps = s.pacts;
+  if (!ps || !ps.length) return null;
+  let ix = ps === lastPs ? lastIx : pactIdx.get(ps); // 바로 앞에 본 약조 배열이면 찾지 않고 씀
+  if (!ix || ix.len !== ps.length) { const m = new Map(); for (const p of ps) { const k = p.a < p.b ? p.a * 4096 + p.b : p.b * 4096 + p.a; if (!m.has(k)) m.set(k, []); m.get(k).push(p); } ix = { len: ps.length, m }; pactIdx.set(ps, ix); }
+  lastPs = ps; lastIx = ix;
+  const l = ix.m.get(a < b ? a * 4096 + b : b * 4096 + a);
+  if (!l) return null;
+  for (const p of l) if (((p.a === a && p.b === b) || (p.a === b && p.b === a)) && p.until > s.turn) return p;
+  return null;
+};
 export const PACT = { ally: '동맹', truce: '정전', vassal: '속국' };
 
 export const powerOf = (s, nid) => s.castles.filter((c) => c.owner === nid).reduce((a, c) => a + c.troops, 0) + s.units.filter((u) => u.nation === nid).reduce((a, u) => a + u.troops, 0);

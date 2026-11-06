@@ -664,47 +664,57 @@ function heap() {
 }
 
 // 길찾기 (A*): 지나갈 수 없는 칸·다른 부대가 있는 칸은 피함 (목표 칸은 허용)
+// 길찾기용 작업 공간: 칸 수만큼의 숫자 배열을 지도마다 한 번 만들어 두고 다시 씀 (부를 때마다 Map을 만들지 않게)
+const pathWork = new WeakMap();
 export function findPath(s, grid, from, to, nation, navy = false) {
   if (from === to) return [];
+  let W = pathWork.get(grid);
+  if (!W) { W = { g: new Float64Array(grid.N), prev: new Int32Array(grid.N), mark: new Int32Array(grid.N), shut: new Int32Array(grid.N), gen: 0 }; pathWork.set(grid, W); }
+  const gen = ++W.gen, gS = W.g, prev = W.prev, mark = W.mark, shut = W.shut;
   const occ = unitAt(s);
-  const cas = castleAt(s);
-  const forts = new Map((s.forts || []).map((f) => [f.tile, f]));
+  // 성 자리 → 성 (성 자리는 안 움직임, 주인은 그때그때 봄)
+  const cas = castleTiles(s, grid);
+  const forts = s.forts?.length ? new Map(s.forts.map((f) => [f.tile, f])) : null;
   const open = heap();
   open.push(0, from);
-  const g = new Map([[from, 0]]);
-  const prev = new Map();
-  const seen = new Set();
-  let it = 0;
+  gS[from] = 0; mark[from] = gen; prev[from] = -1;
+  let it = 0, found = false;
   while (open.size() && it++ < 40000) {
     const cur = open.pop();
-    if (cur === to) break;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
+    if (cur === to) { found = true; break; }
+    if (shut[cur] === gen) continue;
+    shut[cur] = gen;
+    const gc = gS[cur];
     for (const nx of grid.nb[cur]) {
       if (!canGo(grid, nx, navy)) continue;
+      const u = occ.get(nx);
       if (nx !== to) {
-        const u = occ.get(nx);
         if (u && u.nation !== nation) continue;
-        const c = cas.get(nx);
-        if (c && c.owner !== nation) continue; // 남의 성은 지나갈 수 없음 (공격 목표일 때만 들어감)
+        const ci = cas[nx];
+        if (ci >= 0 && s.castles[ci].owner !== nation) continue; // 남의 성은 지나갈 수 없음 (공격 목표일 때만 들어감)
       }
       // 남의 진지·망루·목책: 부숴야 지나가므로 아주 비싼 길 (돌아갈 길이 멀면 부수고 감)
-      const ef = forts.get(nx);
+      const ef = forts && forts.get(nx);
       // 빠른 길로 가되, 목표 바로 옆(싸울 자리)은 땅을 고름 — 물 위에서 싸우면 약하므로 상륙해서 침
       const board = grid.sea[nx] && nx !== to && grid.dist(nx, to) === 1 ? 4 : grid.sea[nx] !== grid.sea[cur] ? 0.5 : 0;
-      const ng = g.get(cur) + moveCost(grid, cur, nx) + board + (occ.get(nx) ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
-      if (ng < (g.get(nx) ?? Infinity)) {
-        g.set(nx, ng);
-        prev.set(nx, cur);
+      const ng = gc + moveCost(grid, cur, nx) + board + (u ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
+      if (mark[nx] !== gen || ng < gS[nx]) {
+        mark[nx] = gen; gS[nx] = ng; prev[nx] = cur;
         open.push(ng + grid.dist(nx, to), nx);
       }
     }
   }
-  if (!prev.has(to)) return null;
+  if (!found && mark[to] !== gen) return null;
   const path = [to];
-  while (path[path.length - 1] !== from) path.push(prev.get(path[path.length - 1]));
+  while (path[path.length - 1] !== from) path.push(prev[path[path.length - 1]]);
   path.pop();
   return path.reverse();
+}
+const castleTileCache = new WeakMap();
+function castleTiles(s, grid) {
+  let c = castleTileCache.get(grid);
+  if (!c || c.n !== s.castles.length) { const a = new Int32Array(grid.N).fill(-1); s.castles.forEach((x, i) => { a[x.tile] = i; }); c = { n: s.castles.length, a }; castleTileCache.set(grid, c); }
+  return c.a;
 }
 
 // ── 출진: 성에서 장수와 병력을 뽑아 부대를 만듦 ──
@@ -1017,9 +1027,10 @@ export function stepDay(s, grid) {
   fortsDay(s, grid);
   // 4) 보급: 내 성과 내 땅으로 이어져 있지 않으면 병력·사기가 줄어듦
   const supplied = {};
+  const SC = supplyComps(s, grid); // 땅 덩어리 나누기는 하루 한 번만 (나라마다 지도 전체를 훑지 않게)
   for (const u of s.units) {
-    if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation);
-    if (u.outlaw) { u.cut = false; continue; } // 도적은 보급이 없어도 버팀 (대신 몇 순 뒤 흩어짐)
+    if (u.outlaw) { u.cut = false; continue; } // 도적은 보급이 없어도 버팀
+    if (!supplied[u.nation]) supplied[u.nation] = supplyMap(s, grid, u.nation, SC);
     if (!grid.sea[u.tile] && !supplied[u.nation].has(u.tile)) { u.troops *= 0.995; u.morale -= 1; u.cut = true; continue; } // 보급이 끊기면 병력·사기가 천천히 줄어듦
     u.cut = false;
     // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
@@ -1080,7 +1091,48 @@ export function nearestCastle(s, grid, tile, nation) {
 }
 
 // 보급망: 내 성에서 내 땅(칸)으로 이어진 칸들 (+그 옆 한 칸)
-export function supplyMap(s, grid, nation) {
+// 보급용 땅 덩어리: 같은 주인끼리 이어진 땅을 한 덩어리로, 얕은 바다(부대가 없는 칸)도 덩어리로 묶고, 덩어리끼리 맞닿은 관계를 셈
+export function supplyComps(s, grid) {
+  const N = grid.N, comp = new Int32Array(N).fill(-1), cls = [];
+  const unitOn = new Map(); for (const u of s.units) { if (!unitOn.has(u.tile)) unitOn.set(u.tile, []); unitOn.get(u.tile).push(u.nation); }
+  // -2 = 바다, -3 = 부대가 선 바다 칸(그 칸 하나만, 적 부대가 있으면 그 나라는 못 지나감), -9 = 못 지나감
+  const clsOf = (i) => (grid.water[i] ? (unitOn.has(i) ? -3 : -2) : s.owner[i] >= 0 ? s.owner[i] : -9);
+  const q = new Int32Array(N), onTile = [];
+  for (let i = 0; i < N; i++) {
+    if (comp[i] >= 0) continue;
+    const c = clsOf(i); if (c === -9) continue;
+    const id = cls.length; cls.push(c);
+    if (c === -3) { comp[i] = id; onTile[id] = unitOn.get(i); continue; }
+    let n = 0; q[n++] = i; comp[i] = id;
+    for (let k = 0; k < n; k++) for (const j of grid.nb[q[k]]) if (comp[j] < 0 && clsOf(j) === c) { comp[j] = id; q[n++] = j; }
+  }
+  const adj = cls.map(() => new Set());
+  for (let i = 0; i < N; i++) { const a = comp[i]; if (a < 0) continue; for (const j of grid.nb[i]) { const b = comp[j]; if (b >= 0 && b !== a) adj[a].add(b); } }
+  return { comp, cls, onTile, adj: adj.map((x) => [...x]) };
+}
+export function supplyMap(s, grid, nation, SC = null) {
+  if (SC) {
+    // 덩어리 단위로 훑음: 내 성·진지가 있는 덩어리에서 시작해 내 땅·동맹/정전국 땅·(항구가 있으면) 바다로 이어진 덩어리
+    const { comp, cls, adj, onTile } = SC;
+    const port = s.castles.some((c) => c.owner === nation && c.port);
+    const okOwner = s.nations.map((m) => m.id === nation || !enemy(s, nation, m.id));
+    const ok = (k) => (cls[k] === -2 ? port : cls[k] === -3 ? port && !onTile[k].some((x) => enemy(s, nation, x)) : cls[k] === nation || (cls[k] >= 0 && okOwner[cls[k]]));
+    const reach = new Uint8Array(cls.length), q = [];
+    const seed = (t) => { const k = comp[t]; if (k >= 0 && !reach[k]) { reach[k] = 1; q.push(k); } };
+    for (const c of s.castles) if (c.owner === nation) seed(c.tile);
+    // 진지가 적 땅에 있으면 그 칸만 보급 거점 (적 땅 덩어리 전체가 보급되지 않게): 진지 칸과 맞닿은 지나갈 수 있는 덩어리부터 이어짐
+    const extra = new Set();
+    for (const f of s.forts || []) if (f.kind === 'camp' && f.owner === nation && !f.left) {
+      if (comp[f.tile] >= 0 && ok(comp[f.tile])) seed(f.tile);
+      else { extra.add(f.tile); for (const j of grid.nb[f.tile]) if (comp[j] >= 0 && ok(comp[j])) seed(j); }
+    }
+    for (let i = 0; i < q.length; i++) for (const b of adj[q[i]]) if (!reach[b] && ok(b)) { reach[b] = 1; q.push(b); }
+    const on = (t) => (comp[t] >= 0 && reach[comp[t]] === 1) || extra.has(t);
+    return { has: (t) => on(t) || grid.nb[t].some(on) };
+  }
+  return supplyMapExact(s, grid, nation);
+}
+export function supplyMapExact(s, grid, nation) {
   // 칸이 많은 세계 지도에서도 빠르게: 방문 표시는 숫자 배열, 나라끼리 적대 여부는 미리 한 번만
   const seen = new Uint8Array(grid.N), q = new Int32Array(grid.N);
   let n = 0;

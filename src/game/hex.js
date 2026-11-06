@@ -60,7 +60,10 @@ export function neighborIndexWrap(cols, rows, idx, d) {
 export function hexDistanceWrap(cols, a, b) {
   const ac = a % cols, ar = (a / cols) | 0, bc = b % cols, br = (b / cols) | 0;
   const ax = ac - (ar - (ar & 1)) / 2, bx0 = bc - (br - (br & 1)) / 2, dz = ar - br;
-  let best = Infinity;
-  for (const sh of [-cols, 0, cols]) { const dx = ax - (bx0 + sh), dy = -dx - dz; const d = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)); if (d < best) best = d; }
+  // 왼쪽·제자리·오른쪽으로 한 바퀴 옮긴 셋 중 가까운 것 (자주 불려서 배열을 만들지 않고 바로 셈)
+  const adz = dz < 0 ? -dz : dz;
+  let dx = ax - bx0 + cols, dy = -dx - dz, best = Math.max(dx < 0 ? -dx : dx, dy < 0 ? -dy : dy, adz);
+  dx -= cols; dy = -dx - dz; let d = Math.max(dx < 0 ? -dx : dx, dy < 0 ? -dy : dy, adz); if (d < best) best = d;
+  dx -= cols; dy = -dx - dz; d = Math.max(dx < 0 ? -dx : dx, dy < 0 ? -dy : dy, adz); if (d < best) best = d;
   return best;
 }

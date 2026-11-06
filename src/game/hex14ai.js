@@ -25,7 +25,37 @@ export const STRATS = {
 
 // 이웃 나라: 내 성에서 가까운 성을 가진 나라들 (가까운 순)
 // 맞닿은 성: 그 성에서 가장 가까운 남의 성(그 나라 것 말고)이 우리 성이거나 거의 같은 거리 — 다른 나라 땅 너머가 아님
+// 성마다 다른 성들을 가까운 순으로 한 번만 정렬해 둠 (성 자리는 안 움직임, 새 도시가 생기면 다시)
+const nearCache = new WeakMap();
+function nearList(s, grid) {
+  let L = nearCache.get(grid);
+  if (L && L.n === s.castles.length) return L;
+  const cs = s.castles, n = cs.length, ids = [], ds = [];
+  for (let i = 0; i < n; i++) {
+    const arr = [];
+    for (let j = 0; j < n; j++) if (j !== i) arr.push([j, grid.dist(cs[i].tile, cs[j].tile)]);
+    arr.sort((a, b) => a[1] - b[1]);
+    ids.push(Int16Array.from(arr, (x) => x[0])); ds.push(Int16Array.from(arr, (x) => x[1]));
+  }
+  L = { n, ids, ds };
+  nearCache.set(grid, L);
+  return L;
+}
 export function frontier(s, grid, nid, c) {
+  // 가까운 순으로 보다가 우리 성을 만나면 끝 (예전엔 부를 때마다 모든 성을 훑었음)
+  const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id], lim = 2 * grid.k;
+  if (!ids) return frontierSlow(s, grid, nid, c);
+  let otherD = Infinity;
+  for (let k = 0; k < ids.length; k++) {
+    const x = s.castles[ids[k]], d = ds[k];
+    if (d > otherD + lim) return Infinity;
+    if (x.owner === c.owner) continue;
+    if (x.owner === nid) return d;
+    if (otherD === Infinity && x.owner !== null && x.owner >= 0 && s.nations[x.owner]?.alive) otherD = d;
+  }
+  return Infinity;
+}
+export function frontierSlow(s, grid, nid, c) {
   let mineD = Infinity, otherD = Infinity;
   for (const x of s.castles) {
     if (x === c || x.owner === c.owner) continue;
@@ -106,15 +136,31 @@ export function chooseStrategy(s, grid, nid) {
 
 
 // 싸움터에 보낼 장수: 무력·통솔 위주로 고르고, 성에는 정치 가장 높은 장수 한 명을 남겨 내정을 맡김
+// 성별 장수 목록: 컴퓨터 한 나라가 생각할 때마다 한 번만 만듦 (성마다 장수 전체를 훑지 않게). 꺼낼 때 지금 상태로 다시 걸러 냄
+let genIdx = null;
+const indexGenerals = (s) => { if (genIdx && genIdx.s === s && genIdx.k === `${s.turn}:${s.day}`) return; const m = new Map(); for (const g of Object.values(s.generals)) if (g.castle !== null && g.castle !== undefined) { if (!m.has(g.castle)) m.set(g.castle, []); m.get(g.castle).push(g); } genIdx = { s, m, k: `${s.turn}:${s.day}` }; };
 export function fighters(s, c) {
-  const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active');
+  const pool = genIdx && genIdx.s === s ? genIdx.m.get(c.id) || [] : Object.values(s.generals);
+  const gs = pool.filter((g) => g.castle === c.id && g.status === 'active');
   if (gs.length <= 1) return gs;
   const keeper = gs.slice().sort((a, b) => b.pol - a.pol)[0];
   return gs.filter((g) => g !== keeper || g.war + g.lead >= 170).sort((a, b) => b.war * 1.2 + b.lead - b.pol * 0.3 - (a.war * 1.2 + a.lead - a.pol * 0.3));
 }
 
 // 성 주변 위협: 6칸 안 적 부대 병력 합
+// 같은 날 같은 성은 같은 답 (컴퓨터가 생각하는 동안엔 부대가 움직이지 않음) → 기억해 둠
+let threatMemo = null;
 function threatNear(s, grid, c) {
+  const k = `${s.turn}:${s.day}:${s.units.length}`;
+  if (!threatMemo || threatMemo.s !== s || threatMemo.k !== k) threatMemo = { s, k, m: new Map() };
+  const key = c.id * 64 + (c.owner + 1);
+  const hit = threatMemo.m.get(key);
+  if (hit !== undefined) return hit;
+  const v = threatNear0(s, grid, c);
+  threatMemo.m.set(key, v);
+  return v;
+}
+function threatNear0(s, grid, c) {
   let t = 0;
   for (const u of s.units) if (enemy(s, c.owner, u.nation) && grid.dist(u.tile, c.tile) <= 6 * grid.k) t += u.troops;
   return t;
@@ -156,6 +202,7 @@ function strategyDiplomacy(s, grid, nid, rng) {
 export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const n = s.nations[nid];
   if (!n.alive) return;
+  indexGenerals(s);
   // 전략은 군단(플레이어 나라)이 아닐 때만 고름: 1년마다, 또는 도시 수가 크게 바뀌면
   if (!daily && !scope && s.turn % 6 === 0) {
     const heg = hegemonOf(s);
@@ -179,9 +226,10 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const focus = scope ? null : n.focus;
   // 지금 싸우는 나라: 우리가 치러 가는 나라 + 우리 성을 노리고 다가온 나라 — 두 나라 넘게 전쟁을 벌이지 않음
   const wars = new Set();
+  const ownCs = s.castles.filter((c) => c.owner === nid); // 우리 성만 (예전엔 부대마다 모든 성을 훑었음)
   for (const u of s.units) {
     if (u.nation === nid && u.order?.kind === 'castle') { const o = s.castles[u.order.id]?.owner; if (o !== null && o !== undefined && o !== nid) wars.add(o); }
-    if (u.nation !== nid && enemy(s, nid, u.nation) && s.castles.some((c) => c.owner === nid && grid.dist(c.tile, u.tile) <= 5 * grid.k)) wars.add(u.nation);
+    if (u.nation !== nid && !wars.has(u.nation) && enemy(s, nid, u.nation) && ownCs.some((c) => grid.dist(c.tile, u.tile) <= 5 * grid.k)) wars.add(u.nation);
   }
   // 군단: 남의 나라를 먹으러 가지 않고, 맡은 성을 지키고 빼앗긴 맡은 성만 되찾음
   const lost = scope ? new Set([...(scope.all || [])].filter((id) => s.castles[id] && s.castles[id].owner !== nid && enemy(s, nid, s.castles[id].owner))) : null;
