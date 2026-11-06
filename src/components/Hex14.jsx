@@ -733,7 +733,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
         }, 0);
       }
       const all = vis.every((key) => { const t = L.tiles.get(key); return t && !t.stale; });
-      return { vis, all };
+      // 확대·축소 직후 새 배율 타일이 아직 없으면: 이웃 배율에서 그려 둔 타일을 늘이거나 줄여 먼저 보여 줌 (흐린 전체 지도 대신)
+      const fallback = [];
+      if (!all) for (const l2 of [lv - 0.5, lv + 0.5, lv - 1, lv + 1]) {
+        const TW2 = 512 / Math.min(B0.sc * 2 ** l2, 12);
+        for (let ty = Math.max(0, Math.floor(vy / TW2)); ty <= Math.floor((vy + vh) / TW2); ty++) for (let tx = Math.floor(vx0 / TW2); tx <= Math.floor((vx0 + vw) / TW2); tx++) { const t = L.tiles.get(`${l2}|${tx}|${ty}`); if (t) fallback.push(t); }
+      }
+      L.lastFallback = all ? 1 : fallback.length;
+      return { vis, all, fallback };
     })();
     const passes = [view.current.x];
     if (grid.wrap) for (let n = 1; view.current.x + cw / k > n * grid.period; n++) passes.push(view.current.x - n * grid.period);
@@ -767,7 +774,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       blit(L.comp, B.sc);
     }
     // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
-    if (TL) for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); }
+    if (TL) { for (const t of TL.fallback) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); } }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
       const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(26,64,100,';
@@ -1158,7 +1165,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
-      chunk: () => { const L = land.current; const Q = L.tileQ; return { ok: !!Q && Q.list.length === 0, tiles: L.tiles?.size || 0, queued: Q?.list.length || 0 }; },
+      chunk: () => { const L = land.current; const Q = L.tileQ; return { ok: !!Q && Q.list.filter((x) => x.inView).length === 0, fb: (L.lastFallback || 0) > 0, tiles: L.tiles?.size || 0, queued: Q?.list.length || 0 }; },
       probe: (lon, lat) => { const [x, y] = world.geo.toPx(lon, lat); const t = pixelToCell(grid.size, grid.cols, grid.rows, x, y); return { t, terrain: grid.terrain[t], pass: grid.passable(t), N: grid.N, cols: grid.cols, W: world.W, H: world.H, wc: world.cols, wr: world.rows }; },
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],

@@ -450,7 +450,7 @@ function spreadLand(s, grid) {
       // 삼국지14처럼: 남이 칠해 둔 땅은 저절로 되찾지 않음 (부대가 직접 칠해야 함) — 빈 땅만 넓힘
       if (s.owner[t] !== -1 || near.has(t)) continue;
       if (!grid.nb[t].some((x) => s.owner[x] === c.owner)) continue;
-      s.owner[t] = c.owner;
+      s.owner[t] = c.owner ?? -1;
       n -= 1;
     }
   }

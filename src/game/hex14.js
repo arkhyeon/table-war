@@ -13,6 +13,16 @@ import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
 import { t14, castleGens } from './hex14traits.js';
+
+// 칸 배열(주인·관할)은 Int16Array로 둠: 일반 배열은 structuredClone을 거치면 다시 복사할 때 몇 배 느려짐 (하루마다 상태를 복사하므로)
+// 저장(JSON)할 땐 보통 배열로 쓰고, 불러올 땐 다시 Int16Array로
+if (!Int16Array.prototype.toJSON) Object.defineProperty(Int16Array.prototype, 'toJSON', { value() { return Array.from(this); }, configurable: true });
+export function normalizeHex14(s) {
+  if (s?.mode !== 'hex14') return s;
+  if (s.owner && !(s.owner instanceof Int16Array)) s.owner = Int16Array.from(s.owner, (v) => (v === null || v === undefined ? -1 : v));
+  if (s.district && !(s.district instanceof Int16Array)) s.district = Int16Array.from(s.district, (v) => (v === null || v === undefined ? -1 : v));
+  return s;
+}
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -410,7 +420,7 @@ function districts(grid, cities, landOwner = null) {
 
 // 새 도시가 생기면 관할 구역을 다시 나눔
 export function redistrict(s, grid) {
-  s.district = districts(grid, s.castles, (i) => s.owner?.[i] ?? -1);
+  s.district = Int16Array.from(districts(grid, s.castles, (i) => s.owner?.[i] ?? -1));
 }
 
 // ── 새 판: 기존 게임 설정(나라·장수·지역 병력)을 칸 지도와 도시로 옮김 ──
@@ -473,7 +483,7 @@ export function createHex14(world, base) {
     }
   }
   // 땅: 그 칸이 속한 도시의 주인 (삼국지14처럼 시작할 때 관할 구역이 통째로 그 나라 땅)
-  const owner = new Array(grid.N).fill(-1);
+  const owner = new Int16Array(grid.N).fill(-1); // 칸 주인(-1 = 없음). 숫자 배열이라 날마다 상태를 복사할 때 빠름
   // 단, 그 칸의 지역이 실제로 그 나라 땅(역사 강역)일 때만 — 성이 드문 빈 땅(사막·초원)까지 통째로 칠해지지 않게. 나머지는 시간이 지나며 넓어짐
   for (let i = 0; i < grid.N; i++) if (grid.passable(i)) owner[i] = landOwner(i);
   for (const c of castles) owner[c.tile] = c.owner === null ? -1 : c.owner;
@@ -503,7 +513,7 @@ export function createHex14(world, base) {
   const nations = base.nations.map((n) => ({ id: n.id, name: n.name, color: n.color, alive: n.alive && castles.some((c) => c.owner === n.id), isPlayer: n.isPlayer, gold: n.gold, horde: !!n.horde, pools: n.pools || [] }));
   const st = {
     mode: 'hex14', version: 14, scenarioId: base.scenarioId, seed: base.seed, opts: base.opts, playerId: base.playerId, spectator: base.spectator,
-    startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district, units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
+    startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district: Int16Array.from(district), units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
   initGov(st, makeRng(`gov0:${base.seed}`)); ensureTraits(st);
   rollWeather(st, grid);
