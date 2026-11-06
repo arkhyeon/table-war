@@ -50,13 +50,60 @@ function seamFix(grid, cv, sc) {
 
 // ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
 // chunk가 있으면: 그 사각형(지도 좌표)만, 주어진 배율로 새로 그림 (확대했을 때 흐려지지 않게)
+// 사각형(지도 좌표) 둘레 m 안의 칸들: 줄·열 범위로 바로 셈
+function tilesIn(grid, r, m) {
+  const out = [], hw = grid.size * Math.sqrt(3), m2 = m + grid.size * 2;
+  const r0 = Math.max(0, Math.floor((r.y - m2) / (1.5 * grid.size)) - 1), r1 = Math.min(grid.rows - 1, Math.ceil((r.y + r.h + m2) / (1.5 * grid.size)) + 1);
+  const c0 = Math.max(0, Math.floor((r.x - m2) / hw) - 1), c1 = Math.min(grid.cols - 1, Math.ceil((r.x + r.w + m2) / hw) + 1);
+  for (let y = r0; y <= r1; y++) for (let x = c0; x <= c1; x++) { const i = y * grid.cols + x; const [cx, cy] = grid.center(i); if (cx > r.x - m && cx < r.x + r.w + m && cy > r.y - m && cy < r.y + r.h + m) out.push(i); }
+  return out;
+}
+// 해안선: 전체 경로는 한 번만 만들고, 토막(선분)은 칸 64짜리 바구니에 나눠 담아 둠
+const coastCache = new WeakMap();
+function coastData(world) {
+  let c = coastCache.get(world);
+  if (c) return c;
+  const B = 64, segs = [], buckets = new Map();
+  let px = 0, py = 0, sx = 0, sy = 0;
+  const re = /([MLZ])\s*([-\d.]*)\s*([-\d.]*)/g; let m;
+  const add = (x1, y1, x2, y2) => { const id = segs.length; segs.push(x1, y1, x2, y2); const bx0 = Math.floor(Math.min(x1, x2) / B), bx1 = Math.floor(Math.max(x1, x2) / B), by0 = Math.floor(Math.min(y1, y2) / B), by1 = Math.floor(Math.max(y1, y2) / B); for (let bx = bx0; bx <= bx1; bx++) for (let by = by0; by <= by1; by++) { const k = bx * 100000 + by; let l = buckets.get(k); if (!l) buckets.set(k, (l = [])); l.push(id); } };
+  while ((m = re.exec(world.paths.land))) {
+    if (m[1] === 'M') { px = sx = +m[2]; py = sy = +m[3]; }
+    else if (m[1] === 'L') { const x = +m[2], y = +m[3]; add(px, py, x, y); px = x; py = y; }
+    else { if (px !== sx || py !== sy) add(px, py, sx, sy); px = sx; py = sy; }
+  }
+  c = { B, segs, buckets, full: null };
+  coastCache.set(world, c);
+  return c;
+}
+const coastFull = (world) => { const c = coastData(world); return c.full || (c.full = new Path2D(world.paths.land)); };
+function coastNear(world, r, m, period) {
+  const c = coastData(world), p = new Path2D(), seen = new Set();
+  for (const ox of period ? [0, -period, period] : [0]) {
+    const x0 = r.x - m - ox, x1 = r.x + r.w + m - ox, y0 = r.y - m, y1 = r.y + r.h + m;
+    for (let bx = Math.floor(x0 / c.B); bx <= Math.floor(x1 / c.B); bx++) for (let by = Math.floor(y0 / c.B); by <= Math.floor(y1 / c.B); by++) {
+      const l = c.buckets.get(bx * 100000 + by); if (!l) continue;
+      for (const id of l) { const key = id * 4 + (ox > 0 ? 1 : ox < 0 ? 2 : 0); if (seen.has(key)) continue; seen.add(key); const o = id * 4; p.moveTo(c.segs[o] + ox, c.segs[o + 1]); p.lineTo(c.segs[o + 2] + ox, c.segs[o + 3]); }
+    }
+  }
+  return p;
+}
+const spriteCaches = new WeakMap();
+function spriteCacheFor(grid, sc) { let m = spriteCaches.get(grid); if (!m) spriteCaches.set(grid, (m = new Map())); const k = sc.toFixed(3); if (!m.has(k)) { if (m.size > 6) m.clear(); m.set(k, new Map()); } return m.get(k); }
 function paintTerrain(grid, world, chunk = null) {
   const sc = chunk ? chunk.sc : mapScale(grid);
   const layer = () => { if (!chunk) return newLayer(grid, sc); const c2 = document.createElement('canvas'); c2.width = Math.ceil(chunk.w * sc); c2.height = Math.ceil(chunk.h * sc); const x = c2.getContext('2d'); x.scale(sc, sc); x.translate(-chunk.x, -chunk.y); return [c2, x]; };
   const [cv, ctx0] = layer();
   let ctx = ctx0; // 나무 그림을 작은 그림(스프라이트)에 미리 그릴 때 잠깐 바꿔 씀
   const m = grid.size * 3;
-  const TILES = chunk ? (() => { const out = []; for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); if (x > chunk.x - m && x < chunk.x + chunk.w + m && y > chunk.y - m && y < chunk.y + chunk.h + m) out.push(i); } return out; })() : null;
+  // 조각에 드는 칸: 줄·열 범위로 바로 셈 (칸 전체를 훑지 않게)
+  const TILES = chunk ? (() => {
+    const out = [], hw = grid.size * Math.sqrt(3), m2 = m + grid.size * 2;
+    const r0 = Math.max(0, Math.floor((chunk.y - m2) / (1.5 * grid.size)) - 1), r1 = Math.min(grid.rows - 1, Math.ceil((chunk.y + chunk.h + m2) / (1.5 * grid.size)) + 1);
+    const c0 = Math.max(0, Math.floor((chunk.x - m2) / hw) - 1), c1 = Math.min(grid.cols - 1, Math.ceil((chunk.x + chunk.w + m2) / hw) + 1);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) { const i = r * grid.cols + c; const [x, y] = grid.center(i); if (x > chunk.x - m && x < chunk.x + chunk.w + m && y > chunk.y - m && y < chunk.y + chunk.h + m) out.push(i); }
+    return out;
+  })() : null;
   const ALL = { [Symbol.iterator]: function* () { for (let i = 0; i < grid.N; i++) yield i; } };
   const each = (fn) => { if (TILES) for (const i of TILES) fn(i); else for (let i = 0; i < grid.N; i++) fn(i); };
   const sz = grid.size;
@@ -107,14 +154,16 @@ function paintTerrain(grid, world, chunk = null) {
   // 파도 거품: 실제 해안선 바깥쪽에 흰 띠 (땅 칸이 안쪽을 덮음)
   if (world.geo && world.paths?.land) {
     try {
-      const coast = new Path2D(world.paths.land);
-      ctx.lineJoin = 'round';
-      for (const ox of grid.wrap ? [0, -grid.period, grid.period] : [0]) {
+      // 조각(타일)을 그릴 땐 그 둘레 해안선 토막만 모아 그림 (세계 해안선 전체는 116만 글자라 타일마다 통째로 그리면 몹시 느림)
+      const coast = chunk ? coastNear(world, chunk, sz * 1.5, grid.wrap ? grid.period : 0) : coastFull(world);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      for (const ox of grid.wrap && !chunk ? [0, -grid.period, grid.period] : [0]) {
         ctx.save(); ctx.translate(ox, 0);
         ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = sz * 1.2; ctx.stroke(coast);
         ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = sz * 0.55; ctx.stroke(coast);
         ctx.restore();
       }
+      ctx.lineCap = 'butt';
     } catch { /* 거품 없이 */ }
   }
   // 물결
@@ -282,7 +331,7 @@ function paintTerrain(grid, world, chunk = null) {
     ctx.beginPath(); ctx.arc(x + h * 0.1, cy0 + h * 0.08, h * 0.3, 0.1, 2.2); ctx.strokeStyle = 'rgba(20,45,20,0.35)'; ctx.lineWidth = sz * 0.04; ctx.stroke();
   };
   // 나무는 크기 5단계 × 모양별로 한 번만 작은 그림에 그려 두고 찍어 냄 (세계판은 나무가 수만 그루라 하나하나 그리면 몇 초 걸림)
-  const sprites = new Map();
+  const sprites = spriteCacheFor(grid, sc); // 같은 배율이면 조각끼리 나무 그림을 같이 씀
   const tree = (isPine, x, y, h, seed) => {
     const hq = Math.max(0, Math.min(4, Math.round(((h / sz - 0.7) / 0.32) * 4)));
     const v = isPine ? 0 : 1 + Math.floor(hash(seed, 1) * 4);
@@ -606,7 +655,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 조금 바뀌면 그 구역만 영토 그림·합친 그림·확대 조각에서 고침 (예전엔 날마다 큰 그림 세 장을 통째로 다시 합치고 확대 조각도 버렸음 → 날 바뀔 때 끊김)
       const L = land.current, prev = L.prev;
       const dPrev = L.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
-      const full = () => { L.ownVer = (L.ownVer || 0) + 1; L.over = paintOwners(grid, s, L.base.sc); };
+      const full = () => { L.ownVer = (L.ownVer || 0) + 1; L.over = paintOwners(grid, s, L.base.sc); for (const t of L.tiles?.values() || []) t.stale = true; };
       if (!prev || !dSame || !L.over) full();
       else {
         const changed = [];
@@ -627,13 +676,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
             }
             L.compVer = L.ownVer;
           }
-          // 확대 조각: 그 안에 든 사각형만 영토를 다시 그림
-          const CH0 = L.chunk;
-          if (CH0 && CH0.ver === v0) {
-            const inside = rects.filter((r) => r.x1 > CH0.x && r.x0 < CH0.x + CH0.w && r.y1 > CH0.y && r.y0 < CH0.y + CH0.h);
-            if (inside.length) repaintOwnerRects(grid, s, CH0.over.getContext('2d'), inside);
-            CH0.ver = L.ownVer;
-          }
+          // 확대 그림 타일: 바뀐 구역에 걸린 타일만 '다시 그릴 것'으로 표시 (새로 그릴 때까지는 옛 그림을 보여 줌)
+          for (const t of L.tiles?.values() || []) if (rects.some((r) => r.x1 > t.x && r.x0 < t.x + t.w && r.y1 > t.y && r.y0 < t.y + t.h)) t.stale = true;
         }
       }
       land.current.prev = Int16Array.from(s.owner);
@@ -650,30 +694,47 @@ export default function Hex14({ world, game, setGame, onExit }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#1a4064';
     ctx.fillRect(0, 0, cw, ch);
-    // 선명한 조각 관리: 확대 배율이 바탕 그림보다 1.6배 넘게 크면, 멈춘 뒤 잠깐 있다가 보이는 범위만 새로 그림
-    {
-      const B0 = land.current.base, want = k * dpr, vx0 = view.current.x, vw = cw / k, vh = ch / k;
-      const CH = land.current.chunk;
-      const fits = (c) => c && c.x <= vx0 && c.y <= vy && c.x + c.w >= vx0 + vw && c.y + c.h >= vy + vh && c.sc >= want * 0.75 && c.sc <= want * 2.5 && c.ver === land.current.ownVer;
+    // 선명한 확대 그림: 지도를 작은 타일(512점)로 나눠, 보이는 타일만 쉬는 틈에 하나씩 그려 두고 다시 씀
+    // (예전엔 화면 크기 조각을 한 번에 0.3~0.6초 들여 그려서, 끌다가 조각 밖으로 나가면 흐렸다가 멈칫하며 선명해졌음)
+    const TL = (() => {
+      const L = land.current, B0 = L.base, want = k * dpr, vx0 = view.current.x, vw = cw / k, vh = ch / k;
       const need = want > B0.sc * 1.6 && !(grid.wrap && vx0 + vw > grid.period);
-      land.current.dbg = { want, base: B0.sc, need, vx0, vw, P: grid.period };
-      if (CH) CH.ok = need && fits(CH);
-      if (need && !fits(CH) && !land.current.chunkT) {
-        land.current.chunkT = setTimeout(() => {
-          land.current.chunkT = null;
-          const v = view.current, s2 = gameRef.current, el2 = wrap.current; if (!v || !el2) return;
-          const w2 = el2.clientWidth / v.k, h2 = el2.clientHeight / v.k;
-          const r = { x: v.x - w2 * 0.25, y: v.y - h2 * 0.25, w: w2 * 1.5, h: h2 * 1.5 };
-          r.sc = Math.min(v.k * (window.devicePixelRatio || 1), 4096 / Math.max(r.w, r.h));
+      if (!need) return null;
+      L.tiles = L.tiles || new Map();
+      const lv = Math.round(Math.log2(want / B0.sc) * 2) / 2, sc = Math.min(B0.sc * 2 ** lv, 12), TW = 512 / sc; // 배율은 √2 단계로 (확대 중 조금씩 바뀔 때마다 새로 그리지 않게)
+      const tx0 = Math.floor(vx0 / TW), tx1 = Math.floor((vx0 + vw) / TW), ty0 = Math.max(0, Math.floor(vy / TW)), ty1 = Math.floor((vy + vh) / TW);
+      const vis = [], want2 = [];
+      const frame = (L.frame = (L.frame || 0) + 1);
+      for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
+        if (tx < 0 || ty < 0 || tx * TW > grid.W || ty * TW > grid.H) continue;
+        const key = `${lv}|${tx}|${ty}`, t = L.tiles.get(key), inView = tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1;
+        if (inView) vis.push(key);
+        if (t) t.used = frame;
+        if (!t || t.stale) want2.push({ key, tx, ty, inView, d: Math.hypot(tx - (tx0 + tx1) / 2, ty - (ty0 + ty1) / 2) });
+      }
+      // 그릴 차례: 화면 안 → 가운데 가까운 순, 옛 그림이 있는 것보다 없는 것 먼저
+      want2.sort((a, b) => (b.inView - a.inView) || (!!L.tiles.get(a.key) - !!L.tiles.get(b.key)) || a.d - b.d);
+      L.tileQ = { list: want2, lv, sc, TW };
+      if (want2.length && !L.tileT) {
+        L.tileT = setTimeout(function pump() {
+          L.tileT = null;
+          const Q = L.tileQ; if (!Q || !Q.list.length) return;
+          const job = Q.list.shift(), r = { x: job.tx * Q.TW, y: job.ty * Q.TW, w: Q.TW, h: Q.TW, sc: Q.sc };
+          const s2 = gameRef.current;
           const T = paintTerrain(grid, world, r);
           const oc = document.createElement('canvas'); oc.width = T.cv.width; oc.height = T.cv.height; const ox = oc.getContext('2d'); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y);
-          const m = grid.size * 3, tiles = []; for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); if (x > r.x - m && x < r.x + r.w + m && y > r.y - m && y < r.y + r.h + m) tiles.push(i); }
-          drawOwnerTiles(grid, s2, ox, tiles);
-          land.current.chunk = { ...r, cv: T.cv, rcv: T.rcv, over: oc, ver: land.current.ownVer, ok: true };
+          drawOwnerTiles(grid, s2, ox, tilesIn(grid, r, grid.size * 3));
+          const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(oc, 0, 0); cx3.drawImage(T.rcv, 0, 0); // 한 장으로 합침 (지형 위에 영토, 그 위에 강)
+          L.tiles.set(job.key, { ...r, comp: T.cv, used: L.frame || 0, stale: false });
+          // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
+          if (L.tiles.size > 72) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - 72); for (const [k2] of old) L.tiles.delete(k2); }
           draw();
-        }, 180);
+          if (Q.list.length) L.tileT = setTimeout(pump, 0);
+        }, 0);
       }
-    }
+      const all = vis.every((key) => { const t = L.tiles.get(key); return t && !t.stale; });
+      return { vis, all };
+    })();
     const passes = [view.current.x];
     if (grid.wrap) for (let n = 1; view.current.x + cw / k > n * grid.period; n++) passes.push(view.current.x - n * grid.period);
     // 세계 지도: 지도 위쪽 바깥도 북극 얼음으로 이어 그림 (화면 폭 전체, 한 번만)
@@ -693,9 +754,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (x1 <= x0 || y1 <= y0) return;
       ctx.drawImage(img, x0 * sc, y0 * sc, (x1 - x0) * sc, (y1 - y0) * sc, x0, y0, x1 - x0, y1 - y0);
     };
-    const CH = land.current.chunk;
-    // 선명한 조각이 화면을 다 덮으면 흐린 바탕은 그릴 필요 없음
-    const chCovers = CH && CH.ok && CH.x <= vx && CH.y <= vy && CH.x + CH.w >= vx1 && CH.y + CH.h >= vy1;
+    // 선명한 타일이 화면을 다 덮으면 흐린 바탕은 그릴 필요 없음
+    const chCovers = !!TL && TL.all;
     // 지형·나라 색·강 세 겹을 한 장으로 합쳐 두고(나라 땅이 바뀔 때만 다시 합침) 매 장면엔 한 장만 그림
     if (!chCovers) {
       const L = land.current;
@@ -707,7 +767,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       blit(L.comp, B.sc);
     }
     // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
-    if (CH && CH.ok) { ctx.drawImage(CH.cv, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.over, CH.x, CH.y, CH.w, CH.h); ctx.drawImage(CH.rcv, CH.x, CH.y, CH.w, CH.h); }
+    if (TL) for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
       const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(26,64,100,';
@@ -1098,7 +1158,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
-      chunk: () => { const c = land.current.chunk; if (!c) return land.current.dbg; return c ? { x: c.x, y: c.y, w: c.w, h: c.h, sc: c.sc, ok: c.ok, ver: c.ver, now: land.current.ownVer, base: land.current.base?.sc, k: view.current?.k } : null; },
+      chunk: () => { const L = land.current; const Q = L.tileQ; return { ok: !!Q && Q.list.length === 0, tiles: L.tiles?.size || 0, queued: Q?.list.length || 0 }; },
       probe: (lon, lat) => { const [x, y] = world.geo.toPx(lon, lat); const t = pixelToCell(grid.size, grid.cols, grid.rows, x, y); return { t, terrain: grid.terrain[t], pass: grid.passable(t), N: grid.N, cols: grid.cols, W: world.W, H: world.H, wc: world.cols, wr: world.rows }; },
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
       spots: () => spotsRef.current || [],
