@@ -828,7 +828,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const f = Math.min(1, (now - a.t0) / a.dur);
     // 둥근 지도: 이음매 건너편 점은 가까운 쪽으로 펴서 그림 (선이 지도를 가로지르지 않게)
     const ux = (x, ref) => (grid.wrap ? x + Math.round((ref - x) / grid.period) * grid.period : x);
-    const ease = f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
+    const ease = a.linear ? f : f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
     const posOf = (u) => {
       const [tx, ty] = grid.center(u.tile);
       const p = a.prev.get(u.id);
@@ -1403,7 +1403,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       setSel((v) => (v?.type === 'unit' && !snap.units.some((u) => u.id === v.id) ? null : v));
     };
     const tick = () => {
-      anim.current = { prev: new Map(s.units.map((u) => [u.id, u.tile])), t0: performance.now(), dur: speed * 0.9 };
+      const prevTiles = new Map(s.units.map((u) => [u.id, u.tile]));
       // 하루마다 컴퓨터도 군사 판단 (내정·외교는 순 첫날에만)
       if (s.day > 0) {
         for (const n of s.nations) if (n.alive && !n.outlaw && n.id !== pid) aiTurn14(s, grid, n.id, null, true);
@@ -1442,6 +1442,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 일기토 장면을 누르면 바로 다음으로 (기다리던 타이머를 당겨 실행)
       const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; fn(); }; const id = setTimeout(run, ms); if (dl) skipDuel.current = () => { clearTimeout(id); run(); }; };
       const snap = clone(s);
+      // 움직임은 계산이 끝난 뒤부터 셈 (계산하느라 걸린 시간만큼 앞부분이 잘려 순간이동하지 않게).
+      // 순 끝까지는 하루 내내 같은 빠르기로 쭉 움직이고 바로 다음 날로 이어짐 (예전엔 날마다 천천히 멈췄다 다시 출발해 뚝뚝 끊겨 보였음)
+      anim.current = { prev: prevTiles, t0: performance.now(), dur: toEnd ? speed : speed * 0.9, linear: toEnd };
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
       if (stopIdle && toEnd && !endOfTurn && idleNow.length) {

@@ -170,15 +170,21 @@ function buildHistorical(scn, g) {
     const la = lat + j;
     // 동토 한계선: 북아메리카·동시베리아는 더 남쪽까지 춥고, 스칸디나비아는 난류로 더 북쪽까지 숲
     const tundraLat = lon < -52 && lon > -170 ? (lon > -100 ? 59 : 62) : lon > 100 ? 66 : lon < 32 && lon > -12 ? 69 : 67.5;
-    const greenland = lon > -75 && lon < -10 && lat > 59.5;
-    const steppe = lat > 43 && lat < 53 && lon > 28 && lon < 95; // 유라시아 초원: 숲이 드묾
+    // 그린란드: 서쪽 끝이 위도마다 다름 (데이비스 해협·배핀만 건너 래브라도·배핀섬은 빼야 함 — 예전엔 네모 상자라 캐나다에 일자 선이 생김)
+    const glW = lat < 70 ? -57.5 : lat < 75 ? -62 : lat < 78 ? -68 : -73;
+    const greenland = lon > glW && lon < -10 && lat > 59.5;
+    // 유라시아 초원: 숲이 드묾. 경계도 노이즈로 흔듦 (일자 선이 안 보이게)
+    const steppe = la > 43 && la < 53 && lon + j * 1.5 > 28 && lon + j * 1.5 < 95;
     if (greenland || la > tundraLat || la < -50) t = T.TUNDRA;
     else if (la > tundraLat - 4) t = m > 0.52 ? T.FOREST : m > 0.4 && la > tundraLat - 2 ? T.TUNDRA : T.PLAINS; // 삼림 툰드라: 숲과 동토가 섞임
     else if (Math.abs(la) > 52 && !steppe && m > 0.32) t = T.FOREST; // 북방 침엽수림(타이가)
     else if (m > (steppe ? 0.75 : 0.63)) t = T.FOREST;
     if (t === T.PLAINS && h > 0.66) t = T.HILLS;
+    // 지형대(사막·고원 등): 타원 가장자리를 노이즈로 울퉁불퉁하게, mix가 있으면 안쪽도 두 지형을 섞음 (예: 티베트 = 산지+구릉 고원)
+    const edgeN = (n2.fbm(x / size / 6 + 5.3, y / size / 6 + 9.1, 3) - 0.5) * 0.9;
     for (const z of ZONES) {
-      if (((lon - z.c[0]) / z.rx) ** 2 + ((lat - z.c[1]) / z.ry) ** 2 < 1) t = z.t;
+      const e = ((lon - z.c[0]) / z.rx) ** 2 + ((lat - z.c[1]) / z.ry) ** 2;
+      if (e < 1 + edgeN) t = z.mix && n1.fbm(x / size / 3 + 21.7, y / size / 3 + 3.3, 2) < (z.mixShare ?? 0.45) ? z.mix : z.t;
     }
     for (const r of ranges) {
       const d = polyDist(x, y, r.px);
