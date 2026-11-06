@@ -31,11 +31,23 @@ export function zoneAt(grid, x, y) {
 }
 export const zoneOf = (grid, tile) => zoneAt(grid, ...grid.center(tile));
 // 그 칸 둘레에서 같은 날씨인 비율 (0~1) — 구역 경계를 부드럽게 칠하려고
+// 칸마다 둘레 9곳이 어느 구역인지는 늘 같으니 지도마다 한 번만 셈
+const sampleCache = new WeakMap();
+const OFFS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+function samplesOf(grid) {
+  let z = sampleCache.get(grid);
+  if (z) return z;
+  z = new Uint8Array(grid.N * 9);
+  const rx = (grid.W / WX_C) * 0.32, ry = (grid.H / WX_R) * 0.32;
+  for (let i = 0; i < grid.N; i++) { const [x, y] = grid.center(i); for (let k = 0; k < 9; k++) z[i * 9 + k] = zoneAt(grid, x + OFFS[k][0] * rx, y + OFFS[k][1] * ry); }
+  sampleCache.set(grid, z);
+  return z;
+}
 export function weatherShare(s, grid, tile, kind) {
   if (!s.wx) return s.weather?.kind === kind ? 1 : 0;
-  const [x, y] = grid.center(tile), rx = (grid.W / WX_C) * 0.32, ry = (grid.H / WX_R) * 0.32;
+  const z = samplesOf(grid), o = tile * 9;
   let n = 0;
-  for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]]) if (s.wx[zoneAt(grid, x + dx * rx, y + dy * ry)] === kind) n++;
+  for (let k = 0; k < 9; k++) if (s.wx[z[o + k]] === kind) n++;
   return n / 9;
 }
 export function rollWeather(s, grid) {

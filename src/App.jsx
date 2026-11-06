@@ -17,10 +17,21 @@ export default function App() {
   const [gen, setGen] = useState(0); // 불러올 때마다 게임 화면을 새로 그림
   const cloudKey = useRef(null);
 
+  // 자동 저장: 순이 바뀌면 바로, 순 중간(하루 진행·명령)에는 손이 멈추고 1.5초 뒤에 한 번만 (순을 재생하는 동안 날마다 큰 상태를 저장하느라 끊기지 않게). 창을 닫을 때도 저장
+  const saveT = useRef(null), latest = useRef(null);
+  useEffect(() => {
+    const flush = () => { if (latest.current) { writeSave(latest.current); latest.current = null; } };
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    return () => { window.removeEventListener('beforeunload', flush); window.removeEventListener('pagehide', flush); };
+  }, []);
   useEffect(() => {
     if (!game || !session) return;
     const data = { scenarioId: game.scenarioId, seed: game.seed, state: game };
-    writeSave(data);
+    latest.current = data;
+    clearTimeout(saveT.current);
+    const now = () => { if (latest.current === data) { writeSave(data); latest.current = null; } };
+    if (game.day === 0 || game.over) now(); else saveT.current = setTimeout(now, 1500);
     writeHistory(game.appearHistory);
     // 클라우드 자동 저장은 턴이 바뀔 때만 (하루마다 쓰면 너무 잦음)
     const key = `${game.turn}:${game.over ? 1 : 0}`;

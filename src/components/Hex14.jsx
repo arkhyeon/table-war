@@ -407,26 +407,35 @@ function paintOwners(grid, s, sc) {
 }
 // 바뀐 칸이 있는 구역(블록)만 지우고 다시 그림 — 세계 지도처럼 칸이 많을 때 매일 전체를 다시 칠하지 않게
 const BLK = 24;
-function repaintOwners(grid, s, cv, sc, changed) {
-  const ctx = cv.getContext('2d');
+// 바뀐 칸들이 든 구역(블록) 사각형들 (지도 좌표) — 영토 그림·합친 그림·확대 조각을 그 부분만 고칠 때 씀
+function ownerBlocks(grid, changed) {
   const blocks = new Set();
   for (const i of changed) blocks.add(Math.floor((i % grid.cols) / BLK) + ',' + Math.floor(Math.floor(i / grid.cols) / BLK));
-  let edgeTouched = false;
-  const hw = grid.size * Math.sqrt(3);
+  const hw = grid.size * Math.sqrt(3), out = [];
   for (const key of blocks) {
     const [bc, br] = key.split(',').map(Number);
     const c0 = bc * BLK, c1 = Math.min(grid.cols - 1, c0 + BLK - 1), r0 = br * BLK, r1 = Math.min(grid.rows - 1, r0 + BLK - 1);
-    if (c0 === 0 || c1 === grid.cols - 1) edgeTouched = true;
-    const x0 = c0 * hw, x1 = (c1 + 1.5) * hw, y0 = r0 * grid.size * 1.5, y1 = (r1 + 1) * grid.size * 1.5 + grid.size;
     const tiles = [];
     for (let r = Math.max(0, r0 - 2); r <= Math.min(grid.rows - 1, r1 + 2); r++) for (let c = Math.max(0, c0 - 2); c <= Math.min(grid.cols - 1, c1 + 2); c++) tiles.push(r * grid.cols + c);
+    out.push({ x0: c0 * hw, x1: (c1 + 1.5) * hw, y0: r0 * grid.size * 1.5, y1: (r1 + 1) * grid.size * 1.5 + grid.size, tiles, edge: c0 === 0 || c1 === grid.cols - 1 });
+  }
+  return out;
+}
+// 영토 그림에서 그 사각형들만 지우고 다시 그림 (ctx는 이미 지도 좌표로 맞춰져 있음)
+function repaintOwnerRects(grid, s, ctx, rects) {
+  for (const r of rects) {
     ctx.save();
-    ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
-    ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
-    drawOwnerTiles(grid, s, ctx, tiles);
+    ctx.beginPath(); ctx.rect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0); ctx.clip();
+    ctx.clearRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+    drawOwnerTiles(grid, s, ctx, r.tiles);
     ctx.restore();
   }
-  if (edgeTouched) seamFix(grid, cv, sc);
+}
+function repaintOwners(grid, s, cv, sc, changed) {
+  const rects = ownerBlocks(grid, changed);
+  repaintOwnerRects(grid, s, cv.getContext('2d'), rects);
+  if (rects.some((r) => r.edge)) seamFix(grid, cv, sc);
+  return rects;
 }
 
 // 일기토 장면: 소개 → 합마다 두 장수가 달려들어 부딪치고(피해 숫자·회심의 일격) → 승부 — 화면을 누르면 결과로 건너뜀
@@ -593,15 +602,39 @@ export default function Hex14({ world, game, setGame, onExit }) {
       return;
     }
     if (land.current.ref !== s.owner) {
-      const prev = land.current.prev;
-      const dPrev = land.current.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
-      land.current.ownVer = (land.current.ownVer || 0) + 1;
-      if (!prev || !dSame || !land.current.over) { land.current.over = paintOwners(grid, s, land.current.base.sc); }
+      // 날마다 새 상태가 와도 실제로 바뀐 칸이 없으면 아무것도 다시 그리지 않음.
+      // 조금 바뀌면 그 구역만 영토 그림·합친 그림·확대 조각에서 고침 (예전엔 날마다 큰 그림 세 장을 통째로 다시 합치고 확대 조각도 버렸음 → 날 바뀔 때 끊김)
+      const L = land.current, prev = L.prev;
+      const dPrev = L.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
+      const full = () => { L.ownVer = (L.ownVer || 0) + 1; L.over = paintOwners(grid, s, L.base.sc); };
+      if (!prev || !dSame || !L.over) full();
       else {
         const changed = [];
         for (let i = 0; i < grid.N; i++) if (prev[i] !== s.owner[i]) changed.push(i);
-        if (changed.length > grid.N * 0.2) land.current.over = paintOwners(grid, s, land.current.base.sc);
-        else if (changed.length) repaintOwners(grid, s, land.current.over, land.current.base.sc, changed);
+        if (changed.length > grid.N * 0.2) full();
+        else if (changed.length) {
+          const sc = L.base.sc, B0 = L.base;
+          const rects = repaintOwners(grid, s, L.over, sc, changed);
+          const v0 = L.ownVer || 0; L.ownVer = v0 + 1;
+          // 합친 그림: 그 사각형만 세 겹을 다시 합침 (가장자리면 통째로)
+          if (L.comp && L.compVer === v0 && L.compBase === B0 && !rects.some((r) => r.edge)) {
+            const cx2 = L.comp.getContext('2d');
+            for (const r of rects) {
+              const sx = Math.max(0, Math.floor(r.x0 * sc)), sy = Math.max(0, Math.floor(r.y0 * sc)), sw = Math.min(L.comp.width, Math.ceil(r.x1 * sc)) - sx, sh = Math.min(L.comp.height, Math.ceil(r.y1 * sc)) - sy;
+              if (sw <= 0 || sh <= 0) continue;
+              cx2.clearRect(sx, sy, sw, sh);
+              for (const img of [B0.cv, L.over, B0.rcv]) cx2.drawImage(img, sx, sy, sw, sh, sx, sy, sw, sh);
+            }
+            L.compVer = L.ownVer;
+          }
+          // 확대 조각: 그 안에 든 사각형만 영토를 다시 그림
+          const CH0 = L.chunk;
+          if (CH0 && CH0.ver === v0) {
+            const inside = rects.filter((r) => r.x1 > CH0.x && r.x0 < CH0.x + CH0.w && r.y1 > CH0.y && r.y0 < CH0.y + CH0.h);
+            if (inside.length) repaintOwnerRects(grid, s, CH0.over.getContext('2d'), inside);
+            CH0.ver = L.ownVer;
+          }
+        }
       }
       land.current.prev = Int16Array.from(s.owner);
       land.current.dprev = Int32Array.from(s.district);
@@ -686,14 +719,26 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 날씨 칠: 눈 오는 구역의 땅은 하얗게, 비 오는 구역은 푸르스름하게 어둡게 (순마다, 바탕 그림이 바뀌면 다시 만듦)
     if ((s.wx || [s.weather?.kind]).some((x) => x === 'snow' || x === 'rain')) {
-      const key = `${s.turn}:${B.cv.width}:${B.sc}`;
+      const key = `${s.turn}`;
       if (!land.current.snow || land.current.snowKey !== key) {
-        const [scv, sctx] = (() => { const c2 = document.createElement('canvas'); c2.width = B.cv.width; c2.height = B.cv.height; const x = c2.getContext('2d'); x.scale(B.sc, B.sc); return [c2, x]; })();
-        for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const sn = weatherShare(s, grid, i, 'snow'), rn = sn ? 0 : weatherShare(s, grid, i, 'rain'); if (!sn && !rn) continue; sctx.fillStyle = sn ? `rgba(255,255,255,${sn.toFixed(2)})` : `rgba(30,48,80,${(rn * 0.55).toFixed(2)})`; const [hx, hy] = grid.center(i); sctx.beginPath(); for (let d = 0; d < 6; d++) { const [qx, qy] = corner(hx, hy, grid.size * 1.03, d); if (d) sctx.lineTo(qx, qy); else sctx.moveTo(qx, qy); } sctx.fill(); }
-        land.current.snow = scv; land.current.snowKey = key;
+        // 칸 하나 = 작은 그림의 점 두 개(홀수 줄은 반 칸 밀림)로 날씨를 찍고, 지도 크기로 부드럽게 늘려 그림
+        // (예전엔 칸 수만 개를 하나하나 칠해 순이 바뀔 때마다 0.5초쯤 멈췄음). 늘리면서 경계도 자연스럽게 번짐
+        const tw = grid.cols * 2 + 1, th = grid.rows;
+        const tiny = land.current.snow?.width === tw ? land.current.snow : Object.assign(document.createElement('canvas'), { width: tw, height: th });
+        const tctx = tiny.getContext('2d'), img = tctx.createImageData(tw, th), d = img.data;
+        for (let i = 0; i < grid.N; i++) {
+          if (!grid.passable(i)) continue;
+          const sn = weatherShare(s, grid, i, 'snow'), rn = sn ? 0 : weatherShare(s, grid, i, 'rain');
+          if (!sn && !rn) continue;
+          const c = i % grid.cols, r = (i / grid.cols) | 0, px = c * 2 + (r & 1);
+          const [R, G, Bl, A] = sn ? [255, 255, 255, sn * 255] : [30, 48, 80, rn * 0.55 * 255];
+          for (const x of [px, px + 1]) { const o = (r * tw + x) * 4; d[o] = R; d[o + 1] = G; d[o + 2] = Bl; d[o + 3] = A; }
+        }
+        tctx.putImageData(img, 0, 0);
+        land.current.snow = tiny; land.current.snowKey = key;
       }
       ctx.globalAlpha = 0.42;
-      blit(land.current.snow, B.sc);
+      { const hw = grid.size * Math.sqrt(3); ctx.drawImage(land.current.snow, 0, grid.size * 0.25, (land.current.snow.width * hw) / 2, land.current.snow.height * grid.size * 1.5); }
       ctx.globalAlpha = 1;
     }
     // 고른 도시의 관할 땅: 옅게 칠하고, 아직 내 것이 아닌 칸은 빗금처럼 진하게
