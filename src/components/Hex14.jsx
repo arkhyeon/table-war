@@ -730,13 +730,16 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 도시·관문
     const fs = Math.min(Math.max(sz * 0.9, 11 * px), 15 * px);
     const labelJobs = [];
+    if (!land.current.gap || land.current.gapN !== s.castles.length) { land.current.gap = s.castles.map((c) => Math.min(9, ...s.castles.filter((d) => d !== c).map((d) => grid.dist(c.tile, d.tile)))); land.current.gapN = s.castles.length; }
+    const castleGap = land.current.gap;
     for (const c of s.castles) {
       const [cx, cy] = grid.center(c.tile);
       if (!vis(cx, cy)) continue;
       const col = ownerColor(s, c.owner);
       const on = sl?.type === 'castle' && sl.id === c.id;
       // 도시·관문 그림 (나라 색 깃발), 바닥이 칸 아래쪽에 오게
-      const S = sz * (c.kind === 'pass' ? 4.2 : c.capital ? 5.6 : 4.6);
+      // 성 그림 크기: 이웃 성이 가까우면(세계판 중원처럼 2~3칸) 그만큼 작게 그려 서로 겹치지 않게
+      const S = sz * (c.kind === 'pass' ? 4.2 : c.capital ? 5.6 : 4.6) * Math.max(0.42, Math.min(1, ((castleGap[c.id] ?? 5) * 1.15) / 4.6));
       const baseY = cy + sz * 0.7;
       if (on) { ctx.fillStyle = 'rgba(255,224,102,0.45)'; ctx.beginPath(); ctx.ellipse(cx, baseY - sz * 0.2, S * 0.55, S * 0.2, 0, 0, 7); ctx.fill(); }
       if (c.founding) ctx.globalAlpha = 0.45;
@@ -756,18 +759,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.fillRect(cx - S * 0.32, baseY + sz * 0.1, S * 0.64 * Math.max(0, c.dur / c.maxDur), sz * 0.28);
       }
       // 이름판: 바로 그리지 않고 모아 두었다가, 중요한 것부터 겹치지 않게 그림 (멀리서 볼 때 이름표가 뒤엉키지 않게)
-      if (k * sz > 2.2 || c.capital) labelJobs.push({ c, cx, cy, col, pri: on ? 0 : c.capital ? 1 : c.owner === pid ? 2 : c.owner !== null && c.owner >= 0 ? 3 : 4 });
+      if (k * sz > 2.2 || c.capital) labelJobs.push({ c, cx, cy, col, S, pri: on ? 0 : c.capital ? 1 : c.owner === pid ? 2 : c.owner !== null && c.owner >= 0 ? 3 : 4 });
     }
     // 이름판 그리기: 선택 > 도읍 > 내 성 > 나라 성 > 주인 없는 성 순, 앞의 것과 겹치면 생략 (멀리서 볼 땐 주인 없는 성 이름은 숨김)
     {
       const placed = [];
       labelJobs.sort((a, b) => a.pri - b.pri);
-      for (const { c, cx, cy, col, pri } of labelJobs) {
+      for (const { c, cx, cy, col, S, pri } of labelJobs) {
         if (pri === 4 && k * sz < 3.2) continue;
         const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}${c.founding ? ` (공사 ${c.founding}턴)` : ''}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
-        const ly = cy + sz * 2.6;
+        const ly = cy + sz * 0.7 + S * 0.42; // 성 그림 바로 아래
         const bh = fs * (k * sz > 4.5 ? 2.3 : 1.2);
         if (pri > 0 && placed.some(([x, y, w, h]) => Math.abs(x - cx) * 2 < w + tw && y < ly - fs * 0.85 + bh && ly - fs * 0.85 < y + h)) continue;
         placed.push([cx, ly - fs * 0.85, tw, bh]);
