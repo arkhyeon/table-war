@@ -1,14 +1,17 @@
 // ───────── 삼국지14식 모드: 내정(농업·상업·징병 담당관), 병량·수확, 관할 땅 넓히기, 외교, 인재 ─────────
 import { makeRng } from './rng.js';
-import { tv, initTraits, TRAITS } from './traits.js';
+import { initTraits } from './traits.js';
+import { T14, MAP14, t14, castleGens, nationT } from './hex14traits.js';
 
 // 특성이 없는 장수(새로 나온 장수 등)에게 능력에 맞는 특성을 붙임
 export function ensureTraits(s) {
   for (const g of Object.values(s.generals)) {
     if (g.status === 'gone') continue;
-    g.traits = (g.traits || []).filter(([t]) => TRAITS[t]);
-    if (g.traits.length) continue;
-    g.traits = initTraits(g, makeRng(`trait:${s.seed}:${g.id}`)).traits;
+    if (!(g.traits || []).length) g.traits = initTraits(g, makeRng(`trait:${s.seed}:${g.id}`)).traits;
+    // 이 모드에 없는 특성은 비슷한 것으로 (겹치면 높은 등급 하나만)
+    const m = new Map();
+    for (const [t, tier] of g.traits) { const k = T14[t] ? t : MAP14[t]; if (k && T14[k] && !(m.get(k) >= tier)) m.set(k, tier); }
+    g.traits = [...m.entries()];
   }
 }
 import { fmtTroops, fmtGold } from './format.js';
@@ -103,7 +106,7 @@ export const powerOf = (s, nid) => s.castles.filter((c) => c.owner === nid).redu
 export function envoyOf(s, nid) {
   const g = Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && !x.unit).sort((x, y) => y.pol - x.pol)[0];
   const pol = g ? g.pol : 40;
-  return { g: g || null, pol, bonus: Math.max(-0.05, Math.min(0.2, (pol - 60) / 200)), mult: 0.7 + pol / 150 };
+  return { g: g || null, pol, bonus: Math.max(-0.05, Math.min(0.2, (pol - 60) / 200)) + nationT(s, nid, '외교'), mult: 0.7 + pol / 150 };
 }
 // 한 순 금 수입 (도시 세금 합)
 export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === nid ? goldOf(s, c) : 0), 0);
@@ -255,8 +258,10 @@ export const isRuler = (g) => !!(g.ruler || g.exRuler);
 export function recruitChance(s, g, nid, cityId) {
   if (isRuler(g)) return 0;
   const pol = Math.max(0, ...Object.values(s.generals).filter((x) => x.nation === nid && x.status === 'active' && (cityId === undefined || x.castle === cityId)).map((x) => x.pol));
-  if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35, 0.08 + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
-  return Math.max(0.1, Math.min(0.9, 0.3 + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0) + (isSmall(s, nid) ? 0.1 : 0)));
+  if (s.nations[g.nation]?.outlaw || g.boss) return 0; // 도적 두목은 등용 불가
+  const jin = nationT(s, nid, '인덕');
+  if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35 + jin, 0.08 + jin + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
+  return Math.max(0.1, Math.min(0.9, 0.3 + jin + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0) + (isSmall(s, nid) ? 0.1 : 0)));
 }
 
 export function recruit(s, gid, nid, rng = Math.random) {
@@ -357,8 +362,12 @@ export const jobGen = (s, c, role) => {
 // 금 수입: 도시 기본 세금 1,200(인구와 상관없이, 작은 나라도 움직일 수 있게) + 상업×5 × 관할 땅 비율
 // 넓은 영토 관리: 도시 15개를 넘으면 1개마다 수입·수확·자원병 −1.2% (최대 −45%) — 큰 나라가 끝없이 불어나지 않게
 export const sprawlOf = () => 1;
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
-export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+// 특성: 머무는 장수의 정치·교역, 나라의 상업
+const traitGold = (s, c) => { const g = castleGens(s, c); return 1 + t14(g, '정치') + (c.port ? t14(g, '교역') : 0) + nationT(s, c.owner, '상업'); };
+// 특성: 머무는 장수의 모병·인덕 (자원병 명/순)
+const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 100); };
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (hasPolicy(s, c.owner, 'farming') ? 0.9 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1 + (jobGen(s, c, 'farm') ? t14([jobGen(s, c, 'farm')], '농정') : 0)) * c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 1.3 : 1) * (1 + 0.25 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER);
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
 
@@ -376,14 +385,14 @@ export function govTurn(s, grid) {
       if (c.auto || n.id !== s.playerId || s.spectator) autoJobs(s, c);
       const f = jobGen(s, c, 'farm'), t = jobGen(s, c, 'trade'), d = jobGen(s, c, 'draft');
       const edu = 1;
-      if (f) c.farm = Math.min(c.devMax, c.farm + Math.round((3 + f.pol / 6) * edu * (1 + tv([f], '농정') + tv([f], '정치') / 2)));
-      if (t) c.trade = Math.min(c.devMax, c.trade + Math.round((3 + t.pol / 6) * edu * (1 + tv([t], '정치') + tv([t], '상업') * 5 + tv([t], '교역'))));
+      if (f) c.farm = Math.min(c.devMax, c.farm + Math.round((3 + f.pol / 6) * edu));
+      if (t) c.trade = Math.min(c.devMax, c.trade + Math.round((3 + t.pol / 6) * edu));
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 * (1 + tv([d], '징병') + tv([d], '모병') / 2 + tv([d], '인덕') / 10) : 0)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 + t14([d], '징병') : 0) + traitDraft(s, c)) * (hasPolicy(s, c.owner, 'conscript') ? 1.5 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
       // 성벽 보수, 인구 회복
-      c.dur = Math.min(c.maxDur, c.dur + c.maxDur * (hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05));
+      c.dur = Math.min(c.maxDur, c.dur + c.maxDur * ((hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05) + t14(castleGens(s, c), '축성')));
       c.popMax = c.popMax || c.pop * 1.2;
       if (c.pop < c.popMax) c.pop = Math.round(Math.min(c.popMax, c.pop * 1.01 + 0.1) * 10) / 10;
     }

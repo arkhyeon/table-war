@@ -6,7 +6,7 @@ import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
-import { traitLabel, traitDesc } from '../game/traits.js';
+import { tlabel, tdesc, TIER_GOLD, TIER_NAME } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
@@ -1307,7 +1307,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 능력치: 85 이상 금색, 95 이상 주황 굵게
   const St = ({ k, v }) => <span className={v >= 95 ? 'stat-top' : v >= 85 ? 'stat-high' : undefined}>{k}{v}</span>;
   // 특성: 이름+등급(Ⅰ~Ⅲ), 마우스를 올리면 효과
-  const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => <span key={tr[0]} className={`trait t${tr[1]}`} title={`${traitLabel(tr)}: ${traitDesc(tr[0], tr[1])}`}>{traitLabel(tr)}</span>)}</span> : null);
+  const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => <span key={tr[0]} className={`trait t${tr[1]}`} title={`${tr[0]} ${TIER_NAME[tr[1]]}: ${tdesc(tr[0], tr[1])} · 금 ${TIER_GOLD[tr[1]]}/순 값어치`}>{tlabel(tr)}</span>)}</span> : null);
   const Stats = ({ g, keys = ['war', 'lead', 'intel', 'pol'] }) => <span className="stats">{keys.map((k) => <St key={k} k={{ war: '무', lead: '통', intel: '지', pol: '정' }[k]} v={g[k]} />)}<Traits g={g} /></span>;
   // 지금 맡은 내정 (그 성 담당이면 배지)
   const jobOf = (g) => { const c = g.castle !== null && g.castle !== undefined ? game.castles[g.castle] : null; if (!c) return null; return Object.keys(ROLES).find((r) => jobGen(game, c, r)?.id === g.id) || null; };
@@ -1833,7 +1833,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>🏪🌾 시장·농장은 그 도시 금·수확 +25%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
-                <li>🎖️ 장수 특성: 장수 이름 옆 작은 꼬리표(예: 맹장Ⅱ)가 특성이에요. 마우스를 올리면 효과가 나옵니다. 명장·맹장·책략은 공격·방어, 기마는 평원·사막, 산악은 산·구릉, 돌격은 병력이 적을 때, 위압은 적 방어를 깎고, 수성·궁술·철벽·축성은 성을 지킬 때, 공성은 성벽을 더 깎고, 추격은 적장을 더 잘 사로잡아요. 농정·정치·상업은 농업·상업 담당, 징병·모병은 징병 담당일 때 더 잘합니다. 등급이 높을수록 셉니다.</li>
+                <li>🎖️ 장수 특성: 장수 이름 옆 꼬리표(예: 맹장Ⅱ)가 특성이고, 마우스를 올리면 효과가 나옵니다. 등급은 브론즈(Ⅰ)·실버(Ⅱ)·골드(Ⅲ)이고, 병사 1명 = 금 10으로 쳐서 한 순에 브론즈 ≈ 금 200(장수 녹봉 하나)·실버 ≈ 400·골드 ≈ 700만큼 벌어 주도록 맞췄어요. 그래서 자주 쓰이는 특성(명장: 공격 +8~29%)은 수치가 작고, 가끔 쓰이는 특성(산악: 산·구릉 공격 +25~80%, 사막·화공 등)은 수치가 큽니다. 싸움 특성은 부대에 있을 때, 성 특성(수성·궁술·철벽·정치·교역·모병·인덕·축성·건축)은 그 성에 머물 때, 농정·징병은 그 일을 맡았을 때, 상업·외교는 나라에서 가장 높은 장수 하나가 적용돼요.</li>
                 <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(4천~2만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 5~9순 지나거나 1천 아래로 줄면 흩어집니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>

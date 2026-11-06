@@ -1,3 +1,4 @@
+import { t14, castleGens } from './hex14traits.js';
 // ───────── 삼국지14식 모드: 도시 시설 건설과 새 도시 세우기(축성) ─────────
 import { fmtGold } from './format.js';
 import { log, enemy } from './hex14.js';
@@ -17,7 +18,7 @@ export const slotsOf = (c) => (c.kind === 'pass' ? 2 : c.founding ? 0 : 4);
 export const usedSlots = (c) => Object.values(c.bld || {}).reduce((a, b) => a + b, 0) + (c.build ? 1 : 0);
 
 // 축성 장려 정책이면 30% 싸게
-export const buildCost = (s, c, k) => Math.round(BUILDINGS[k].cost * (hasPolicy(s, c.owner, 'fortify') ? 0.7 : 1));
+export const buildCost = (s, c, k) => Math.round(BUILDINGS[k].cost * (hasPolicy(s, c.owner, 'fortify') ? 0.7 : 1) * (1 - t14(castleGens(s, c), '건축')));
 
 export function canBuild(s, c, k) {
   if (s.units.some((u) => u.nation !== c.owner && u.nation !== null && s.nations[u.nation] && (u.order?.kind === 'castle' && u.order.id === c.id) && u.path.length <= 1)) return '공격받고 있어 지을 수 없습니다.';

@@ -1,6 +1,7 @@
 // ───────── 삼국지14식 모드: 계절·날씨, 고유 전법, 일기토, 역사 사건·무작위 사건 ─────────
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
+import { t14 } from './hex14traits.js';
 import { log, gensOf, enemy, districtTiles } from './hex14.js';
 import { makePact, powerOf } from './hex14gov.js';
 
@@ -74,17 +75,20 @@ export function maybeDuel(s, u, t, rng) {
   s.duelDone = s.duelDone || {};
   s.duelDone[`${u.id}-${t.id}`] = 1;
   // 세 합: 무력 + 운으로 체력을 깎음
+  // 위력 = 무력 + 특성(맹장·무쌍)
+  const pw = (g) => g.war + t14([g], '맹장') * 60 + t14([g], '무쌍');
+  const pa = pw(a), pb = pw(b);
   let ha = 100, hb = 100;
   const rounds = [];
   for (let r = 0; r < 5 && ha > 0 && hb > 0; r++) {
     // 무력 차이는 반영하되 운도 커서 아래 무력도 이길 수 있음 (차이 10이면 약 30%, 20이면 약 13%)
-    const da = Math.round(Math.max(4, (a.war - b.war) * 0.16 + 14 + rng() * 28));
-    const db = Math.round(Math.max(4, (b.war - a.war) * 0.16 + 14 + rng() * 28));
+    const da = Math.round(Math.max(4, (pa - pb) * 0.16 + 14 + rng() * 28));
+    const db = Math.round(Math.max(4, (pb - pa) * 0.16 + 14 + rng() * 28));
     hb = Math.max(0, hb - da);
     ha = Math.max(0, ha - db);
     rounds.push([ha, hb]);
   }
-  const winA = ha === hb ? a.war >= b.war : ha > hb;
+  const winA = ha === hb ? pa >= pb : ha > hb;
   const [W, Lo, wu, lu] = winA ? [a, b, u, t] : [b, a, t, u];
   // 이긴 쪽: 사기 크게 오르고 진 쪽 병사가 겁먹고 흩어짐, 이긴 장수는 무력이 자라기도 함
   lu.morale -= 30;
@@ -94,7 +98,11 @@ export function maybeDuel(s, u, t, rng) {
   const big = Math.abs(ha - hb) > 45;
   let fate = ` 적 병사 ${flee}명이 달아났습니다.`;
   if (W.war < 100 && rng() < 0.3) { W.war += 1; fate += ` ${W.name} 무력 +1!`; }
-  if (big && rng() < 0.25) {
+  if (s.nations[Lo.nation]?.outlaw && big && rng() < 0.25) {
+    // 도적 두목은 사로잡지 않고 베어 버림
+    Lo.status = 'gone'; Lo.unit = null; lu.gens = lu.gens.filter((id) => id !== Lo.id); if (!lu.gens.length) lu.morale = 0;
+    fate += ` ${Lo.name}이(가) 목이 베였습니다!`;
+  } else if (big && rng() < 0.25 && !t14([Lo], '무쌍') && !s.nations[W.nation]?.outlaw) {
     // 크게 지면 사로잡힘
     Lo.status = 'prisoner'; Lo.captor = W.nation; Lo.castle = null; Lo.unit = null;
     lu.gens = lu.gens.filter((id) => id !== Lo.id);

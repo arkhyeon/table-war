@@ -12,7 +12,7 @@ import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall, ensureT
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
-import { tv, MIL, CIV } from './traits.js';
+import { t14, castleGens } from './hex14traits.js';
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
 export const DAYS = 10;
@@ -527,13 +527,14 @@ export const log = (s, text, kind = 'info', nations = []) => {
 export const gensOf = (s, ids) => ids.map((id) => s.generals[id]).filter(Boolean);
 const leader = (s, u) => gensOf(s, u.gens).reduce((a, b) => (b.lead + b.war > a.lead + a.war ? b : a), { name: '?', lead: -1, war: -1 });
 const has = (g, t) => (g.traits || []).some(([x]) => x === t);
+const has14 = (s, u, t) => gensOf(s, u.gens).some((g) => has(g, t));
 export const unitStats = (s, u) => {
   const gs = gensOf(s, u.gens);
   const best = (k) => (gs.length ? Math.max(...gs.map((g) => g[k])) : 30); // 대장을 잃은 부대는 약함
   // 부장 보좌: 부장 하나마다 공격·방어 +12% (둘까지) — 둘이 따로 나가 협공하는 것과 비슷하게
   const aid = 1 + 0.12 * Math.min(2, Math.max(0, gs.length - 1));
   // 특성: 명장·맹장 공격↑, 책략 공격·방어↑
-  const ta = 1 + tv(gs, '명장') + tv(gs, '맹장') + tv(gs, '책략'), td = 1 + tv(gs, '책략');
+  const ta = 1 + t14(gs, '명장') + t14(gs, '맹장') + t14(gs, '책략'), td = 1 + t14(gs, '책략');
   return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid * ta, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid * td, intel: best('intel') };
 };
 // 장수 부르기: 다른 내 성의 장수가 병력을 이끌고 이 성으로 행군해 옴
@@ -593,11 +594,17 @@ export const commandCap = (s, gids) => {
   const mil = gs[0] && hasPolicy(s, gs[0].nation, 'military') ? 1.2 : 1; // 군비 확장: 지휘 한도 +20%
   return caps.length ? Math.round((caps[0] + caps.slice(1).reduce((a, c) => a + c * 0.5, 0)) * mil) : 0;
 };
-export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 1.0 : 0.75) * (u.siege ? 0.75 : 1) * (u.routed ? 1.2 : 1) * (s.kmScale || 1); // 하루에 평지 0.75칸 (기마 1칸), 공성병기를 끌면 느림
+export const speedOf = (s, u) => (gensOf(s, u.gens).some((g) => has(g, '기마')) ? 1.0 : 0.75) * (1 + t14(gensOf(s, u.gens), '신속')) * (u.siege ? 0.75 : 1) * (u.routed ? 1.2 : 1) * (s.kmScale || 1); // 하루에 평지 0.75칸 (기마 1칸), 공성병기를 끌면 느림
 export const moveCost = (grid, from, to, s, u) => {
   if (grid.sea?.[to]) return 1; // 바다는 평지만큼
   let c = (COST[grid.terrain[to]] || 1.2) + (grid.river[to] && !grid.river[from] ? 0.8 : 0);
   if (u && grid.river[to] && gensOf(s, u.gens).some((g) => has(g, '수군'))) c *= 0.6; // 수군 장수는 강을 따라 빠름
+  if (u) {
+    const gs = gensOf(s, u.gens), tr = grid.terrain[to];
+    if (grid.river[to] && !grid.river[from]) c -= 0.8 * Math.min(1, t14(gs, '도하'));
+    if (tr === T.MOUNTAIN || tr === T.HILLS) c *= 1 - t14(gs, '산악') / 2;
+    if (tr === T.DESERT || tr === T.TUNDRA) c *= 1 - t14(gs, '사막') / 2.5;
+  }
   return s ? weatherCost(s, grid, to, c) : c;
 };
 // 땅, 얕은 바다(뭍에서 3칸)는 누구나 · 깊은 바다는 항구에서 나온 부대만
@@ -868,7 +875,7 @@ export function stepDay(s, grid) {
       occ.set(nx, u);
       u.path.shift();
       // 칠하기: 적·빈 땅을 지나가면 내 땅이 됨 (성 칸·동맹/정전국 땅 제외)
-      if (!c && grid.passable(nx) && s.owner[nx] !== u.nation && enemy(s, u.nation, s.owner[nx])) s.owner[nx] = u.nation;
+      if (!c && !u.outlaw && grid.passable(nx) && s.owner[nx] !== u.nation && enemy(s, u.nation, s.owner[nx])) s.owner[nx] = u.nation; // 도적은 땅을 칠하지 않음
       // 내 성에 들어가면 입성 (병력·장수가 성으로) — 경유지면 지나가기만 함
       if (c && c.owner === u.nation && u.order?.kind === 'castle' && u.order.id === c.id) { if (u.queue?.length) { u.order = null; u.path = []; break; } enter(s, u, c); break; }
       // 통제 구역: 적 부대 옆에 서면 그날은 더 못 감
@@ -890,11 +897,13 @@ export function stepDay(s, grid) {
     if (!tgt) continue;
     const a = unitStats(s, u), d = unitStats(s, tgt);
     // 물 위에서는 수군 장수가 없으면 약함
-    const sea = (x) => (grid.sea[x.tile] ? (gensOf(s, x.gens).some((g) => has(g, '수군')) ? 1.15 : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
+    const sea = (x) => (grid.sea[x.tile] ? (has14(s, x, '수군') ? 1 + t14(gensOf(s, x.gens), '수군') : x.ships || hasPolicy(s, x.nation, 'navy') ? 1 : 0.75) : 1);
     const ug = gensOf(s, u.gens), tr = grid.terrain[tgt.tile];
     // 지형·상황 특성: 기마(평원·사막·동토), 산악(산·구릉), 돌격(병력 열세), 위압(적 방어↓), 화공(맑은 날 숲·구릉)
-    const tb = 1 + (tr === T.PLAINS || tr === T.DESERT || tr === T.TUNDRA ? tv(ug, '기마') : 0) + (tr === T.MOUNTAIN || tr === T.HILLS ? tv(ug, '산악') : 0)
-      + (u.troops < tgt.troops ? tv(ug, '돌격') : 0) + tv(ug, '위압') + (tr === T.DESERT ? tv(ug, '사막') : 0) + ((tr === T.FOREST || tr === T.HILLS) && fireMult(s) > 1 ? tv(ug, '화공') : 0);
+    const tg = gensOf(s, tgt.gens);
+    const tb = (1 + (tr === T.PLAINS || tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '기마') : 0) + (tr === T.MOUNTAIN || tr === T.HILLS ? t14(ug, '산악') : 0)
+      + (u.troops < tgt.troops ? t14(ug, '돌격') : 0) + (tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '사막') : 0) + (tr === T.FOREST || tr === T.HILLS ? t14(ug, '화공') : 0)
+      + (grid.river[tgt.tile] ? t14(ug, '도하') / 2 : 0)) / (1 - t14(ug, '위압')) / (1 + t14(tg, '매복'));
     let dmg = tb * (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
     maybeDuel(s, u, tgt, rng);
@@ -912,7 +921,7 @@ export function stepDay(s, grid) {
     }
     if (tac) {
       u.cd = tac.unique ? 4 : 3;
-      const fire = tac.kind === 'fire' ? fireMult(s) : 1;
+      const fire = tac.kind === 'fire' ? fireMult(s) * (1 + t14([tac.g], '화공') / 2) : 1;
       if (tac.kind === 'guard') { u.guard = 2; }
       else dmg *= tac.mult * fire;
       tgt.morale -= tac.morale * (tac.kind === 'scare' ? 1.5 : 1);
@@ -937,7 +946,7 @@ export function stepDay(s, grid) {
     // 반격: 맞은 부대가 때린 부대들에게 되갚음 (협공당하면 나눠짐)
     const dt = unitStats(s, t);
     for (const { u } of list) {
-      const back = (t.troops * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length;
+      const back = (t.troops * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length * (1 - t14(gensOf(s, u.gens), '노련')) / (1 + t14(gensOf(s, u.gens), '매복'));
       u.troops -= back;
       u.morale -= (back / Math.max(1, u.troops)) * 30;
       s.fx.push({ type: 'hit', tile: u.tile, amt: Math.round(back) });
@@ -969,19 +978,19 @@ export function stepDay(s, grid) {
     // 성벽이 남아 있으면 수비병 피해가 크게 줄고 반격이 셈. 성벽부터 깎아야 함
     const walled = c.dur > 0;
     // 물 위에서 치면 약함 (수군 장수·조선소·수군 육성이 있으면 괜찮음)
-    const sea = grid.sea[u.tile] ? (gensOf(s, u.gens).some((g) => has(g, '수군')) ? 1.1 : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
+    const sea = grid.sea[u.tile] ? (has14(s, u, '수군') ? 1 + t14(gensOf(s, u.gens), '수군') : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
     a.atk *= sea;
     // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
     const ug = gensOf(s, u.gens);
     // 성을 지키는 장수의 특성: 수성·궁술 방어↑, 철벽 피해↓, 축성 성벽↑ / 공격 쪽 공성은 성벽을 더 깎음
-    const cg = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active' && g.nation === c.owner);
-    const guardT = 1 + tv(cg, '수성') + tv(cg, '궁술') + tv(cg, '철벽');
-    const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1) * (1 + tv(ug, '공성') * 0.25) / (1 + tv(cg, '축성'));
+    const cg = castleGens(s, c);
+    const guardT = 1 + t14(cg, '수성');
+    const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1) * (1 + t14(ug, '공성')) / (1 + t14(cg, '철벽'));
     c.dur = Math.max(0, c.dur - wall);
     // 약소국은 결사 항전: 수비병 피해 −15%
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
-    u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + tv(cg, '궁술') * 2) * (1 - tv(ug, '노련') * 0.5);
+    u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련'));
     u.morale -= walled ? 0.5 : 0;
     s.fx.push({ type: 'clash', a: u.tile, b: c.tile }, { type: 'hit', tile: c.tile, amt: Math.round(kill), wall: walled });
     if (c.troops <= 0) capture(s, grid, c, u);
@@ -1015,7 +1024,7 @@ export function stepDay(s, grid) {
     for (const g of gensOf(s, u.gens)) {
       g.unit = null;
       if (s.nations[u.nation]?.outlaw) { g.status = 'gone'; continue; } // 도적 두목은 사로잡지 않음 (그냥 죽음)
-      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + tv(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
+      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + t14(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
     if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; }
