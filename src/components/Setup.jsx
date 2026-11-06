@@ -87,7 +87,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <div>
             <div className="title">⚔️ TABLE WAR</div>
             <div className="muted">역사 속 문명과 장수로 펼치는 턴제 땅따먹기 전략 게임</div>
-            <div className="muted build-info" title={`마지막 커밋: ${BUILD.msg}\n빌드: ${BUILD.built} (UTC)`}>🏷️ {versionText}{BUILD.msg ? ` — ${BUILD.msg}` : ''}</div>
+            <div className="muted build-info" title={`마지막 커밋: ${BUILD.msg}\n빌드: ${BUILD.built} (한국 시간)`}>🏷️ {versionText}{BUILD.msg ? ` — ${BUILD.msg}` : ''}</div>
           </div>
           {(hasSave || cloudHas) && (
             <button className="primary" onClick={() => setShowSaves((v) => !v)}>

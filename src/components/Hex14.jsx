@@ -1793,7 +1793,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
           {tab === 'help' && (
             <div className="card muted help-box" style={{ fontSize: 13 }} ref={helpRef}>
-              <div className="build-info" title={`빌드: ${BUILD.built} (UTC)`}>🏷️ 판 {versionText}{BUILD.msg ? <><br />마지막 커밋: {BUILD.msg}</> : null}</div>
+              <div className="build-info" title={`빌드: ${BUILD.built} (한국 시간)`}>🏷️ 판 {versionText}{BUILD.msg ? <><br />마지막 커밋: {BUILD.msg}</> : null}</div>
               <input type="search" id="help-q" className="help-search" placeholder="🔍 도움말 검색 (예: 망루, 정전, 보급)" value={helpQ} onChange={(e) => setHelpQ(e.target.value)} />
               {helpQ.trim() && helpHits === 0 && <div className="help-none">「{helpQ.trim()}」에 맞는 도움말이 없습니다.</div>}
               내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
