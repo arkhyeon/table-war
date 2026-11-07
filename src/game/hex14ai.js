@@ -5,11 +5,11 @@ import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost, mercMax14, mercCost, hireMerc14 } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
-export const graceOf = (s) => (s.playerStart ?? 99) <= 3 ? 36 : GRACE;
+export const graceOf = () => GRACE; // 작은 나라로 시작해도 같음 (크기 보정 없음)
 
 // ── 전략: 나라마다 형편에 맞게 고르고 1년(36순)·큰 변화마다 다시 고름 ──
 // reserve: 성에 남길 몫 · bold: 얼마나 센 성까지 노리나 · units: 동시에 내보낼 부대 수 배율
@@ -456,8 +456,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const k = Math.max(1, Math.min(6, hub.length));
     for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
-    // 인구를 다 뽑았는데도 금이 넉넉하면(예비의 3배 넘게) 용병으로 — 쌓아 두지 않고 병사로 바꿈
-    if (n.gold > floor * 3) { const b2 = (n.gold - floor * 2) * (scope ? 1 : share); for (const c of hub.slice(0, 6)) { const m = Math.min(mercMax14(s, c), Math.floor(b2 / mercCost(c, s) / k / 1000) * 1000); if (m >= 1000) hireMerc14(s, c.id, m); } }
+    // 그래도 금이 넉넉하면(예비의 3배 넘게) 장수 없는 후방 성에서도 뽑아 둠 — 쌓아 두지 않고 병사로 바꿈 (병력 받기로 앞으로 보냄)
+    if (n.gold > floor * 3) { const rest = mine.filter((c) => c.kind !== 'pass' && !hub.slice(0, 6).includes(c) && draftMax14(s, c) >= 1000).sort((a, b) => b.pop - a.pop); for (const c of rest) { if (n.gold < floor * 2) break; draft14(s, c.id, Math.min(draftMax14(s, c), Math.floor((n.gold - floor * 2) / draftCost(c, s) / 1000) * 1000)); } }
   }
   if (!scope && !daily) aiBuild(s, grid, nid, (c) => threatNear(s, grid, c), floor, 2);
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)

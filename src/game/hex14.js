@@ -8,7 +8,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { PLACES, placeExists, placeName } from './places.js';
-import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, isSmall, ensureTraits } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, ensureTraits } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
@@ -1094,8 +1094,7 @@ export function stepDay(s, grid) {
     const guardT = 1 + t14(cg, '수성');
     const wall = u.troops * 0.004 * (a.atk / 100) * (u.siege ? 5 : 1) * (1 + t14(ug, '공성')) / (1 + t14(cg, '철벽'));
     c.dur = Math.max(0, c.dur - wall);
-    // 약소국은 결사 항전: 수비병 피해 −15%
-    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1) / guardT;
+    const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
     const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련')) * (u.troops / Math.max(1, siegeSum.get(c) || u.troops));
     u.troops -= sback;
@@ -1345,27 +1344,11 @@ export function endTurn14(s, grid) {
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
 }
 
-// 용병: 인구를 다 뽑아도 금이 남으면 금으로 병사를 삼 — 1명당 징병의 2배, 성마다 순에 (2천 + 인구×100)명까지, 인구는 줄지 않음
-export const mercCost = (c, s) => Math.round(draftCost(c, s) * 2 * 10) / 10;
-export const mercMax14 = (s, c) => {
-  if (c.kind === 'pass' || c.owner === null || c.owner < 0 || !s.nations[c.owner]) return 0;
-  const cap = Math.round((2000 + (c.pop || 0) * 100) / 1000) * 1000 - (c.mercT === s.turn ? c.mercN || 0 : 0);
-  return Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / mercCost(c, s) / 1000) * 1000, cap));
-};
-export function hireMerc14(s, castleId, amt) {
-  const c = s.castles[castleId];
-  amt = Math.min(Math.floor(amt / 1000) * 1000, mercMax14(s, c));
-  if (amt < 1000) return { ok: false, msg: '살 수 있는 용병이 없습니다.' };
-  const cost = Math.round(amt * mercCost(c, s));
-  s.nations[c.owner].gold -= cost;
-  c.troops += amt;
-  if (c.mercT !== s.turn) { c.mercT = s.turn; c.mercN = 0; }
-  c.mercN += amt;
-  return { ok: true, msg: `${c.name}에 용병 ${fmtTroops(amt)} (금 -${fmtGold(cost)})` };
-}
-// 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
-export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 9 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
-export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));
+// 징병: 성에서 금으로 병사를 뽑음 (1명당 10금). 성마다 순에 인구의 20%까지 — 뽑은 1천 명당 인구는 500명만 줄어 (식구는 남음)
+// 순이 바뀌면 다시 뽑을 수 있으니, 금이 넉넉하면 순마다 계속 병사로 바꿀 수 있음 (인구는 뽑지 않으면 다시 늚)
+export const draftCost = (c, s) => (s && hasPolicy(s, c.owner, 'conscript') ? 9 : 10);
+export const draftLeft14 = (s, c) => Math.max(0, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000 - (c.draftT === s.turn ? c.draftN || 0 : 0));
+export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, draftLeft14(s, c)));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
   const n = s.nations[c.owner];
@@ -1373,6 +1356,8 @@ export function draft14(s, castleId, amt) {
   if (amt < 100) return { ok: false, msg: '뽑을 수 없습니다.' };
   n.gold -= amt * draftCost(c, s);
   c.troops += amt;
-  c.pop = Math.max(1, Math.round((c.pop - amt / 1000) * 10) / 10);
+  if (c.draftT !== s.turn) { c.draftT = s.turn; c.draftN = 0; }
+  c.draftN += amt;
+  c.pop = Math.max(1, Math.round((c.pop - amt / 2000) * 10) / 10);
   return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * draftCost(c, s))})` };
 }

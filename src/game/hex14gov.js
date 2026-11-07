@@ -125,12 +125,10 @@ export function envoyOf(s, nid) {
 // 한 순 금 수입 (도시 세금 합)
 export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === nid ? goldOf(s, c) : 0), 0);
 // 친선 금액: 주는 나라와 받는 나라 수입(2순 치)의 기하평균 — 내가 커질수록, 상대가 클수록 같은 우호에 돈이 더 듦
-// 친선: 금 1만·3만 두 가지. 큰 나라일수록 같은 돈으로 덜 오름 (도시 4곳까지는 1만에 +10, 크면 최대 1/3)
-const sizeF = (s, b) => Math.max(1, Math.min(3, Math.sqrt(s.castles.filter((c) => c.owner === b && c.kind !== 'pass').length / 4)));
+// 친선: 금 1만·3만 두 가지. 1만에 우호 +10 (크든 작든 같음, 사신 정치만큼 더)
 export const giftSizes = () => [10000, 30000];
-export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round(((amt / 10000) * 10 * envoyOf(s, a).mult) / sizeF(s, b))));
-// 약소국 결속·대국 영토 관리 감점은 없앰 (크든 작든 같은 규칙) — 예전 호출과 저장을 깨지 않게 함수만 남김
-export const isSmall = () => false;
+export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round((amt / 10000) * 10 * envoyOf(s, a).mult)));
+// 약소국 결속·대국 영토 관리 감점은 없앰 (크든 작든 같은 규칙)
 
 // 받아들일 확률 (b가 a의 제안을)
 // 패권국: 전체 도시의 30%를 넘고 2등보다 1.5배 넘게 큰 나라 (다른 나라들이 견제함)
@@ -275,7 +273,7 @@ export function recruitChance(s, g, nid, cityId) {
   if (s.nations[g.nation]?.outlaw || g.boss) return 0; // 도적 두목은 등용 불가
   const jin = nationT(s, nid, '인덕');
   if (g.status === 'prisoner') return Math.max(0.05, Math.min(0.35 + jin, 0.08 + jin + (pol - 50) / 250 + (!s.nations[g.nation]?.alive ? 0.08 : 0)));
-  return Math.max(0.1, Math.min(0.9, 0.3 + jin + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0) + (isSmall(s, nid) ? 0.1 : 0)));
+  return Math.max(0.1, Math.min(0.9, 0.3 + jin + (pol - 50) / 100 + (hasPolicy(s, nid, 'talent') ? 0.15 : 0)));
 }
 
 export function recruit(s, gid, nid, rng = Math.random) {
@@ -393,7 +391,6 @@ export function govTurn(s, grid) {
   for (const n of s.nations) {
     if (!n.alive) continue;
     let gold = 0, food = 0;
-    const small = isSmall(s, n.id);
     for (const c of s.castles) {
       if (c.owner !== n.id) continue;
       if (c.auto || n.id !== s.playerId || s.spectator) autoJobs(s, c);
@@ -404,7 +401,7 @@ export function govTurn(s, grid) {
       gold += goldOf(s, c);
       if (harvest) food += harvestOf(s, c);
       // 자원병: 인구에 비례, 징병 담당관이 있으면 통솔만큼 더 (인구의 25%까지 성에 참)
-      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 + t14([d], '징병') : 0) + traitDraft(s, c)) * (hasPolicy(s, c.owner, 'conscript') ? 1.1 : 1) * sprawlOf(s, c.owner) * (small ? 1.5 : 1));
+      if (c.kind !== 'pass' && !(c.unrest >= s.turn) && c.troops < c.pop * 250) c.troops += Math.round((c.pop * 15 * (0.5 + 0.5 * landShare(s, c)) + (d ? d.lead * 12 + t14([d], '징병') : 0) + traitDraft(s, c)) * (hasPolicy(s, c.owner, 'conscript') ? 1.1 : 1) * sprawlOf(s, c.owner));
       // 성벽 보수, 인구 회복
       c.dur = Math.min(c.maxDur, c.dur + c.maxDur * ((hasPolicy(s, c.owner, 'fortify') ? 0.1 : 0.05) + t14(castleGens(s, c), '축성')));
       c.popMax = c.popMax || c.pop * 1.2;

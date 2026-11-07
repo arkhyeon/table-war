@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { uiConfirm } from '../dialog.js';
 import { BUILD, versionText } from '../version.js';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, mercMax14, mercCost, hireMerc14, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -1711,7 +1711,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const freeIn = (c) => Object.values(game.generals).filter((g) => g.status === 'free' && g.castle === c.id && !isRuler(g)); // 옛 군주는 신하가 되지 않으므로 빼고
   const Loyal = ({ g }) => (g.ruler ? null : <small style={{ color: loyalOf(g) < 40 ? 'var(--danger)' : 'var(--muted)', marginLeft: 2 }}>충{loyalOf(g)}</small>);
   // 능력치: 85 이상 금색, 95 이상 주황 굵게
-  const St = ({ k, v }) => <span className={v >= 95 ? 'stat-top' : v >= 85 ? 'stat-high' : undefined}>{k}{v}</span>;
+  const St = ({ k, v }) => <span className={v >= 95 ? 'stat-top' : v >= 90 ? 'stat-90' : v >= 80 ? 'stat-high' : undefined}>{k}{v}</span>;
   // 특성: 이름+등급(Ⅰ~Ⅲ), 마우스를 올리면 효과
   // 특성 꼬리표: 마우스를 올리거나(PC) 누르면(폰) 효과가 펼쳐짐 — 다시 누르면 접힘
   const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => { const k = `${g.id}:${tr[0]}`, on = traitOpen === k; return (
@@ -1917,10 +1917,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
               )}
               {selCastle.kind !== 'pass' && (
                 <div style={{ fontSize: 13 }}>
-                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금)
+                  징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금) <small className="muted">이번 순 남은 징병 {fmtTroops(draftLeft14(game, selCastle))} · 순마다 인구의 20%</small>
                   <Slider min={0} max={draftMax14(game, selCastle)} step={1000} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={(v) => setDraftAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
-                  {(() => { const mm = mercMax14(game, selCastle); return <button className="sm" style={{ marginLeft: 6 }} disabled={playing || mm < 1000} title={`인구와 상관없이 금으로 병사를 삼 — 1명당 ${mercCost(selCastle, game)}금(징병의 2배), 이 성에서 순마다 ${fmtTroops(Math.round((2000 + (selCastle.pop || 0) * 100) / 1000) * 1000)}명까지`} onClick={() => act((s) => hireMerc14(s, selCastle.id, mm))}>💰 용병 {fmtTroops(mm)}</button>; })()}
                   
                   <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
                     <b>🚚 병력 받기</b> <small className="muted">장수 없이 내 다른 성에서 이 성으로 · 수송대는 내 땅 길로 하루 1.5칸</small>
@@ -2161,7 +2160,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   </div>
                 );
               })}
-              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>동맹(1년)·정전(반년) 중에는 서로 칠 수 없습니다. 친선은 1만·3만, 큰 나라일수록 같은 돈으로 덜 오릅니다(괄호 안이 우호 상승). 약조가 끝나기 3순 전과 끝날 때 알려 드립니다. 도시를 빼앗으면 우호가 크게 떨어집니다.</div>
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>동맹(1년)·정전(반년) 중에는 서로 칠 수 없습니다. 친선은 1만에 우호 +10, 3만에 +30(괄호 안이 우호 상승). 약조가 끝나기 3순 전과 끝날 때 알려 드립니다. 도시를 빼앗으면 우호가 크게 떨어집니다.</div>
             </div>
           )}
           {tab === 'people' && (
@@ -2256,7 +2255,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
-                <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만·3만, 큰 나라일수록 우호가 덜 오릅니다.</li>
+                <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만에 우호 +10, 3만에 +30 (나라 크기와 상관없음).</li>
                 <li>🧠 컴퓨터 나라는 확장·속공·내실·편승·반패권·수성·사방 방어 중 형편에 맞는 전략을 고릅니다(외교 탭에서 확인).</li>
                 <li>⚖️ 밸런스 기준: 병사 1명 = 금 10 = 공격력 1(병사 1명이 내는 힘) = 병량 1.5. 정책·시설·특성은 모두 이 환율로 「한 순에 금 몇 어치」인지 따져 맞춥니다.</li>
                 <li>🏪🌾 시장은 그 도시 금 +25%씩, 농장은 그 도시 수확 +100%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>

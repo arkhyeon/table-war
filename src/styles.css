@@ -603,3 +603,6 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .day-strip i.go { background: #fff; }
 .day-strip .go-next { font-size: 10px; margin-left: 3px; }
 .end-turn { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.stat-high { color: #f0c24b; font-weight: 700; }
+.stat-90 { color: #ff9f40; font-weight: 800; }
+.stat-top { color: #ff5a3c; font-weight: 800; }
