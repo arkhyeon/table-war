@@ -176,6 +176,25 @@ function pickCities(world, grid, base, tileOwner = null) {
   };
   const out = [];
   const far = (t, m) => out.every((c) => grid.dist(c.tile, t) >= m);
+  // 얼음땅: 그린란드 빙상·캐나다 북쪽(북위 63도 위)·북위 71도 위는 사람이 거의 살지 않았으므로 주인 없는 성을 두지 않음 (나라 땅이면 그대로)
+  const frozen = (t) => {
+    if (!world.geo || t < 0) return false;
+    const [lon, lat] = world.geo.toLL(...grid.center(t));
+    const glW = lat < 70 ? -57.5 : lat < 75 ? -62 : lat < 78 ? -68 : -73;
+    return (lon > glW && lon < -10 && lat > 59.5) || lat > 71 || (lat > 63 && lon > -141 && lon < -60);
+  };
+  // 그린란드 남서쪽 노르드인 정착지: 있던 시대 판에서만 성으로
+  {
+    const yr = getScenario(base.scenarioId)?.startYear;
+    // 브라타흘리드(동부 정착지)는 985~1450년 무렵, 서부 정착지는 1000~1350년 무렵까지
+    if (world.geo) for (const [name, lon, lat, y0, y1] of [['브라타흘리드', -45.5, 61.15, 985, 1450], ['서부 정착지', -51.0, 64.3, 1000, 1350]]) {
+      if (!(yr >= y0 && yr <= y1)) continue;
+      const [x, y] = world.geo.toPx(lon, lat);
+      if (x < 0 || y < 0 || x > world.W || y > world.H) continue;
+      const t = near(pixelToCell(grid.size, grid.cols, grid.rows, x, y));
+      if (t >= 0 && far(t, 2)) out.push({ name, tile: t, kind: 'city', pop: 20, norse: true });
+    }
+  }
   // 빈 땅 메우기: 성 사이 보통 간격보다 훨씬 먼 곳(나라 땅이든 빈 땅이든)에 성을 더 둠 — 어느 지역은 성이 빽빽하고 어느 곳은 텅 비지 않게
   let fillPts = null;
   const snapMajor = (onlyFrom = 0) => {
@@ -202,13 +221,14 @@ function pickCities(world, grid, base, tileOwner = null) {
     const whole = !!world.geo?.whole;
     const kOf = new Float32Array(grid.N).fill(1);
     if (whole) for (let i = 0; i < grid.N; i++) { if (!grid.passable(i)) continue; const [x, y] = grid.center(i); const la = grid.latAt(x, y); const own = base.regions[grid.region[i]]?.owner; kOf[i] = Math.max(0.3, Math.min(1.15, Math.cos((la * Math.PI) / 180) / Math.cos((35 * Math.PI) / 180))) * (own === null || own === undefined || own < 0 ? 0.8 : 1); }
+    const frozenT = new Uint8Array(grid.N); if (world.geo) for (let i = 0; i < grid.N; i++) if (grid.passable(i) && frozen(i) && (base.regions[grid.region[i]]?.owner ?? -1) < 0) frozenT[i] = 1;
     const dist = new Float32Array(grid.N).fill(Infinity);
     const spread = (src) => { const q = [src]; dist[src] = 0; for (let k = 0; k < q.length; k++) { const x = q[k], dx = dist[x] + kOf[x]; if (dx > gapN * 1.5) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < dist[j]) { dist[j] = dx; q.push(j); } } };
     for (const c of out) spread(c.tile);
     for (let it = 0; it < 400; it++) {
       let bt = -1, bd = gapN;
       for (let i = 0; i < grid.N; i++) {
-        if (!grid.passable(i) || grid.terrain[i] === T.PEAK) continue;
+        if (!grid.passable(i) || grid.terrain[i] === T.PEAK || frozenT[i]) continue;
         // 산지도 성이 없으면 세움 (실제로도 산간 요새·고을이 있었음) — 다만 같은 거리면 평지를 먼저
         const d0 = dist[i] === Infinity ? (csize[comp[i]] >= gapN * gapN * 0.2 ? gapN * 1.5 : 0) : dist[i];
         const d = grid.terrain[i] === T.MOUNTAIN ? d0 - 0.6 : d0;
@@ -219,7 +239,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       if (world.geo) {
         if (!fillPts) fillPts = PLACES.filter((p) => !p.area).map((p) => { const [x, y] = world.geo.toPx(p.lon, p.lat); return { t: x >= 0 && y >= 0 && x <= world.W && y <= world.H ? pixelToCell(grid.size, grid.cols, grid.rows, x, y) : -1, major: MAJOR.has(p.name) }; }).filter((p) => p.t >= 0 && grid.passable(p.t) && grid.terrain[p.t] !== T.PEAK);
         let st = -1, sd = Math.max(2, gapN * 0.45);
-        for (const { t: pt, major } of fillPts) { const d = grid.dist(pt, bt) - (major ? 3 : 0); if (d < sd && dist[pt] >= gapN * 0.5 && !out.some((c) => c.tile === pt)) { sd = d; st = pt; } }
+        for (const { t: pt, major } of fillPts) { const d = grid.dist(pt, bt) - (major ? 3 : 0); if (d < sd && dist[pt] >= gapN * 0.5 && !frozenT[pt] && !out.some((c) => c.tile === pt)) { sd = d; st = pt; } }
         if (st >= 0) bt = st;
       }
       out.push({ name: base.regions[grid.region[bt]]?.name || '', tile: bt, kind: 'city', fill: true });
@@ -295,7 +315,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       for (const g of [gap, Math.max(2, Math.round(gap / 2)), 2]) for (const r of order) {
         if (have >= Math.min(want, regs.length)) break;
         const t = grid.castleTile[r.id];
-        if (out.some((c) => c.tile === t) || !far(t, g)) continue;
+        if (out.some((c) => c.tile === t) || !far(t, g) || (o === -1 && frozen(t))) continue;
         out.push({ name: base.regions[r.id].name, tile: t, kind: 'city' });
         have += 1;
       }
@@ -340,7 +360,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       const free = pts.filter((p) => !caps.some((c) => grid.dist(c.tile, p.t) <= 1));
       const pairs = [];
       for (const c of out) {
-        if (c.capitalOf !== undefined) continue;
+        if (c.capitalOf !== undefined || c.norse) continue;
         const own = (base.regions[grid.region[c.tile]]?.owner ?? null) !== null;
         for (const p of free) { const d = grid.dist(c.tile, p.t); if (d <= (own ? Rown : Rfree)) pairs.push([d + (d > R ? 100 : 0) - (MAJOR.has(p.name) ? 2.5 : 0), c, p.name]); }
       }
@@ -350,7 +370,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       // 실제 지명을 못 찾은 성: 주인 없는 황무지(초원·동토 등)면 성을 두지 않고, 나라 땅이면 지역 이름 그대로
       for (let k = out.length - 1; k >= 0; k--) {
         const c = out[k];
-        if (done.has(c) || c.capitalOf !== undefined) continue;
+        if (done.has(c) || c.capitalOf !== undefined || c.norse) continue; // 노르드 정착지는 이름 그대로
         if ((base.regions[grid.region[c.tile]]?.owner ?? null) === null && !c.fill && !/^threekingdoms/.test(base.scenarioId)) out.splice(k, 1);
       }
       // 이름 없는 빈 땅 성을 뺀 다음에 빈 곳 메우기 (먼저 메우면 나중에 빠진 자리가 다시 텅 빔) — 새 성은 가까운 실제 지명으로
@@ -367,7 +387,7 @@ function pickCities(world, grid, base, tileOwner = null) {
       const known = new Set(pts.map((p) => p.name));
       const DIRS8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
       for (const c of out) {
-        if (done.has(c) || c.capitalOf !== undefined) continue;
+        if (done.has(c) || c.capitalOf !== undefined || c.norse) continue; // 노르드 정착지는 이름 그대로
         const baseNm = c.name.replace(/ (동|남동|남|남서|서|북서|북|북동)부$/, '');
         if (known.has(baseNm)) continue;
         let best = null, bd = Infinity;
