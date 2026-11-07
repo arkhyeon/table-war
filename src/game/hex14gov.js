@@ -24,7 +24,7 @@ import { initPeople, peopleTurn } from './hex14people.js';
 import { makeVassal, vassalTurn } from './hex14vassal.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
-const FOOD_PER = 0.04; // 병사 1명이 한 순(10일)에 먹는 병량 (0.02였을 땐 병량이 늘 170순 치씩 남아 징병을 막지 못했음)
+const FOOD_PER = 0.03; // 병사 1명이 한 순(10일)에 먹는 병량 (예전 0.02의 1.5배 — 0.02였을 땐 병량이 늘 170순 치씩 남았음)
 export const SALARY = 200; // 장수 녹봉 (금/순)
 export const SORTIE_COST = 0.5; // 출진: 병사 1명당 금
 export const HARVEST_MONTH = 7; // 8월(가을) 상순에 수확
