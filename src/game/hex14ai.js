@@ -5,7 +5,7 @@ import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -433,13 +433,19 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (n.food > use * 108 && n.gold < 60000) trade(s, nid, 'sell', Math.round((n.food - use * 72) / 1000) * 1000);
     else if (n.gold > 150000 && n.food < use * 40) trade(s, nid, 'buy', Math.round((n.gold - 100000) / 2 / 1000) * 1000);
   }
-  // 5) 징병: 금이 남으면 장수 있는 성부터 (내실·속공은 더 일찍 뽑음)
-  const floor = scope ? 200000 : n.strat === 'build' || n.strat === 'blitz' ? 30000 : 50000;
-  if (n.gold > floor && n.food > foodUse(s, nid) * 30) {
-    const hub = mine.filter((c) => Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active')).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
-    const per = Math.floor((n.gold - floor * 0.6) / 10 / Math.max(1, Math.min(6, hub.length)) / 100) * 100;
-    for (const c of hub.slice(0, 6)) { const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
+  // 5) 시설 먼저(시장·성벽), 남는 금은 팍팍 징병: 녹봉 몇 순 치만 남기고 장수 있는 성(위협받는 곳 먼저)에 뽑아 둠 — 출진 비용이 없으니 쌓아 둘 까닭이 없음
+  //    인구가 너무 줄어든 성(20 아래)은 위협받을 때만 뽑음 (인구가 곧 자원병·금 수입)
+  const gensN = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active').length;
+  const floor = scope ? 200000 : Math.max(8000, gensN * 600);
+  // 남는 금의 몫: 싸우는 중이면 85%, 아니면 65%를 징병에, 나머지로 시장·성벽
+  const share = wars.size || mine.some((c) => threatNear(s, grid, c) > 0) ? 0.85 : n.strat === 'build' ? 0.45 : 0.65;
+  if (n.gold > floor && n.food > foodUse(s, nid) * 20) {
+    const budget = (n.gold - floor) * (scope ? 1 : share);
+    const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
+    const k = Math.max(1, Math.min(6, hub.length));
+    for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
   }
+  if (!scope && !daily) aiBuild(s, grid, nid, (c) => threatNear(s, grid, c), floor, 2);
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)
   // 포위된 성(적 부대가 바로 옆)에는 순간 이동으로 병력을 넣지 않음 — 원군은 부대·수송으로만
   const besieged = (c) => s.units.some((u) => enemy(s, nid, u.nation) && grid.dist(u.tile, c.tile) <= 1);
@@ -458,7 +464,6 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   // 시설·외교 (군단이 아닐 때만)
   if (!scope) {
     const threat = (c) => threatNear(s, grid, c);
-    aiBuild(s, grid, nid, threat, n.strat === 'build' ? 20000 : 40000);
     aiForts(s, grid, nid, threat);
     aiPolicy(s, nid, mine.some((c) => threat(c) > 0), n.food < foodUse(s, nid) * 12);
     aiPeople(s, grid, nid, makeRng(`aip:${s.seed}:${s.turn}:${nid}`));

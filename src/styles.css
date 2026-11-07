@@ -581,3 +581,5 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .h14-think-bar { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 3px; border-radius: 2px; background: #ffffff1a; overflow: hidden; }
 .h14-think-bar div { height: 100%; background: var(--accent, #f0b94a); transition: width .15s; }
 @keyframes thinkIn { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translateX(-50%); } }
+.trait.open { white-space: normal; }
+.trait-desc { display: block; font-style: normal; font-weight: 500; font-size: 11px; margin-top: 2px; color: var(--text); white-space: normal; }

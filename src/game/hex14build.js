@@ -3,6 +3,7 @@ import { t14, castleGens } from './hex14traits.js';
 import { fmtGold } from './format.js';
 import { log, enemy } from './hex14.js';
 import { hasPolicy } from './hex14policy.js';
+import { goldOf, foodUse } from './hex14gov.js';
 
 // 도시 시설: 시장·농장(돈·병량, 유지비 없음), 성벽 증축, 조선소
 export const BUILDINGS = {
@@ -116,15 +117,17 @@ export function buildTurn(s, grid, redistrict) {
   if (regrid) redistrict(s, grid);
 }
 
-// 컴퓨터: 금이 넉넉하면 위협받는 도시에 성벽, 아니면 시장·농장·조선소
-export function aiBuild(s, grid, nid, threat, minGold = 40000) {
+// 컴퓨터: 짓는 값 + 여윳돈(reserve)이 있으면 순마다 2곳까지 — 위협받는 도시는 성벽, 안전한 도시는 금 수입 많은 곳부터 시장
+// (시장 1.2만금은 그 도시 금 +25%라 15~20순이면 본전, 그 뒤로는 계속 이득). 병량이 모자랄 때만 농장
+export function aiBuild(s, grid, nid, threat, reserve = 10000, maxN = 2) {
   const n = s.nations[nid];
-  if (n.gold < minGold) return;
   const mine = s.castles.filter((c) => c.owner === nid && !c.build && !c.founding);
-  for (const c of mine.sort((a, b) => threat(b) - threat(a))) {
-    const order = threat(c) > 0 ? ['wall'] : ['market', 'farmland', 'shipyard'];
-    for (const k of order) if (!canBuild(s, c, k)) { startBuild(s, c.id, k); return; }
-  }
+  let built = 0;
+  const tryB = (c, k) => { if (built >= maxN || canBuild(s, c, k) || n.gold < buildCost(s, c, k) + reserve) return; if (startBuild(s, c.id, k)?.ok !== false) built++; };
+  for (const c of mine.filter((x) => threat(x) > 0).sort((a, b) => threat(b) - threat(a))) tryB(c, 'wall');
+  const safe = mine.filter((x) => threat(x) === 0 && x.kind !== 'pass').sort((a, b) => goldOf(s, b) - goldOf(s, a));
+  const hungry = n.food < foodUse(s, nid) * 24;
+  for (const k of hungry ? ['farmland', 'market'] : ['market']) for (const c of safe) tryB(c, k);
 }
 
 // ───────── 야전 시설: 부대가 그 칸에 멈춰 짓는 진지·망루·목책 ─────────

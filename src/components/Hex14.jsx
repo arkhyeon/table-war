@@ -618,6 +618,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [ordersOpen, setOrdersOpen] = useState(() => { try { return localStorage.getItem('h14.orders') !== '0'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('h14.orders', ordersOpen ? '1' : '0'); } catch { /* 무시 */ } }, [ordersOpen]);
   const [sendAmt, setSendAmt] = useState(5000);
+  const [donorsAll, setDonorsAll] = useState(null);
+  const [traitOpen, setTraitOpen] = useState(null); // 눌러서 펼친 특성 (장수id:특성) // 병력 받기: 보낼 성 목록을 모두 펼친 성
   const [aud, setAud] = useState(audioOpt());
   // 처음 누를 때 소리를 켬 (브라우저 규칙)
   useEffect(() => { const on = () => unlockAudio(); window.addEventListener('pointerdown', on, { once: true }); return () => window.removeEventListener('pointerdown', on); }, []);
@@ -1594,7 +1596,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 능력치: 85 이상 금색, 95 이상 주황 굵게
   const St = ({ k, v }) => <span className={v >= 95 ? 'stat-top' : v >= 85 ? 'stat-high' : undefined}>{k}{v}</span>;
   // 특성: 이름+등급(Ⅰ~Ⅲ), 마우스를 올리면 효과
-  const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => <span key={tr[0]} className={`trait t${tr[1]}`} title={`${tr[0]} ${TIER_NAME[tr[1]]}: ${tdesc(tr[0], tr[1])} · 금 ${TIER_GOLD[tr[1]]}/순 값어치`}>{tlabel(tr)}</span>)}</span> : null);
+  // 특성 꼬리표: 마우스를 올리거나(PC) 누르면(폰) 효과가 펼쳐짐 — 다시 누르면 접힘
+  const Traits = ({ g }) => ((g.traits || []).length ? <span className="traits">{g.traits.map((tr) => { const k = `${g.id}:${tr[0]}`, on = traitOpen === k; return (
+    <span key={tr[0]} className={`trait t${tr[1]}${on ? ' open' : ''}`} title={`${tr[0]} ${TIER_NAME[tr[1]]}: ${tdesc(tr[0], tr[1])}`} onClick={(e) => { e.stopPropagation(); setTraitOpen(on ? null : k); }}>{tlabel(tr)}{on && <em className="trait-desc">{TIER_NAME[tr[1]]} · {tdesc(tr[0], tr[1])}</em>}</span>); })}</span> : null);
   const Stats = ({ g, keys = ['war', 'lead', 'intel', 'pol'] }) => <span className="stats">{keys.map((k) => <St key={k} k={{ war: '무', lead: '통', intel: '지', pol: '정' }[k]} v={g[k]} />)}<Traits g={g} /></span>;
   // 지금 맡은 내정 (그 성 담당이면 배지)
   const jobOf = (g) => { const c = g.castle !== null && g.castle !== undefined ? game.castles[g.castle] : null; if (!c) return null; return Object.keys(ROLES).find((r) => jobGen(game, c, r)?.id === g.id) || null; };
@@ -1806,13 +1810,15 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       <div style={{ fontSize: 12, marginTop: 4 }}>받을 병력 {fmtTroops(sendAmt)} <small className="muted">(남은 자리 {fmtTroops(Math.max(0, capOf(selCastle, game) - selCastle.troops))})</small></div>
                       <Slider min={1000} max={30000} step={1000} value={sendAmt} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                       {(() => {
-                        const donors = game.castles.filter((d) => d.owner === pid && d.id !== selCastle.id && d.troops >= 1500 && !(game.convoys || []).some((v) => v.from === d.id && v.to === selCastle.id)).map((d) => ({ d, dist: grid.dist(d.tile, selCastle.tile) })).sort((x, y) => x.dist - y.dist).slice(0, 5);
+                        const donors = game.castles.filter((d) => d.owner === pid && d.id !== selCastle.id && d.troops >= 1500 && !(game.convoys || []).some((v) => v.from === d.id && v.to === selCastle.id)).map((d) => ({ d, dist: grid.dist(d.tile, selCastle.tile) })).sort((x, y) => x.dist - y.dist);
+                        const allDon = donors.length, shownDon = donorsAll === selCastle.id ? donors : donors.slice(0, 5);
                         if (!donors.length) return <div className="muted" style={{ fontSize: 12 }}>보낼 수 있는 내 성이 없습니다.</div>;
-                        return donors.map(({ d, dist }) => { const amt = Math.min(sendAmt, Math.floor((d.troops - 500) / 1000) * 1000); return (
+                        return <>{shownDon.map(({ d, dist }) => { const amt = Math.min(sendAmt, Math.floor((d.troops - 500) / 1000) * 1000); return (
                           <div key={d.id} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '2px 0' }}>
                             <span>{d.name} <small className="muted">보유 {fmtTroops(d.troops)} · 약 {convoyDays(Math.ceil(dist * 1.15))}일</small></span>
                             <button className="sm" disabled={playing || amt < 1000} onClick={() => act((s) => sendTroops(s, grid, d.id, selCastle.id, amt))}>{fmtTroops(amt)} 받기</button>
-                          </div>); });
+                          </div>); })}
+                          {allDon > 5 && <button className="sm" style={{ marginTop: 4 }} onClick={() => setDonorsAll(donorsAll === selCastle.id ? null : selCastle.id)}>{donorsAll === selCastle.id ? '접기' : `더보기 (+${allDon - 5}곳, 먼 순서)`}</button>}</>;
                       })()}
                     </>}
                   </div>
