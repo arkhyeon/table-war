@@ -5,7 +5,7 @@ import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitS
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
-import { ROLES, jobGen, autoJobs, isWarrior, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { tlabel, tdesc, TIER_GOLD, TIER_NAME } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
@@ -1809,7 +1809,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 장수 카드: 1줄 이름(+담당), 2줄 충성·능력치, 3줄 특성·전법
   const GenCard = ({ g, loyal = true }) => { const tn = tacticName(g); return (
     <div className="gen-main">
-      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}{isWarrior(g) && <span className="mil-tag" title="무관: 내정 담당보다 출진 우선 (자동 배치·장수 나누기에서)">⚔무관</span>}<Job g={g} /></div>
+      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} /></div>
       <div className="gen-line"><Stats g={g} traits={false} /></div>
       {((g.traits || []).length > 0 || tn) && <div className="gen-tags"><Traits g={g} />{tn && <span className="tac" title="전법">「{tn}」</span>}</div>}
     </div>); };
