@@ -2,7 +2,7 @@
 // 지도는 기존 세계(world)의 촘촘한 격자를 굵은 육각 칸으로 다시 뽑아 씀 (칸 = 약 2.5천 개)
 // 한 턴 = 10일. 모든 부대가 하루씩 동시에 움직이고(통제 구역·칠하기), 붙어 있으면 싸우고(협공), 성을 공격함
 import { SQRT3, cellCenter, pixelToCell, hexDistance, neighborIndex, neighborIndexWrap, hexDistanceWrap } from './hex.js';
-import { T } from './rules.js';
+import { T, DIFFICULTY } from './rules.js';
 import { makeRng } from './rng.js';
 import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
@@ -21,7 +21,35 @@ export function normalizeHex14(s) {
   if (s?.mode !== 'hex14') return s;
   if (s.owner && !(s.owner instanceof Int16Array)) s.owner = Int16Array.from(s.owner, (v) => (v === null || v === undefined ? -1 : v));
   if (s.district && !(s.district instanceof Int16Array)) s.district = Int16Array.from(s.district, (v) => (v === null || v === undefined ? -1 : v));
+  if (s.seen && !(s.seen instanceof Uint8Array)) s.seen = Uint8Array.from(s.seen);
   return s;
+}
+if (!Uint8Array.prototype.toJSON) Object.defineProperty(Uint8Array.prototype, 'toJSON', { value() { return Array.from(this); }, configurable: true });
+
+// ── 시야(안개): 「지도 전체 공개」를 끄면 내 성 둘레 5칸·내 부대 둘레 4칸만 보임. 「탐색 지역 기억」이면 한 번 본 땅은 s.seen에 남음 ──
+export const fogOn = (s) => !s.spectator && s.opts?.revealMap === false;
+export const troopsHidden = (s) => !s.spectator && s.opts?.revealTroops === false;
+let sightMemo = null;
+export function sightOf(s, grid) {
+  const key = `${s.turn}:${s.day}:${s.units.length}:${s.castles.reduce((a, c) => a + (c.owner === s.playerId ? c.id + 1 : 0), 0)}`;
+  if (sightMemo && sightMemo.s === s && sightMemo.key === key) return sightMemo.v;
+  const pid = s.playerId, v = new Uint8Array(grid.N), dist = new Int16Array(grid.N).fill(-1), q = [];
+  const allies = new Set([pid, ...(s.pacts || []).filter((p) => p.type === 'ally' && (p.a === pid || p.b === pid) && p.until > s.turn).map((p) => (p.a === pid ? p.b : p.a))]);
+  const R = (base) => Math.max(2, Math.round(base * (grid.k || 1)));
+  const push = (t, r) => { if (t < 0 || t >= grid.N) return; if (dist[t] < r) { dist[t] = r; q.push(t); } };
+  for (const c of s.castles) if (allies.has(c.owner)) push(c.tile, R(5));
+  for (const u of s.units) if (allies.has(u.nation)) push(u.tile, R(4));
+  // 남은 거리가 큰 것부터 퍼뜨림 (거리 단위 BFS)
+  q.sort((a, b) => dist[b] - dist[a]);
+  for (let i = 0; i < q.length; i++) { const t = q[i]; v[t] = 1; const r = dist[t] - 1; if (r < 0) continue; for (const j of grid.nb[t]) if (dist[j] < r) { dist[j] = r; q.push(j); } }
+  sightMemo = { s, key, v };
+  return v;
+}
+export function updateSeen(s, grid) {
+  if (!fogOn(s) || s.opts?.rememberExplored === false) return;
+  if (!(s.seen instanceof Uint8Array) || s.seen.length !== grid.N) s.seen = new Uint8Array(grid.N);
+  const v = sightOf(s, grid);
+  for (let i = 0; i < grid.N; i++) if (v[i]) s.seen[i] = 1;
 }
 import { rollWeather, weatherCost, fireMult, tacticOf, maybeDuel, eventsTurn } from './hex14extra.js';
 
@@ -529,6 +557,9 @@ export function createHex14(world, base) {
       if (best && best[1] < 12) best[0].port = true;
     }
   }
+  // 난이도: 컴퓨터 나라 성의 처음 병력 보정 (쉬움 ×0.85, 어려움 ×1.2) — 중립 성은 그대로
+  const dTroops = DIFFICULTY[base.opts?.difficulty]?.troops || 1;
+  if (dTroops !== 1) for (const c of castles) if (c.owner !== null && (c.owner !== base.playerId || base.spectator)) c.troops = Math.round((c.troops * dTroops) / 100) * 100;
   const generals = {};
   for (const g of Object.values(base.generals)) {
     if (g.status !== 'active' || g.nation === null || g.nation === undefined) continue;
@@ -1113,6 +1144,7 @@ export function stepDay(s, grid) {
   advanceQueues(s, grid);
   convoysDay(s, grid);
   for (const u of s.units) { u.troops = Math.round(u.troops); u.morale = Math.max(0, Math.min(100, u.morale)); }
+  updateSeen(s, grid);
   for (const c of s.castles) c.troops = Math.max(0, Math.round(c.troops));
 }
 
@@ -1307,10 +1339,30 @@ export function endTurn14(s, grid) {
   // 속국의 도시는 종주국 몫으로 셈 (속국만 남으면 천하통일)
   const lordOfN = (id) => (s.pacts || []).find((p) => p.type === 'vassal' && p.b === id)?.a ?? id;
   const top = alive.filter((n) => lordOfN(n.id) === n.id).map((n) => [n, cities.filter((c) => c.owner !== null && lordOfN(c.owner) === n.id).length]).sort((a, b) => b[1] - a[1])[0];
-  if (alive.length === 1 || (top && top[1] >= cities.length * 0.8)) s.over = { winner: (top || [alive[0]])[0].id };
+  // 80%를 차지하면 통일 — 「계속 진행」을 고르면 남은 나라가 하나만 남을 때까지 이어 감
+  if (alive.length === 1) s.over = { winner: alive[0].id, final: true };
+  else if (!s.keepPlaying && top && top[1] >= cities.length * 0.8) s.over = { winner: top[0].id };
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
 }
 
+// 용병: 인구를 다 뽑아도 금이 남으면 금으로 병사를 삼 — 1명당 징병의 2배, 성마다 순에 (2천 + 인구×100)명까지, 인구는 줄지 않음
+export const mercCost = (c, s) => Math.round(draftCost(c, s) * 2 * 10) / 10;
+export const mercMax14 = (s, c) => {
+  if (c.kind === 'pass' || c.owner === null || c.owner < 0 || !s.nations[c.owner]) return 0;
+  const cap = Math.round((2000 + (c.pop || 0) * 100) / 1000) * 1000 - (c.mercT === s.turn ? c.mercN || 0 : 0);
+  return Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / mercCost(c, s) / 1000) * 1000, cap));
+};
+export function hireMerc14(s, castleId, amt) {
+  const c = s.castles[castleId];
+  amt = Math.min(Math.floor(amt / 1000) * 1000, mercMax14(s, c));
+  if (amt < 1000) return { ok: false, msg: '살 수 있는 용병이 없습니다.' };
+  const cost = Math.round(amt * mercCost(c, s));
+  s.nations[c.owner].gold -= cost;
+  c.troops += amt;
+  if (c.mercT !== s.turn) { c.mercT = s.turn; c.mercN = 0; }
+  c.mercN += amt;
+  return { ok: true, msg: `${c.name}에 용병 ${fmtTroops(amt)} (금 -${fmtGold(cost)})` };
+}
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금, 인구의 20%까지)
 export const draftCost = (c, s) => Math.round((s && hasPolicy(s, c.owner, 'conscript') ? 9 : 10) * (s && isSmall(s, c.owner) ? 0.75 : 1) * 10) / 10;
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000));

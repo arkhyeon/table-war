@@ -5,7 +5,7 @@ import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost, mercMax14, mercCost, hireMerc14 } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -115,9 +115,12 @@ export function chooseStrategy(s, grid, nid) {
   const topShare = citiesOf(s, top.id) / total;
   // 노릴 나라: 이미 둘 넘게 노리는 나라는 피함 (모두가 한 나라만 물어뜯지 않게)
   const hunted = (x) => s.nations.filter((m) => m.alive && m.id !== nid && m.focus === x).length;
-  const free = nb.filter((x) => hunted(x) < 2 && !pactOf(s, nid, x) && !(x === s.playerId && !s.spectator && s.turn <= graceOf(s)));
+  const free = nb.filter((x) => hunted(x) < 3 && !pactOf(s, nid, x) && !(x === s.playerId && !s.spectator && s.turn <= graceOf(s)));
   const pool = free.length ? free : nb.filter((x) => !pactOf(s, nid, x)).length ? nb.filter((x) => !pactOf(s, nid, x)) : nb;
-  const weakest = pool.slice().sort((a, b) => powerOf(s, a) - powerOf(s, b))[0];
+  // 얻어맞고 있는 나라는 더 약해 보임: 다른 나라 부대가 그 나라 성을 치고 있으면 같이 침 (사람이라면 그 틈을 노림)
+  const press = (x) => s.units.reduce((a, u) => a + (u.nation !== nid && u.nation !== x && u.order?.kind === 'castle' && s.castles[u.order.id]?.owner === x ? u.troops : 0), 0);
+  const soft = (x) => powerOf(s, x) / (1 + press(x) / Math.max(1, powerOf(s, x)));
+  const weakest = pool.slice().sort((a, b) => soft(a) - soft(b))[0];
   // 맞수: 힘이 비슷한 이웃 (먹잇감 대신 고르기도 함)
   const mp = powerOf(s, nid);
   const rival = pool.slice().sort((a, b) => Math.abs(Math.log(powerOf(s, a) / mp)) - Math.abs(Math.log(powerOf(s, b) / mp)))[0];
@@ -201,6 +204,15 @@ function strategyDiplomacy(s, grid, nid, rng) {
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const avgC = alive.reduce((a, m) => a + citiesOf(s, m.id), 0) / Math.max(1, alive.length);
   const small = citiesOf(s, nid) <= 3 && citiesOf(s, nid) < avgC * 0.75;
+  // 한 전선에 힘을 모음: 노리는 나라 말고도 약조 없는 이웃이 남으면, 그중 가장 센 나라와 정전 (등 뒤를 막고 반대편을 뚫음, 패권국은 빼고)
+  {
+    const nb0 = neighbors(s, grid, nid), heg = hegemonOf(s);
+    const open = nb0.filter((x) => x !== n.focus && x !== heg && !pactOf(s, nid, x) && !s.nations[x]?.outlaw);
+    if (open.length && nb0.filter((x) => !pactOf(s, nid, x)).length >= 2 && rng() < 0.35) {
+      const m = open.sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
+      if (m !== s.playerId || s.spectator || rng() < 0.3) propose(s, nid, m, 'truce', rng);
+    }
+  }
   if (rng() > (small ? 0.25 : 0.1)) return; // 외교는 가끔 — 싸워서 넓히는 게 먼저
   const nb = neighbors(s, grid, nid);
   if (n.strat === 'hold' || n.strat === 'center' || n.strat === 'build' || (small && nb.some((x) => x !== n.focus && powerOf(s, x) > powerOf(s, nid) * 1.5 && !pactOf(s, nid, x)))) {
@@ -444,6 +456,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const k = Math.max(1, Math.min(6, hub.length));
     for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
+    // 인구를 다 뽑았는데도 금이 넉넉하면(예비의 3배 넘게) 용병으로 — 쌓아 두지 않고 병사로 바꿈
+    if (n.gold > floor * 3) { const b2 = (n.gold - floor * 2) * (scope ? 1 : share); for (const c of hub.slice(0, 6)) { const m = Math.min(mercMax14(s, c), Math.floor(b2 / mercCost(c, s) / k / 1000) * 1000); if (m >= 1000) hireMerc14(s, c.id, m); } }
   }
   if (!scope && !daily) aiBuild(s, grid, nid, (c) => threatNear(s, grid, c), floor, 2);
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)

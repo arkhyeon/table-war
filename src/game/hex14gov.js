@@ -1,3 +1,4 @@
+import { DIFFICULTY } from './rules.js';
 // ───────── 삼국지14식 모드: 내정(농업·상업·징병 담당관), 병량·수확, 관할 땅 넓히기, 외교, 인재 ─────────
 import { makeRng } from './rng.js';
 import { initTraits } from './traits.js';
@@ -413,6 +414,8 @@ export function govTurn(s, grid) {
     const gens = Object.values(s.generals).filter((g) => g.nation === n.id && g.status === 'active').length;
     // 장수 녹봉 1명당 200, 시설 유지비 단계당 300
     const upkeep = s.castles.filter((c) => c.owner === n.id).reduce((a, c) => a + ((c.bld?.wall || 0) + (c.bld?.shipyard || 0)) * 300, 0);
+    // 난이도: 컴퓨터 나라의 금·병량 수입 보정 (쉬움 −15%, 어려움 +20%)
+    if ((n.id !== s.playerId || s.spectator) && !n.outlaw) { const tx = DIFFICULTY[s.opts?.difficulty]?.tax || 0; gold *= 1 + tx; food *= 1 + tx; }
     n.gold = Math.round(n.gold + gold - gens * SALARY - upkeep - (n.policies || []).length * POLICY_UPKEEP);
     n.food = Math.round(n.food + food - foodUse(s, n.id));
     if (harvest && n.id === s.playerId) log(s, `🌾 가을 수확! 병량 +${fmtTroops(food)}`, 'info', [n.id]);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { uiConfirm } from '../dialog.js';
 import { BUILD, versionText } from '../version.js';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, mercMax14, mercCost, hireMerc14, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -679,6 +679,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sheet, setSheet] = useState(false);
   const [tab, setTab] = useState('home');
   const [report, setReport] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [duel, setDuel] = useState(null);
   const skipDuel = useRef(null);
   const [cutin, setCutin] = useState(null);
@@ -899,6 +900,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
       { const hw = grid.size * Math.sqrt(3); ctx.drawImage(land.current.snow, 0, grid.size * 0.25, (land.current.snow.width * hw) / 2, land.current.snow.height * grid.size * 1.5); }
       ctx.globalAlpha = 1;
     }
+    // 안개: 「지도 전체 공개」를 끄면 지금 보이는 곳 말고는 어둡게 (한 번 본 곳은 옅게, 처음 보는 곳은 짙게)
+    if (fogOn(s)) {
+      if (!land.current.fog || land.current.fogS !== s) {
+        const tw = grid.cols * 2 + 1, th = grid.rows, sight = sightOf(s, grid), seen = s.seen;
+        const tiny = land.current.fog?.width === tw ? land.current.fog : Object.assign(document.createElement('canvas'), { width: tw, height: th });
+        const tctx = tiny.getContext('2d'), img = tctx.createImageData(tw, th), d = img.data;
+        for (let i = 0; i < grid.N; i++) {
+          if (sight[i]) continue;
+          const c = i % grid.cols, r = (i / grid.cols) | 0, px0 = c * 2 + (r & 1), A = seen && seen[i] ? 110 : 215;
+          for (const x of [px0, px0 + 1]) { const o = (r * tw + x) * 4; d[o] = 12; d[o + 1] = 16; d[o + 2] = 24; d[o + 3] = A; }
+        }
+        tctx.putImageData(img, 0, 0);
+        land.current.fog = tiny; land.current.fogS = s;
+      }
+      const hw = grid.size * Math.sqrt(3), fw = (land.current.fog.width * hw) / 2, fh = land.current.fog.height * grid.size * 1.5;
+      ctx.drawImage(land.current.fog, 0, grid.size * 0.25, fw, fh);
+      if (grid.wrap) ctx.drawImage(land.current.fog, grid.period, grid.size * 0.25, fw, fh);
+    }
     // 고른 도시의 관할 땅: 옅게 칠하고, 아직 내 것이 아닌 칸은 빗금처럼 진하게
     if (sl?.type === 'castle' && s.castles[sl.id]) {
       const c = s.castles[sl.id], tiles = districtTiles(s)[c.id] || [];
@@ -985,9 +1004,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const labelJobs = [];
     if (!land.current.gap || land.current.gapN !== s.castles.length) { land.current.gap = s.castles.map((c) => Math.min(9, ...s.castles.filter((d) => d !== c).map((d) => grid.dist(c.tile, d.tile)))); land.current.gapN = s.castles.length; }
     const castleGap = land.current.gap;
+    const FOG = fogOn(s), HIDE = troopsHidden(s), SIGHT = FOG || HIDE ? sightOf(s, grid) : null, SEEN = s.seen;
+    const known = (t) => !FOG || SIGHT[t] || (SEEN && SEEN[t]);
+    const numOf = (owner, t, v) => (SIGHT && owner !== pid && !SIGHT[t] ? '?' : fmtTroops(v));
     for (const c of s.castles) {
       const [cx, cy] = grid.center(c.tile);
       if (!vis(cx, cy)) continue;
+      if (c.owner !== pid && !known(c.tile)) continue; // 안개 속 아직 못 본 성
       const col = ownerColor(s, c.owner);
       const on = sl?.type === 'castle' && sl.id === c.id;
       // 도시·관문 그림 (나라 색 깃발), 바닥이 칸 아래쪽에 오게
@@ -1039,8 +1062,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
           ctx.fillStyle = '#ffe9a8';
           ctx.strokeStyle = '#111';
           ctx.lineWidth = fs * 0.22;
-          ctx.strokeText(fmtTroops(c.troops), cx, ly + fs * 1.1);
-          ctx.fillText(fmtTroops(c.troops), cx, ly + fs * 1.1);
+          ctx.strokeText(numOf(c.owner, c.tile, c.troops), cx, ly + fs * 1.1);
+          ctx.fillText(numOf(c.owner, c.tile, c.troops), cx, ly + fs * 1.1);
         }
       }
     }
@@ -1089,6 +1112,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const [ax, ay] = grid.center(e.a), [bx, by] = grid.center(e.b);
       const mx = (ax + bx) / 2, my = (ay + by) / 2;
       if (!vis(mx, my)) continue;
+      if (FOG && !SIGHT[e.a] && !SIGHT[e.b]) continue;
       const pulse = 0.7 + 0.3 * Math.sin(now / 90);
       ctx.strokeStyle = `rgba(255,${Math.round(80 + 80 * pulse)},60,0.95)`;
       ctx.lineWidth = sz * 0.22;
@@ -1101,6 +1125,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     for (const u of sorted) {
       const [cx, cy] = posOf(u);
       if (!vis(cx, cy)) continue;
+      if (FOG && u.nation !== pid && !SIGHT[u.tile]) continue; // 안개 속 적 부대는 안 보임
       const n = s.nations[u.nation];
       const on = sl?.type === 'unit' && sl.id === u.id;
       const g = gensOf(s, u.gens)[0];
@@ -1175,7 +1200,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (k * sz > 4.5 && free) {
         labels.push([cx, top]);
         ctx.font = `bold ${fs * 0.78}px sans-serif`;
-        const lab = `${g?.name || ''} ${fmtTroops(u.troops)}`;
+        const lab = `${g?.name || ''} ${numOf(u.nation, u.tile, u.troops)}`;
         ctx.strokeStyle = '#111';
         ctx.lineWidth = fs * 0.22;
         ctx.fillStyle = '#fff';
@@ -1287,8 +1312,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 하루 결과의 효과를 떠오르는 글자로
   const spawnFx = (s) => {
     const now = performance.now();
+    const fogS = fogOn(s) ? sightOf(s, grid) : null;
     for (const e of s.fx || []) {
       if (e.type === 'clash') continue;
+      if (fogS && !fogS[e.tile] && e.nation !== pid) continue; // 안개 속 싸움은 글자도 안 띄움
       const [x, y] = grid.center(e.tile);
       const jit = (Math.random() - 0.5) * grid.size;
       if (e.type === 'hit' && e.amt >= 30) fx.current.push({ x: x + jit, y: y - grid.size * 2.6, text: `-${e.amt.toLocaleString()}`, color: e.wall ? '#ffd27a' : '#ff6b5a', size: 0.85, min: 11, t0: now, life: 1100, rise: 2 });
@@ -1528,6 +1555,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     if (playing) { if (mode !== true && skipWait.current && !duel) { if (!multiRef.current) pendingNext.current = true; skipWait.current(); } return; }
     const toEnd = mode === true || mode > 1;
     let left = mode === true ? Infinity : Math.max(1, Math.min(DAYS, +mode || 1));
+    const spd = game.opts?.showArmy === false ? 0 : speed; // 게임 옵션 「이동 애니메이션」을 끄면 부대가 바로 옮겨 감
     multiRef.current = toEnd;
     if (game.inbox?.length) { setPeek(false); return; } // 사신에게 먼저 답해야 진행
     thinkT0.current = performance.now();
@@ -1535,7 +1563,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     let s = job.s;
     const startN = game.logN || 0;
     setPlaying(true);
-    setReport(null);
+    setReportOpen(false);
     const finish = (snap) => {
       // 순이 끝남: 정산 후 이번 순 소식
       snap.fx = [];
@@ -1562,6 +1590,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         rows,
       };
       setReport(news.length || sum ? { news: news.slice(0, 8), sum } : null);
+      setReportOpen(true);
       return snap;
     };
     const done = (snap) => {
@@ -1596,20 +1625,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 내 장수가 낀 일기토는 장면으로 보여 주고 잠시 멈춤, 고유 전법은 컷인
       const dl = (s.duels || []).find((x) => x.an === pid || x.bn === pid);
       const ui = (s.fx || []).find((e) => e.type === 'tactic' && e.unique && (e.nation === pid || s.units.some((u) => u.nation === pid && u.tile === e.to)));
-      if (ui) { setCutin(ui); sfx('cutin'); holdSfx(1.5); setTimeout(() => setCutin(null), 1500); }
-      if (dl) setDuel(dl);
-      const wait = dl ? duelMs(dl) : 0;
+      const scenes = game.opts?.showBattles !== false; // 게임 옵션 「일기토·전법 장면」
+      if (ui && scenes) { setCutin(ui); sfx('cutin'); holdSfx(1.5); setTimeout(() => setCutin(null), 1500); }
+      if (dl && scenes) setDuel(dl);
+      const wait = dl && scenes ? duelMs(dl) : 0;
       // 일기토 장면을 누르면 바로 다음으로 (기다리던 타이머를 당겨 실행), 하루씩 진행 중 다시 누르면 남은 움직임 건너뜀
-      const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; skipWait.current = null; fn(); }; const id = setTimeout(run, ms); if (dl) skipDuel.current = () => { clearTimeout(id); run(); }; skipWait.current = () => { clearTimeout(id); run(); }; };
+      const later = (fn, ms) => { let fired = false; const run = () => { if (fired) return; fired = true; skipDuel.current = null; skipWait.current = null; fn(); }; const id = setTimeout(run, ms); if (dl && scenes) skipDuel.current = () => { clearTimeout(id); run(); }; skipWait.current = () => { clearTimeout(id); run(); }; };
       const snap = clone(s);
       // 움직임은 계산이 끝난 뒤부터 셈 (계산하느라 걸린 시간만큼 앞부분이 잘려 순간이동하지 않게).
       // 순 끝까지는 하루 내내 같은 빠르기로 쭉 움직이고 바로 다음 날로 이어짐 (예전엔 날마다 천천히 멈췄다 다시 출발해 뚝뚝 끊겨 보였음)
-      anim.current = { prev: prevTiles, t0: performance.now(), dur: toEnd ? speed : speed * 0.9, linear: toEnd };
+      anim.current = { prev: prevTiles, t0: performance.now(), dur: spd === 0 ? 1 : toEnd ? spd : spd * 0.9, linear: toEnd };
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
       left -= 1;
       if (stopIdle && toEnd && !endOfTurn && idleNow.length) {
-        later(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
+        later(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(spd * 0.9, wait));
         return;
       }
       // n일 진행이 순을 넘어가면: 정산(보고서)하고 새 순 첫날부터 이어서 (사신이 왔거나 게임이 끝나면 멈춤)
@@ -1622,14 +1652,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
           setGame(clone(ns));
           thinkT0.current = performance.now();
           stepComputeAsync(s, true, onThink).then((D) => (D ? tick(D) : done(s)));
-        }, Math.max(speed * 0.9, wait));
+        }, Math.max(spd * 0.9, wait));
         return;
       }
       if (endOfTurn || left <= 0) {
-        later(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
+        later(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(spd * 0.9, wait));
         return;
       }
-      later(() => { setDuel(null); thinkT0.current = performance.now(); stepComputeAsync(s, false, onThink).then(tick); }, speed + wait);
+      later(() => { setDuel(null); thinkT0.current = performance.now(); stepComputeAsync(s, false, onThink).then(tick); }, spd + wait);
     };
     // 첫날: 미리 계산이 끝났으면 바로 움직이고, 덜 끝났으면 그 계산을 이어서 기다림 (그동안 「생각 중」 표시)
     if (job.D) tick(job.D);
@@ -1708,7 +1738,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <small className="muted">{selCastle.owner !== null && selCastle.owner >= 0 ? game.nations[selCastle.owner].name : selCastle.bandit || '중립'}</small>
           </h3>
           <div className="kv">
-            <span>수비병</span><span>{fmtTroops(selCastle.troops)}<small className="muted"> / 수용 {fmtTroops(capOf(selCastle, game))}</small></span>
+            <span>수비병</span><span>{selCastle.owner !== pid && (fogOn(game) || troopsHidden(game)) && !sightOf(game, grid)[selCastle.tile] ? '? (시야 밖)' : fmtTroops(selCastle.troops)}<small className="muted"> / 수용 {fmtTroops(capOf(selCastle, game))}</small></span>
             <span>성벽</span><span>{Math.round(selCastle.dur)} / {selCastle.maxDur}</span>
             {selCastle.kind !== 'pass' && <><span>인구</span><span>{Math.round(selCastle.pop)}천</span></>}
             {selCastle.kind !== 'pass' && selCastle.owner !== null && <><span>관할 땅</span><span>{Math.round(landShare(game, selCastle) * 100)}% · 수입 {fmtGold(castleIncome(game, grid, selCastle))} <small className="muted">지도에 흰색=내 관할, 빨강=아직 남의 것(채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)</small></span></>}
@@ -1890,6 +1920,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   징병 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} (1명당 {draftCost(selCastle, game)}금)
                   <Slider min={0} max={draftMax14(game, selCastle)} step={1000} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={(v) => setDraftAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <button disabled={draftAmt < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 징병</button>
+                  {(() => { const mm = mercMax14(game, selCastle); return <button className="sm" style={{ marginLeft: 6 }} disabled={playing || mm < 1000} title={`인구와 상관없이 금으로 병사를 삼 — 1명당 ${mercCost(selCastle, game)}금(징병의 2배), 이 성에서 순마다 ${fmtTroops(Math.round((2000 + (selCastle.pop || 0) * 100) / 1000) * 1000)}명까지`} onClick={() => act((s) => hireMerc14(s, selCastle.id, mm))}>💰 용병 {fmtTroops(mm)}</button>; })()}
                   
                   <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
                     <b>🚚 병력 받기</b> <small className="muted">장수 없이 내 다른 성에서 이 성으로 · 수송대는 내 땅 길로 하루 1.5칸</small>
@@ -1945,7 +1976,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 {selUnit.nation === pid && gs.length > 1 && <button className="sm" disabled={playing} title="이 장수를 떼어 병력을 나눠 옆 칸에 세움" onClick={() => act((s) => splitUnit(s, grid, selUnit.id, g.id))}>✂️ 나누기</button>}</div>)}
             </div>
             <div className="kv">
-              <span>병력</span><span>{fmtTroops(selUnit.troops)} / {fmtTroops(selUnit.max)}</span>
+              <span>병력</span><span>{selUnit.nation !== pid && troopsHidden(game) && !sightOf(game, grid)[selUnit.tile] ? '? (시야 밖)' : `${fmtTroops(selUnit.troops)} / ${fmtTroops(selUnit.max)}`}</span>
               <span>사기 (파란 막대)</span><span>{Math.round(selUnit.morale)} <small className="muted">5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일</small></span>
               <span>공·방</span><span>{Math.round(st.atk)} · {Math.round(st.def)}{selUnit.siege ? ' · ⚙️ 공성병기' : ''}</span>
               <span>전법</span><span>{gs.map(tacticName).filter(Boolean).join(', ') || '없음'}</span>
@@ -2135,6 +2166,19 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
           {tab === 'people' && (
             <div className="card" style={{ fontSize: 13 }}>
+              {(() => {
+                const cand = Object.values(game.generals).filter((g) => g.tried !== game.turn && !isRuler(g) && ((g.status === 'free' && game.castles[g.castle]?.owner === pid) || (g.status === 'prisoner' && g.captor === pid)) && recruitChance(game, g, pid, g.status === 'free' ? g.castle : undefined) >= 0.01);
+                return (
+                  <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span className="muted">이번 순 설득할 수 있는 재야·포로 <b style={{ color: 'var(--text)' }}>{cand.length}명</b></span>
+                    <button className="primary sm" disabled={playing || !cand.length} title="내 성에 있는 재야 장수와 내 포로 모두에게 한 번씩 등용을 권합니다 (사람마다 순에 한 번)" onClick={() => act((s) => {
+                      let tried = 0; const got = [];
+                      for (const g of cand) { const r = recruit(s, g.id, pid); if (r.ok !== false) { tried++; if (s.generals[g.id].status === 'active' && s.generals[g.id].nation === pid) got.push(g.name); } }
+                      return { ok: tried > 0, msg: `${tried}명 설득 → ${got.length ? `${got.length}명 등용 (${got.slice(0, 5).join('·')}${got.length > 5 ? ' 등' : ''})` : '모두 거절'}` };
+                    })}>⭐ 재야·포로 모두 등용</button>
+                  </div>
+                );
+              })()}
               <b>⛓️ 포로</b>
               {!myPrisoners.length && <div className="muted">없음</div>}
               {myPrisoners.map((g) => (
@@ -2278,6 +2322,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.4); }}>＋</button>
             <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.4); }}>－</button>
             <button className="h14-menu" title="세력·외교·인재" onClick={() => { setSel(null); setSheet(true); }}>📋</button>
+            {report && <button title="지난 순 결과 다시 보기" disabled={playing} onClick={() => setReportOpen((v) => !v)}>📊</button>}
           </div>
           {placeFort && <div className="map-hint">{FORTS[placeFort.kind].icon} {game.castles[placeFort.cid]?.name}에서 4칸 안, 내 땅을 누르면 {FORTS[placeFort.kind].name}을(를) 짓습니다 <button className="hint-clear" onClick={() => setPlaceFort(null)}>✕ 취소</button></div>}
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
@@ -2290,7 +2335,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <div className="days-step">
               <button className="sm" disabled={playing || nDays <= 1} title="진행할 날 수 줄이기" onClick={() => setNDays((v) => Math.max(1, v - 1))}>－</button>
               <button className="primary end-turn" disabled={(playing && (!skipWait.current || !!duel || !!thinking)) || !!game.over} onClick={() => runTurn(nDays)}>
-                {playing ? '⏳ 진행 중' : <>{nDays === 1 ? '하루' : `${nDays}일`} 진행 ▶ <span className="lbl-day">{game.day + 1}{nDays > 1 ? `~${((game.day + nDays - 1) % DAYS) + 1}` : ''}/{DAYS}일</span></>}
+                {playing ? '⏳ 진행 중' : (() => {
+                  const endD = game.day + nDays, over = endD > DAYS;
+                  return <><span>{nDays === 1 ? '하루' : `${nDays}일`} 진행 ▶ <span className="lbl-day">{over ? `다음 순 ${endD - DAYS}일까지` : `${endD}일까지`}</span></span>
+                    <span className="day-strip" aria-hidden>{Array.from({ length: DAYS }, (_, i) => <i key={i} className={i < game.day ? 'past' : i < Math.min(DAYS, endD) ? 'go' : ''} />)}{over && <b className="go-next">+{endD - DAYS}</b>}</span></>;
+                })()}
               </button>
               <button className="sm" disabled={playing || nDays >= DAYS} title="진행할 날 수 늘리기 (최대 10일)" onClick={() => setNDays((v) => Math.min(DAYS, v + 1))}>＋</button>
             </div>
@@ -2361,40 +2410,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </details>
             );
           })()}
-          {report && !playing && (() => {
-            const S = report.sum, sg = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±');
-            const dv = (a, b, f) => <b className={b - a > 0 ? 'up' : b - a < 0 ? 'down' : ''}>{sg(b - a)}{f(Math.abs(b - a))}</b>;
-            return (
-              <div className="h14-report">
-                <div className="row" style={{ justifyContent: 'space-between' }}><b>📊 {S ? `${S.turn}순 결과` : '이번 순 소식'}</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
-                {S && (
-                  <div className="rep-grid">
-                    <span>💰 금</span><span>{fmtGold(S.gold[2])} {dv(S.gold[0], S.gold[2], fmtGold)}</span>
-                    <small>{S.full ? <>명령에 씀 {sg(S.gold[1] - S.gold[0])}{fmtGold(Math.abs(S.gold[1] - S.gold[0]))} · </> : null}정산 {sg(S.gold[2] - S.gold[1])}{fmtGold(Math.abs(S.gold[2] - S.gold[1]))}</small>
-                    <span>🌾 식량</span><span>{fmtGold(S.food[2])} {dv(S.food[0], S.food[2], fmtGold)}</span>
-                    <small>{S.full ? <>순 동안 {sg(S.food[1] - S.food[0])}{fmtGold(Math.abs(S.food[1] - S.food[0]))} · </> : null}정산 {sg(S.food[2] - S.food[1])}{fmtGold(Math.abs(S.food[2] - S.food[1]))}</small>
-                    <span>⚔️ 병력</span><span>{fmtTroops(S.troops[2])} {dv(S.troops[0], S.troops[2], fmtTroops)}</span>
-                    <small>출진 {fmtTroops(S.field)} · 전투 손실 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} · 적에게 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))}</small>
-                    <span>🏯 성</span><span>{S.cities}곳</span>
-                    <small>{S.gained.length ? <span className="up">얻음 {S.gained.join('·')}</span> : null}{S.gained.length && S.lost.length ? ' · ' : null}{S.lost.length ? <span className="down">잃음 {S.lost.join('·')}</span> : null}{!S.gained.length && !S.lost.length ? '변화 없음' : null}</small>
-                  </div>
-                )}
-                {S?.rows.length ? (
-                  <details className="rep-battles" open={S.rows.length <= 3}>
-                    <summary>⚔️ 전투 {S.rows.length}건 (아군 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} / 적 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))})</summary>
-                    {S.rows.slice(0, 12).map((r, i) => (
-                      <div key={i} className={`rep-b ${r.win ? 'win' : 'lose'}`}>
-                        <div><b>{r.title}</b> <small>{r.days}일</small></div>
-                        <div>적 −{fmtTroops(r.foeLoss)} / 아군 −{fmtTroops(r.myLoss)}{r.siege && r.wall ? ` · 성벽 −${Math.round(r.wall)}` : ''}</div>
-                        <small>{r.mine ? '우리가 친 힘' : '적이 친 힘'}: {r.why.join(' · ')}</small>
-                      </div>
-                    ))}
-                  </details>
-                ) : null}
-                {report.news.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
-              </div>
-            );
-          })()}
+
           </div>
           {!playing && !game.over && game.inbox?.length > 0 && peek && (() => {
             const n = game.nations[game.inbox[0].from];
@@ -2423,10 +2439,49 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
             );
           })()}
+          {report && reportOpen && !playing && !game.over && !game.inbox?.length && !game.eventsQ?.length && (() => {
+            const S = report.sum, sg = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±');
+            const dv = (a, b, f) => <b className={b - a > 0 ? 'up' : b - a < 0 ? 'down' : ''}>{sg(b - a)}{f(Math.abs(b - a))}</b>;
+            return (
+              <div className="h14-turnrep" onClick={(e) => e.target === e.currentTarget && setReportOpen(false)}><div className="h14-report">
+                <div className="row" style={{ justifyContent: 'space-between' }}><b>📊 {S ? `${S.turn}순 결과` : '이번 순 소식'}</b><button className="sm" onClick={() => setReportOpen(false)}>✕</button></div>
+                {S && (
+                  <div className="rep-grid">
+                    <span>💰 금</span><span>{fmtGold(S.gold[2])} {dv(S.gold[0], S.gold[2], fmtGold)}</span>
+                    <small>{S.full ? <>명령에 씀 {sg(S.gold[1] - S.gold[0])}{fmtGold(Math.abs(S.gold[1] - S.gold[0]))} · </> : null}정산 {sg(S.gold[2] - S.gold[1])}{fmtGold(Math.abs(S.gold[2] - S.gold[1]))}</small>
+                    <span>🌾 식량</span><span>{fmtGold(S.food[2])} {dv(S.food[0], S.food[2], fmtGold)}</span>
+                    <small>{S.full ? <>순 동안 {sg(S.food[1] - S.food[0])}{fmtGold(Math.abs(S.food[1] - S.food[0]))} · </> : null}정산 {sg(S.food[2] - S.food[1])}{fmtGold(Math.abs(S.food[2] - S.food[1]))}</small>
+                    <span>⚔️ 병력</span><span>{fmtTroops(S.troops[2])} {dv(S.troops[0], S.troops[2], fmtTroops)}</span>
+                    <small>출진 {fmtTroops(S.field)} · 전투 손실 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} · 적에게 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))}</small>
+                    <span>🏯 성</span><span>{S.cities}곳</span>
+                    <small>{S.gained.length ? <span className="up">얻음 {S.gained.join('·')}</span> : null}{S.gained.length && S.lost.length ? ' · ' : null}{S.lost.length ? <span className="down">잃음 {S.lost.join('·')}</span> : null}{!S.gained.length && !S.lost.length ? '변화 없음' : null}</small>
+                  </div>
+                )}
+                {S?.rows.length ? (
+                  <details className="rep-battles" open={S.rows.length <= 3}>
+                    <summary>⚔️ 전투 {S.rows.length}건 (아군 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} / 적 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))})</summary>
+                    {S.rows.slice(0, 12).map((r, i) => (
+                      <div key={i} className={`rep-b ${r.win ? 'win' : 'lose'}`}>
+                        <div><b>{r.title}</b> <small>{r.days}일</small></div>
+                        <div>적 −{fmtTroops(r.foeLoss)} / 아군 −{fmtTroops(r.myLoss)}{r.siege && r.wall ? ` · 성벽 −${Math.round(r.wall)}` : ''}</div>
+                        <small>{r.mine ? '우리가 친 힘' : '적이 친 힘'}: {r.why.join(' · ')}</small>
+                      </div>
+                    ))}
+                  </details>
+                ) : null}
+                {report.news.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
+                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}><button className="primary sm" onClick={() => setReportOpen(false)}>확인</button></div>
+              </div></div>
+            );
+          })()}
           {game.over && (
             <div className="h14-over">
               {game.over.winner === pid ? '🏆 천하통일!' : game.over.lost ? '💀 멸망' : `${game.nations[game.over.winner]?.name} 천하통일`}
-              <div><button onClick={onExit}>메인 화면으로</button></div>
+              {!game.over.lost && !game.over.final && <div className="muted" style={{ fontSize: 13, fontWeight: 'normal' }}>성의 80%를 차지했습니다. 남은 나라까지 계속 싸울 수도 있습니다.</div>}
+              <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
+                {!game.over.lost && !game.over.final && <button className="primary" onClick={() => act((s) => { s.keepPlaying = { ...s.over, turn: s.turn }; s.over = null; return { ok: true, msg: '계속 진행합니다 — 남은 나라를 모두 꺾으면 끝납니다' }; })}>▶ 계속 진행</button>}
+                <button onClick={onExit}>메인 화면으로</button>
+              </div>
             </div>
           )}
         </div>
