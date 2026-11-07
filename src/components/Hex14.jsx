@@ -5,7 +5,7 @@ import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitS
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
-import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
+import { ROLES, jobGen, autoJobs, isWarrior, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { tlabel, tdesc, TIER_GOLD, TIER_NAME } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
@@ -1809,7 +1809,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 장수 카드: 1줄 이름(+담당), 2줄 충성·능력치, 3줄 특성·전법
   const GenCard = ({ g, loyal = true }) => { const tn = tacticName(g); return (
     <div className="gen-main">
-      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} /></div>
+      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}{isWarrior(g) && <span className="mil-tag" title="무관: 내정 담당보다 출진 우선 (자동 배치·장수 나누기에서)">⚔무관</span>}<Job g={g} /></div>
       <div className="gen-line"><Stats g={g} traits={false} /></div>
       {((g.traits || []).length > 0 || tn) && <div className="gen-tags"><Traits g={g} />{tn && <span className="tac" title="전법">「{tn}」</span>}</div>}
     </div>); };
@@ -2140,7 +2140,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6 }}>
                 <button className="sm" disabled={playing || me.gold < rewardCost(game, pid)} title="충성 35 아래면 다른 나라로 떠날 수 있습니다. 금이 바닥나면 충성이 떨어집니다." onClick={() => act((s) => rewardAll(s, pid))}>🎁 전체 포상 (금 {fmtGold(rewardCost(game, pid))}, 충성 +12)</button>
-                <button className="sm" disabled={playing || !spreadPlan.length} title="장수가 몰린 성에서 모자란 성으로 보냅니다 (전선 성 4명·후방 3명 목표, 군주·담당관은 그대로). 누르면 어디서 어디로 가는지 먼저 보여 줍니다" onClick={spreadGens}>👥 장수 나누기{spreadPlan.length ? ` (${spreadPlan.length}명)` : ' (고르게 있음)'}</button>
+                <button className="sm" disabled={playing || !spreadPlan.length} title="장수가 몰린 성에서 모자란 성으로 보냅니다 (전선 성 4명·후방 3명 목표, 군주·담당관은 그대로). 무관(무력 75 이상, 또는 무력이 정치보다 10 넘게 높음)은 전선 성으로만, 후방 성에는 문관만 보냅니다. 누르면 어디서 어디로 가는지 먼저 보여 줍니다" onClick={spreadGens}>👥 장수 나누기{spreadPlan.length ? ` (${spreadPlan.length}명)` : ' (고르게 있음)'}</button>
                 {(() => { const off = game.castles.filter((c) => c.owner === pid && c.kind !== 'pass' && !c.auto); return <button className="sm" disabled={playing || !off.length} title="모든 내 성의 농업·상업·징병 담당을 머무는 장수 중에서 알아서 고르게 합니다 (새로 얻는 성은 성마다 따로 켬). 상업·농업은 누구든 맡으면 상한까지 오르고, 징병은 통솔이 높을수록 자원병이 많습니다" onClick={() => act((s) => { let k = 0; for (const c of s.castles) if (c.owner === pid && c.kind !== 'pass' && !c.auto) { c.auto = true; autoJobs(s, c); k++; } return { ok: k > 0, msg: `${k}개 성: 업무를 알아서 맡깁니다` }; })}>👔 모든 성 업무 알아서{off.length ? ` (${off.length}곳)` : ' (모두 켜짐)'}</button>; })()}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>

@@ -355,15 +355,20 @@ export function execute(s, gid) {
 }
 
 // ── 담당관: 자동이면 성에 있는 장수 중 정치 높은 순으로 농업·상업, 통솔 높은 장수를 징병에 ──
+// 무관: 무력 75 이상이거나 무력이 정치보다 10 넘게 높은 장수 — 싸움에 나가야 하니 내정 담당은 문관이 먼저 맡음
+export const isWarrior = (g) => !!g && !g.ruler && (g.war >= 75 || g.war > g.pol + 10);
 export function autoJobs(s, c) {
   const gs = Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active' && g.nation === c.owner);
-  const left = gs.slice().sort((a, b) => b.pol - a.pol);
   c.jobs = { farm: null, trade: null, draft: null };
   if (c.kind === 'pass') return;
-  const take = (id) => { const i = left.findIndex((g) => g.id === id); if (i >= 0) left.splice(i, 1); return id; };
-  if (left.length >= 3) c.jobs.draft = take(left.slice().sort((a, b) => b.lead - a.lead)[0].id);
-  if (left[0]) c.jobs.farm = take(left[0].id);
-  if (left[0]) c.jobs.trade = take(left[0].id);
+  // 문관(군주 포함) 먼저, 문관이 없을 때만 무관 — 무관 중에서는 무력이 낮은 사람부터
+  const civ = gs.filter((g) => !isWarrior(g)), mil = gs.filter((g) => isWarrior(g)).sort((a, b) => a.war - b.war);
+  const left = [...civ, ...mil];
+  // 문관이 남았으면 그중 그 일에 맞는 사람, 무관만 남았으면 무력이 가장 낮은 무관 (센 무관은 출진용으로 비워 둠. 담당이어도 출진은 할 수 있음)
+  const pick = (key) => { if (!left.length) return null; const civL = left.filter((g) => !isWarrior(g)); const g = civL.length ? civL.sort((a, b) => b[key] - a[key])[0] : left.slice().sort((a, b) => a.war - b.war)[0]; left.splice(left.indexOf(g), 1); return g.id; };
+  c.jobs.farm = pick('pol');
+  c.jobs.trade = pick('pol');
+  c.jobs.draft = pick('lead');
 }
 
 export const jobGen = (s, c, role) => {

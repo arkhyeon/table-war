@@ -660,16 +660,20 @@ export function planGenSpread(s, grid, pid) {
   const front = new Map(mine.map((c) => [c.id, s.castles.some((x) => x.owner !== null && x.owner !== pid && x.owner >= 0 && enemy(s, pid, x.owner) && grid.dist(x.tile, c.tile) <= R)]));
   const want = (c) => (front.get(c.id) ? 4 : 3);
   const isJob = (c, g) => Object.values(c.jobs || {}).includes(g.id);
+  const mil = (g) => !g.ruler && (g.war >= 75 || g.war > g.pol + 10); // 무관 (hex14gov isWarrior와 같음)
+  // 무관은 전선 성으로만: 전선 성이 무관 2명이 안 되면 무관을, 그 밖엔 문관을 받음. 후방 성은 문관만 받음
   const moves = [];
   const needs = mine.filter((c) => at.get(c.id).length < want(c)).sort((a, b) => (front.get(b.id) - front.get(a.id)) || (at.get(a.id).length - want(a)) - (at.get(b.id).length - want(b)));
   for (const c of needs) {
     let need = want(c) - at.get(c.id).length, guard = 0;
     while (need > 0 && guard++ < 12) {
-      const donors = mine.filter((d) => d !== c && at.get(d.id).length > want(d) && d.troops >= 1500 && at.get(d.id).some((g) => !g.ruler && !isJob(d, g))).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile));
+      const wantMil = front.get(c.id) && at.get(c.id).filter(mil).length < 2;
+      const ok = (d, g) => !g.ruler && !isJob(d, g) && (wantMil ? mil(g) : !mil(g)) && !(mil(g) && front.get(d.id) && at.get(d.id).filter(mil).length <= 2); // 전선 성의 무관은 2명은 남김
+      let donors = mine.filter((d) => d !== c && at.get(d.id).length > want(d) && d.troops >= 1500 && at.get(d.id).some((g) => ok(d, g))).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile));
       const d = donors[0];
       if (!d) break;
-      const pool = at.get(d.id).filter((g) => !g.ruler && !isJob(d, g));
-      const g = pool.sort((a, b) => (front.get(c.id) ? b.war + b.lead - (a.war + a.lead) : b.pol - a.pol))[0];
+      const pool = at.get(d.id).filter((g) => ok(d, g));
+      const g = pool.sort((a, b) => (wantMil ? b.war + b.lead - (a.war + a.lead) : b.pol - a.pol))[0];
       moves.push({ g: g.id, from: d.id, to: c.id });
       at.set(d.id, at.get(d.id).filter((x) => x !== g)); at.get(c.id).push(g);
       need--;
