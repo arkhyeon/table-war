@@ -1000,7 +1000,10 @@ export function stepDay(s, grid) {
     }
     s.fx.push({ type: 'clash', a: u.tile, b: tgt.tile });
     if (!hits.has(tgt)) hits.set(tgt, []);
-    hits.get(tgt).push({ u, dmg });
+    // 전투 기록 (내 부대가 낀 싸움만): 결과 보고서에서 피해와 그 까닭(능력·특성·사기·지형·협공·전법)을 보여 줌
+    const rec = !s.spectator && (u.nation === s.playerId || tgt.nation === s.playerId) ? { turn: s.turn, day: s.day, a: u.id, an: u.nation, al: leader(s, u)?.name, d: tgt.id, dn: tgt.nation, dl: leader(s, tgt)?.name, terr: tr, ratio: a.atk / d.def, trait: tb, morale: 0.6 + u.morale / 250, tdef: DEF[tr] || 1, tac: tac && tac.kind !== 'guard' ? tac.name : null, dmg: 0, back: 0, pincer: 1 } : null;
+    if (rec) { (s.btl ||= []).push(rec); if (s.btl.length > 120) s.btl.splice(0, s.btl.length - 120); }
+    hits.get(tgt).push({ u, dmg, rec });
   }
   for (const [t, list] of hits) {
     // 협공: 다른 방향에서 함께 치면 한 부대당 +30%
@@ -1013,8 +1016,10 @@ export function stepDay(s, grid) {
     s.fx.push({ type: 'hit', tile: t.tile, amt: Math.round(total), pincer: pincer > 1 });
     // 반격: 맞은 부대가 때린 부대들에게 되갚음 (협공당하면 나눠짐)
     const dt = unitStats(s, t);
-    for (const { u } of list) {
+    const mul = total / Math.max(1e-9, list.reduce((a, x) => a + x.dmg, 0));
+    for (const { u, dmg, rec } of list) {
       const back = (t.troops * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length * (1 - t14(gensOf(s, u.gens), '노련')) / (1 + t14(gensOf(s, u.gens), '매복'));
+      if (rec) { rec.dmg = Math.round(dmg * mul); rec.back = Math.round(back); rec.pincer = pincer; rec.extra = mul / pincer; }
       u.troops -= back;
       u.morale -= (back / Math.max(1, u.troops)) * 30;
       s.fx.push({ type: 'hit', tile: u.tile, amt: Math.round(back) });
@@ -1058,7 +1063,9 @@ export function stepDay(s, grid) {
     // 약소국은 결사 항전: 수비병 피해 −15%
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
-    u.troops -= Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련'));
+    const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련'));
+    u.troops -= sback;
+    if (!s.spectator && (u.nation === s.playerId || c.owner === s.playerId)) { (s.btl ||= []).push({ turn: s.turn, day: s.day, siege: true, a: u.id, an: u.nation, al: leader(s, u)?.name, c: c.id, dn: c.owner, cn: c.name, walled, wall: Math.round(wall), dmg: Math.round(kill), back: Math.round(sback), ratio: a.atk / 100, guard: guardT, engine: !!u.siege }); if (s.btl.length > 120) s.btl.splice(0, s.btl.length - 120); }
     u.morale -= walled ? 0.5 : 0;
     s.fx.push({ type: 'clash', a: u.tile, b: c.tile }, { type: 'hit', tile: c.tile, amt: Math.round(kill), wall: walled });
     if (c.troops <= 0) capture(s, grid, c, u);

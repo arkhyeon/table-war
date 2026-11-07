@@ -320,7 +320,7 @@ details.more > .kv { margin-top: 6px; }
 .h14-panel select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 3px; }
 .h14-menu { display: none; }
 @media (max-width: 760px) { .h14-menu { display: block; } .map-hint .h14-menu { display: inline-block; } }
-.h14-report { position: absolute; left: 10px; top: 10px; width: min(380px, calc(100% - 70px)); max-height: 40%; overflow: auto; background: #15171bee; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; z-index: 6; display: flex; flex-direction: column; gap: 3px; }
+.h14-report { position: absolute; left: 10px; top: 10px; width: min(380px, calc(100% - 70px)); max-height: 58%; overflow: auto; background: #15171bee; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 12px; z-index: 6; display: flex; flex-direction: column; gap: 3px; }
 .duel { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 45%, #4a2410ee, #000f 75%); z-index: 12; color: #fff; gap: 14px; cursor: pointer; overflow: hidden; animation: duelIn 0.35s ease-out; }
 .duel-stage { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; }
 .duel-stage.shake { animation: duelShake 0.45s 0.35s; }
@@ -583,3 +583,14 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 @keyframes thinkIn { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translateX(-50%); } }
 .trait.open { white-space: normal; }
 .trait-desc { display: block; font-style: normal; font-weight: 500; font-size: 11px; margin-top: 2px; color: var(--text); white-space: normal; }
+.h14-report .rep-grid { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 1px; align-items: baseline; }
+.h14-report .rep-grid small { grid-column: 2; color: var(--muted, #9aa); font-size: 11px; margin-bottom: 3px; }
+.h14-report .up { color: #8fe08a; }
+.h14-report .down { color: #ffb4a8; }
+.h14-report .rep-battles summary { cursor: pointer; font-weight: 600; margin: 3px 0; }
+.h14-report .rep-b { border-left: 3px solid #8fe08a; padding: 2px 0 2px 6px; margin: 3px 0; }
+.h14-report .rep-b.lose { border-left-color: #ff8a7a; }
+.h14-report .rep-b small { color: var(--muted, #9aa); font-size: 11px; display: block; }
+.days-step { display: flex; align-items: center; gap: 4px; }
+.days-step > button.sm { background: var(--glass); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 9px 11px; border-radius: 12px; font-size: 15px; min-width: 38px; }
+@media (max-width: 760px) { .days-step { flex: 1; } .days-step .end-turn { flex: 1; } }

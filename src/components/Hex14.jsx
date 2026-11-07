@@ -578,6 +578,54 @@ function DuelView({ d, game, pid, onSkip }) {
   );
 }
 
+// ── 결과 보고서: 순 시작·정산 전·정산 후 세 번 재서 돈·병력·성 변화와 전투 내역을 보여 줌 ──
+const tally = (s, pid) => ({
+  turn: s.turn,
+  gold: s.nations[pid].gold,
+  food: s.nations[pid].food,
+  troops: s.castles.reduce((a, c) => a + (c.owner === pid ? c.troops : 0), 0) + s.units.reduce((a, u) => a + (u.nation === pid ? u.troops : 0), 0),
+  field: s.units.reduce((a, u) => a + (u.nation === pid ? u.troops : 0), 0),
+  owned: s.castles.filter((c) => c.owner === pid && c.kind !== 'pass').map((c) => c.id),
+});
+const xf = (v) => `×${v.toFixed(2)}`;
+// 전투 기록을 (공격 부대, 대상)마다 묶음: 며칠 싸웠는지, 서로 입힌 피해, 가장 크게 친 날의 까닭
+export function battleRows(s, pid, turn) {
+  const m = new Map();
+  for (const r of s.btl || []) {
+    if (r.turn !== turn) continue;
+    const k = r.siege ? `s${r.a}:${r.c}` : `${r.a}:${r.d}`;
+    const e = m.get(k) || { ...r, days: 0, dmg: 0, back: 0, wall: 0, best: r };
+    e.days++; e.dmg += r.dmg; e.back += r.back; e.wall += r.wall || 0;
+    if (r.dmg >= e.best.dmg) e.best = r;
+    m.set(k, e);
+  }
+  return [...m.values()].map((e) => {
+    const mine = e.an === pid, b = e.best;
+    const why = [];
+    if (e.siege) {
+      why.push(`능력 ${xf(b.ratio)}`);
+      why.push(b.walled ? '성벽이 남아 수비병 피해 ×0.35·반격 ×1.4' : '성벽 무너짐 → 수비병 피해 ×1.8');
+      if (b.guard > 1.001) why.push(`수성 특성 ÷${b.guard.toFixed(2)}`);
+      if (b.engine) why.push('공성병기(성벽 ×5)');
+    } else {
+      why.push(`능력(공/방) ${xf(b.ratio)}`);
+      if (Math.abs(b.trait - 1) > 0.005) why.push(`특성 ${xf(b.trait)}`);
+      why.push(`사기 ${xf(b.morale)}`);
+      if (b.tdef > 1.001) why.push(`${TERRAIN_NAME[b.terr] || '지형'} 방어 ÷${b.tdef.toFixed(2)}`);
+      if (b.pincer > 1) why.push(`협공 ${xf(b.pincer)}`);
+      if (b.tac) why.push(`전법 「${b.tac}」`);
+      if (b.extra && Math.abs(b.extra - 1) > 0.01) why.push(b.extra < 1 ? `맞는 쪽 방진·진지 ${xf(b.extra)}` : `맞는 쪽이 공성병기를 끌거나 패주 중 ${xf(b.extra)}`);
+    }
+    const foeN = s.nations[mine ? e.dn : e.an]?.name || '';
+    const title = e.siege
+      ? (mine ? `${e.al} 부대 → ${e.cn} 공성` : `${foeN} ${e.al} 부대가 ${e.cn}을(를) 공격`)
+      : (mine ? `${e.al} → ${foeN} ${e.dl}` : `${foeN} ${e.al} → 아군 ${e.dl}`);
+    // 내 쪽 피해 / 적 피해
+    const myLoss = mine ? e.back : e.dmg, foeLoss = mine ? e.dmg : e.back;
+    return { title, mine, days: e.days, myLoss, foeLoss, wall: e.wall, why, siege: !!e.siege, win: foeLoss >= myLoss };
+  }).sort((a, b) => b.myLoss + b.foeLoss - (a.myLoss + a.foeLoss));
+}
+
 export default function Hex14({ world, game, setGame, onExit }) {
   const grid = useMemo(() => buildGrid(world), [world]);
   const polar = useMemo(() => { const bb = getScenario(world.scenarioId)?.bbox; return !!bb && bb[2] - bb[0] >= 359; }, [world]);
@@ -619,6 +667,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   useEffect(() => { try { localStorage.setItem('h14.orders', ordersOpen ? '1' : '0'); } catch { /* 무시 */ } }, [ordersOpen]);
   const [sendAmt, setSendAmt] = useState(5000);
   const [donorsAll, setDonorsAll] = useState(null);
+  // 한 번에 진행할 날 수 (1~10일), 이 기기에만 기억
+  const [nDays, setNDaysRaw] = useState(() => { try { return Math.max(1, Math.min(10, +localStorage.getItem('h14-ndays') || 1)); } catch { return 1; } });
+  const setNDays = (f) => setNDaysRaw((v) => { const n = typeof f === 'function' ? f(v) : f; try { localStorage.setItem('h14-ndays', String(n)); } catch {} return n; });
   const [traitOpen, setTraitOpen] = useState(null); // 눌러서 펼친 특성 (장수id:특성) // 병력 받기: 보낼 성 목록을 모두 펼친 성
   const [aud, setAud] = useState(audioOpt());
   // 처음 누를 때 소리를 켬 (브라우저 규칙)
@@ -1467,28 +1518,50 @@ export default function Hex14({ world, game, setGame, onExit }) {
     return () => clearTimeout(id);
   }, [game, playing]);
   const runTurnRef = useRef(null);
-  const runTurn = (toEnd = false) => {
+  const turnStart = useRef(null);
+  useEffect(() => { if (game.day === 0 && turnStart.current?.turn !== game.turn) turnStart.current = tally(game, pid); }, [game]);
+  // mode: false = 하루, 숫자 n = n일(순이 끝나면 정산하고 다음 순으로 이어 감), true = 이번 순 끝까지
+  const multiRef = useRef(false);
+  const runTurn = (mode = false) => {
     if (game.over) return;
-    // 하루씩 진행 중에 또 누르면: 지금 날의 남은 움직임을 건너뛰고 바로 다음 날로
-    if (playing) { if (!toEnd && skipWait.current && !duel) { pendingNext.current = true; skipWait.current(); } return; }
+    // 진행 중에 또 누르면: 지금 날의 남은 움직임을 건너뜀 (하루 진행이면 바로 다음 날로)
+    if (playing) { if (mode !== true && skipWait.current && !duel) { if (!multiRef.current) pendingNext.current = true; skipWait.current(); } return; }
+    const toEnd = mode === true || mode > 1;
+    let left = mode === true ? Infinity : Math.max(1, Math.min(DAYS, +mode || 1));
+    multiRef.current = toEnd;
     if (game.inbox?.length) { setPeek(false); return; } // 사신에게 먼저 답해야 진행
     thinkT0.current = performance.now();
     const job = spec.current && spec.current.base === game ? spec.current : startSpec(game);
-    const s = job.s;
+    let s = job.s;
     const startN = game.logN || 0;
     setPlaying(true);
     setReport(null);
     const finish = (snap) => {
       // 순이 끝남: 정산 후 이번 순 소식
       snap.fx = [];
+      const t0 = turnStart.current?.turn === snap.turn ? turnStart.current : null;
+      const pre = tally(snap, pid);
+      const rows = battleRows(snap, pid, snap.turn);
       endTurn14(snap, grid);
+      const post = tally(snap, pid);
+      turnStart.current = post;
       sfx('gong');
       const news = snap.log.filter((l) => (l.n || 0) > startN && l.nations?.includes(pid) && ['capture', 'battle', 'diplo', 'bad'].includes(l.kind) && !l.text.startsWith('🔥')).map((l) => l.text);
       for (const c of snap.castles.filter((x) => x.owner === pid)) {
         const foes = snap.units.filter((u) => enemy(snap, pid, u.nation) && ((u.order?.kind === 'castle' && u.order.id === c.id) || grid.dist(u.tile, c.tile) <= 3));
         if (foes.length) news.push(`⚠️ ${[...new Set(foes.map((u) => snap.nations[u.nation].name))].join('·')}군 ${foes.length}부대(${fmtTroops(foes.reduce((a, u) => a + u.troops, 0))})가 ${c.name}(수비 ${fmtTroops(c.troops)})을 노립니다`);
       }
-      setReport(news.length ? news.slice(0, 8) : null);
+      const start = t0 || pre;
+      const had = new Set(start.owned), now = new Set(post.owned);
+      const sum = snap.spectator ? null : {
+        turn: pre.turn, full: !!t0,
+        gold: [start.gold, pre.gold, post.gold], food: [start.food, pre.food, post.food], troops: [start.troops, pre.troops, post.troops], field: post.field,
+        gained: start.owned.length ? post.owned.filter((id) => !had.has(id)).map((id) => snap.castles[id].name) : [],
+        lost: start.owned.filter((id) => !now.has(id)).map((id) => snap.castles[id].name),
+        cities: post.owned.length,
+        rows,
+      };
+      setReport(news.length || sum ? { news: news.slice(0, 8), sum } : null);
       return snap;
     };
     const done = (snap) => {
@@ -1534,11 +1607,25 @@ export default function Hex14({ world, game, setGame, onExit }) {
       anim.current = { prev: prevTiles, t0: performance.now(), dur: toEnd ? speed : speed * 0.9, linear: toEnd };
       setGame(snap);
       const endOfTurn = s.day >= DAYS || s.over;
+      left -= 1;
       if (stopIdle && toEnd && !endOfTurn && idleNow.length) {
         later(() => { setDuel(null); done(snap); toast(`⚑ ${idleNow.map((u) => gensOf(s, u.gens)[0]?.name).join('·')} 부대가 도착해 멈췄습니다. 다음 명령을 내리세요 (${DAYS - s.day}일 남음)`); }, Math.max(speed * 0.9, wait));
         return;
       }
-      if (endOfTurn || !toEnd) {
+      // n일 진행이 순을 넘어가면: 정산(보고서)하고 새 순 첫날부터 이어서 (사신이 왔거나 게임이 끝나면 멈춤)
+      if (endOfTurn && left > 0 && mode !== true && !s.over) {
+        later(() => {
+          setDuel(null);
+          const ns = finish(clone(s));
+          if (ns.over || ns.inbox?.length) { done(ns); return; }
+          s = ns;
+          setGame(clone(ns));
+          thinkT0.current = performance.now();
+          stepComputeAsync(s, true, onThink).then((D) => (D ? tick(D) : done(s)));
+        }, Math.max(speed * 0.9, wait));
+        return;
+      }
+      if (endOfTurn || left <= 0) {
         later(() => { setDuel(null); done(endOfTurn ? finish(clone(s)) : snap); }, Math.max(speed * 0.9, wait));
         return;
       }
@@ -2200,9 +2287,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 <span className="lbl-long">({DAYS - game.day}일)</span></button>
-            <button className="primary end-turn" disabled={(playing && (!skipWait.current || !!duel || !!thinking)) || !!game.over} onClick={() => runTurn(false)}>
-              {playing ? '⏳ 진행 중' : <>하루 진행 ▶ <span className="lbl-day">{game.day + 1}/{DAYS}일</span></>}
-            </button>
+            <div className="days-step">
+              <button className="sm" disabled={playing || nDays <= 1} title="진행할 날 수 줄이기" onClick={() => setNDays((v) => Math.max(1, v - 1))}>－</button>
+              <button className="primary end-turn" disabled={(playing && (!skipWait.current || !!duel || !!thinking)) || !!game.over} onClick={() => runTurn(nDays)}>
+                {playing ? '⏳ 진행 중' : <>{nDays === 1 ? '하루' : `${nDays}일`} 진행 ▶ <span className="lbl-day">{game.day + 1}{nDays > 1 ? `~${((game.day + nDays - 1) % DAYS) + 1}` : ''}/{DAYS}일</span></>}
+              </button>
+              <button className="sm" disabled={playing || nDays >= DAYS} title="진행할 날 수 늘리기 (최대 10일)" onClick={() => setNDays((v) => Math.min(DAYS, v + 1))}>＋</button>
+            </div>
           </div>
           {toastMsg && <div className="toast">{toastMsg}</div>}
           {thinking && playing && (() => {
@@ -2270,12 +2361,40 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </details>
             );
           })()}
-          {report && !playing && (
-            <div className="h14-report">
-              <div className="row" style={{ justifyContent: 'space-between' }}><b>📰 이번 순 소식</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
-              {report.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
-            </div>
-          )}
+          {report && !playing && (() => {
+            const S = report.sum, sg = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±');
+            const dv = (a, b, f) => <b className={b - a > 0 ? 'up' : b - a < 0 ? 'down' : ''}>{sg(b - a)}{f(Math.abs(b - a))}</b>;
+            return (
+              <div className="h14-report">
+                <div className="row" style={{ justifyContent: 'space-between' }}><b>📊 {S ? `${S.turn}순 결과` : '이번 순 소식'}</b><button className="sm" onClick={() => setReport(null)}>✕</button></div>
+                {S && (
+                  <div className="rep-grid">
+                    <span>💰 금</span><span>{fmtGold(S.gold[2])} {dv(S.gold[0], S.gold[2], fmtGold)}</span>
+                    <small>{S.full ? <>명령에 씀 {sg(S.gold[1] - S.gold[0])}{fmtGold(Math.abs(S.gold[1] - S.gold[0]))} · </> : null}정산 {sg(S.gold[2] - S.gold[1])}{fmtGold(Math.abs(S.gold[2] - S.gold[1]))}</small>
+                    <span>🌾 식량</span><span>{fmtGold(S.food[2])} {dv(S.food[0], S.food[2], fmtGold)}</span>
+                    <small>{S.full ? <>순 동안 {sg(S.food[1] - S.food[0])}{fmtGold(Math.abs(S.food[1] - S.food[0]))} · </> : null}정산 {sg(S.food[2] - S.food[1])}{fmtGold(Math.abs(S.food[2] - S.food[1]))}</small>
+                    <span>⚔️ 병력</span><span>{fmtTroops(S.troops[2])} {dv(S.troops[0], S.troops[2], fmtTroops)}</span>
+                    <small>출진 {fmtTroops(S.field)} · 전투 손실 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} · 적에게 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))}</small>
+                    <span>🏯 성</span><span>{S.cities}곳</span>
+                    <small>{S.gained.length ? <span className="up">얻음 {S.gained.join('·')}</span> : null}{S.gained.length && S.lost.length ? ' · ' : null}{S.lost.length ? <span className="down">잃음 {S.lost.join('·')}</span> : null}{!S.gained.length && !S.lost.length ? '변화 없음' : null}</small>
+                  </div>
+                )}
+                {S?.rows.length ? (
+                  <details className="rep-battles" open={S.rows.length <= 3}>
+                    <summary>⚔️ 전투 {S.rows.length}건 (아군 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} / 적 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))})</summary>
+                    {S.rows.slice(0, 12).map((r, i) => (
+                      <div key={i} className={`rep-b ${r.win ? 'win' : 'lose'}`}>
+                        <div><b>{r.title}</b> <small>{r.days}일</small></div>
+                        <div>적 −{fmtTroops(r.foeLoss)} / 아군 −{fmtTroops(r.myLoss)}{r.siege && r.wall ? ` · 성벽 −${Math.round(r.wall)}` : ''}</div>
+                        <small>{r.mine ? '우리가 친 힘' : '적이 친 힘'}: {r.why.join(' · ')}</small>
+                      </div>
+                    ))}
+                  </details>
+                ) : null}
+                {report.news.map((t, i) => <div key={i} style={{ color: /잃|무너|사로|⚠️|병량/.test(t) ? '#ffb4a8' : undefined }}>{t}</div>)}
+              </div>
+            );
+          })()}
           </div>
           {!playing && !game.over && game.inbox?.length > 0 && peek && (() => {
             const n = game.nations[game.inbox[0].from];
