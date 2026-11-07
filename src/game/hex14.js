@@ -253,13 +253,28 @@ function pickCities(world, grid, base, tileOwner = null) {
     const dist = new Float32Array(grid.N).fill(Infinity);
     const spread = (src) => { const q = [src]; dist[src] = 0; for (let k = 0; k < q.length; k++) { const x = q[k], dx = dist[x] + kOf[x]; if (dx > gapN * 1.5) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < dist[j]) { dist[j] = dx; q.push(j); } } };
     for (const c of out) spread(c.tile);
+    // 지도·무대 가장자리 쏠림 막기: 가장 먼 빈 곳을 고르면 가장자리(그 너머엔 아무것도 없음)가 늘 가장 멀어 성이 테두리를 따라 한 줄로 늘어섬
+    // → 지도 끝 줄·외지와 맞닿은 칸에서 가까울수록 감점(가장자리에서 간격의 절반), 칸마다 고정된 작은 흔들림을 더해 일렬로 서지 않게 (바닷가는 그대로)
+    const edgeD = new Float32Array(grid.N).fill(Infinity);
+    {
+      const q = [];
+      for (let i = 0; i < grid.N; i++) {
+        if (!grid.passable(i)) continue;
+        const r = (i / grid.cols) | 0, c = i % grid.cols;
+        const border = r <= 1 || r >= grid.rows - 2 || (!grid.wrap && (c <= 1 || c >= grid.cols - 2)) || grid.nb[i].some((j) => grid.outside?.[j]);
+        if (border) { edgeD[i] = 0; q.push(i); }
+      }
+      for (let k = 0; k < q.length; k++) { const x = q[k], dx = edgeD[x] + 1; if (dx > gapN) continue; for (const j of grid.nb[x]) if (grid.passable(j) && dx < edgeD[j]) { edgeD[j] = dx; q.push(j); } }
+    }
+    const edgePen = (i) => Math.max(0, gapN * 0.5 - edgeD[i]);
+    const jit = (i) => -((((i * 2654435761) >>> 0) % 1000) / 1000) * gapN * 0.3; // 0 ~ −0.3칸: 순서만 흔들고 성 수는 늘리지 않음
     for (let it = 0; it < 400; it++) {
-      let bt = -1, bd = gapN;
+      let bt = -1, bd = gapN * 0.9; // 흔들림(평균 −0.15칸)만큼 기준을 낮춰 성 수는 예전과 비슷하게
       for (let i = 0; i < grid.N; i++) {
         if (!grid.passable(i) || grid.terrain[i] === T.PEAK || frozenT[i]) continue;
         // 산지도 성이 없으면 세움 (실제로도 산간 요새·고을이 있었음) — 다만 같은 거리면 평지를 먼저
         const d0 = dist[i] === Infinity ? (csize[comp[i]] >= gapN * gapN * 0.2 ? gapN * 1.5 : 0) : dist[i];
-        const d = grid.terrain[i] === T.MOUNTAIN ? d0 - 0.6 : d0;
+        const d = (grid.terrain[i] === T.MOUNTAIN ? d0 - 0.6 : d0) - (d0 === Infinity ? 0 : edgePen(i) - jit(i));
         if (d > bd) { bd = d; bt = i; }
       }
       if (bt < 0) break;

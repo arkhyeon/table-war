@@ -1764,12 +1764,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 할 일: 충성이 낮은 장수
     const low = Object.values(g.generals).filter((x) => x.nation === pid && x.status === 'active' && !x.ruler && loyalOf(x) < 40);
     if (low.length) out.push({ id: 'loy', sev: low.some((x) => loyalOf(x) < 30) ? 'danger' : 'todo', icon: '💔', title: `충성 낮은 장수 ${low.length}명 (떠날 수 있음)`, sub: low.slice(0, 4).map((x) => `${x.name} 충${loyalOf(x)}`).join(' · '), act: { label: `전체 포상 ${fmtGold(rewardCost(g, pid))}`, disabled: me.gold < rewardCost(g, pid), fn: () => act((s) => rewardAll(s, pid)) } });
-    // 알림: 징병 여유 (금이 남고 이번 순 징병 안 한 성)
-    const dr = mine.filter((c) => c.kind !== 'pass' && draftMax14(g, c) >= 1000).sort((a, b) => draftMax14(g, b) - draftMax14(g, a));
-    if (dr.length && me.gold >= 30000) {
-      for (const c of dr.slice(0, 3)) out.push({ id: 'dr' + c.id, sev: 'info', icon: '💂', title: `${c.name} 징병 가능 ${fmtTroops(draftMax14(g, c))}`, sub: `금 ${fmtGold(draftMax14(g, c) * draftCost(c, g))} · 이번 순 남은 징병 ${fmtTroops(draftLeft14(g, c))}`, go: goC(c), act: { label: '최대 징병', fn: () => act((s) => draft14(s, c.id, draftMax14(s, s.castles[c.id]))) } });
-      if (dr.length > 3) out.push({ id: 'drmore', sev: 'info', icon: '💂', title: `그 밖에 징병할 수 있는 성 ${dr.length - 3}곳`, sub: '성을 눌러 징병하세요' });
-    }
     return out;
   }, [game, pid, grid]); // eslint-disable-line react-hooks/exhaustive-deps
   // 순이 바뀌면(첫날) 할 일 목록을 저절로 엶
@@ -2514,7 +2508,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           })()}
           {!playing && !game.spectator && !game.over && todoOpen && (() => {
             const T = todos;
-            const groups = [['danger', '🚨 위급'], ['todo', '📝 할 일'], ['info', '💡 알림']];
+            const groups = [['danger', '🚨 위급'], ['todo', '📝 할 일']];
             return (
               <div className="h14-todo" role="dialog" aria-label="할 일 목록">
                 <div className="todo-head">
