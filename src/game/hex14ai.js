@@ -458,9 +458,9 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const budget = (n.gold - floor) * (scope ? 1 : share);
     const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const k = Math.max(1, Math.min(6, hub.length));
-    for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per); if (m >= 500) draft14(s, c.id, m); }
+    for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per, Math.max(0, Math.floor((c.pop - (c.pop0 || c.pop) * (threatNear(s, grid, c) > 0 ? 0.2 : 0.4)) * 1000 / 100) * 100)); if (m >= 500) draft14(s, c.id, m); } // 위협받는 성은 인구 20%까지, 아니면 40%까지만
     // 그래도 금이 넉넉하면(예비의 3배 넘게) 장수 없는 후방 성에서도 뽑아 둠 — 쌓아 두지 않고 병사로 바꿈 (병력 받기로 앞으로 보냄)
-    if (n.gold > floor * 3) { const rest = mine.filter((c) => c.kind !== 'pass' && !hub.slice(0, 6).includes(c) && draftMax14(s, c) >= 1000).sort((a, b) => b.pop - a.pop); for (const c of rest) { if (n.gold < floor * 2) break; draft14(s, c.id, Math.min(draftMax14(s, c), Math.floor((n.gold - floor * 2) / draftCost(c, s) / 1000) * 1000)); } }
+    if (n.gold > floor * 3) { const rest = mine.filter((c) => c.kind !== 'pass' && !hub.slice(0, 6).includes(c) && draftMax14(s, c) >= 1000 && c.pop > (c.pop0 || c.pop) * 0.6).sort((a, b) => b.pop - a.pop); for (const c of rest) { if (n.gold < floor * 2) break; draft14(s, c.id, Math.min(draftMax14(s, c), Math.floor((c.pop - (c.pop0 || c.pop) * 0.6) * 1000 / 1000) * 1000, Math.floor((n.gold - floor * 2) / draftCost(c, s) / 1000) * 1000)); } }
   }
   if (!scope && !daily) aiBuild(s, grid, nid, (c) => threatNear(s, grid, c), floor, 2);
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)

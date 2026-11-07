@@ -282,7 +282,7 @@ export function recruit(s, gid, nid, rng = Math.random) {
   if (!g) return { ok: false, msg: '없는 장수입니다.' };
   if (g.tried === s.turn) return { ok: false, msg: '이번 턴에는 이미 설득했습니다.' };
   if (isRuler(g)) return { ok: false, msg: `${g.name}은(는) 한 나라의 군주였던 사람이라 신하가 되지 않습니다.` };
-  const city = g.status === 'free' ? s.castles[g.castle] : s.castles.find((c) => c.owner === nid);
+  const city = g.status === 'free' ? s.castles[g.castle] : s.castles[g.heldAt]?.owner === nid ? s.castles[g.heldAt] : s.castles.find((c) => c.owner === nid); // 포로는 갇힌 성(잡힌 곳 가까운 성)에서 일함
   if (!city || (g.status === 'free' && city.owner !== nid)) return { ok: false, msg: '내 도시에 있는 재야만 등용할 수 있습니다.' };
   g.tried = s.turn;
   if (rng() >= recruitChance(s, g, nid, g.status === 'free' ? city.id : undefined)) return { ok: true, msg: `${g.name}이(가) 거절했습니다.` };

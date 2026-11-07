@@ -163,7 +163,7 @@ export function maybeDuel(s, u, t, rng) {
     fate += ` ${Lo.name}이(가) 목이 베였습니다!`;
   } else if (big && rng() < 0.25 && !t14([Lo], '무쌍') && !s.nations[W.nation]?.outlaw) {
     // 크게 지면 사로잡힘
-    Lo.status = 'prisoner'; Lo.captor = W.nation; Lo.castle = null; Lo.unit = null;
+    Lo.status = 'prisoner'; Lo.captor = W.nation; Lo.castle = null; Lo.unit = null; Lo.capTile = wu.tile; Lo.heldAt = null;
     lu.gens = lu.gens.filter((id) => id !== Lo.id);
     if (!lu.gens.length) lu.morale = 0;
     fate += ` ${Lo.name}이(가) 사로잡혔습니다!`;

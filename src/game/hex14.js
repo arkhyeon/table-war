@@ -45,6 +45,16 @@ export function sightOf(s, grid) {
   sightMemo = { s, key, v };
   return v;
 }
+// 포로가 갇힌 성: 잡힌 자리에서 가장 가까운 잡은 나라의 성 (그 성을 잃으면 다시 가장 가까운 성으로) — 등용하면 그 성에서 일함
+export function heldAtNearest(s, grid) {
+  for (const g of Object.values(s.generals)) {
+    if (g.status !== 'prisoner' || g.captor === null || g.captor === undefined) continue;
+    if (g.heldAt !== null && g.heldAt !== undefined && s.castles[g.heldAt]?.owner === g.captor) continue;
+    const at = g.capTile ?? (g.heldAt != null ? s.castles[g.heldAt]?.tile : null);
+    const c = at !== null && at !== undefined ? nearestCastle(s, grid, at, g.captor) : s.castles.find((x) => x.owner === g.captor);
+    g.heldAt = c ? c.id : null;
+  }
+}
 export function updateSeen(s, grid) {
   if (!fogOn(s) || s.opts?.rememberExplored === false) return;
   if (!(s.seen instanceof Uint8Array) || s.seen.length !== grid.N) s.seen = new Uint8Array(grid.N);
@@ -1148,7 +1158,7 @@ export function stepDay(s, grid) {
     for (const g of gensOf(s, u.gens)) {
       g.unit = null;
       if (s.nations[u.nation]?.outlaw) { g.status = 'gone'; continue; } // 도적 두목은 사로잡지 않음 (그냥 죽음)
-      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + t14(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
+      if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + t14(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; g.capTile = u.tile; g.heldAt = null; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
     if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; }
@@ -1158,6 +1168,7 @@ export function stepDay(s, grid) {
   advanceQueues(s, grid);
   convoysDay(s, grid);
   for (const u of s.units) { u.troops = Math.round(u.troops); u.morale = Math.max(0, Math.min(100, u.morale)); }
+  heldAtNearest(s, grid);
   updateSeen(s, grid);
   for (const c of s.castles) c.troops = Math.max(0, Math.round(c.troops));
 }
@@ -1273,7 +1284,7 @@ function capture(s, grid, c, u) {
     if (g.castle !== c.id || g.nation !== old) continue;
     const home = old === null || old === -1 ? null : nearestCastle(s, grid, c.tile, old);
     if (home && rng() < 0.5) g.castle = home.id;
-    else { g.status = 'prisoner'; g.castle = null; g.captor = u.nation; }
+    else { g.status = 'prisoner'; g.castle = null; g.captor = u.nation; g.heldAt = c.id; }
   }
   log(s, `🏯 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name}이(가) ${c.name}${old !== null && old !== -1 ? `(${s.nations[old].name})` : ''}을(를) 함락했습니다!`, 'capture', [u.nation, old]);
   // 이어서 갈 곳(경유지)이 남은 부대는 수비병만 조금 남기고 계속 진군
@@ -1359,10 +1370,9 @@ export function endTurn14(s, grid) {
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
 }
 
-// 징병: 성에서 금으로 병사를 뽑음 (1명당 10금). 성마다 순에 인구의 20%까지 — 뽑은 1천 명당 인구는 500명만 줄어 (식구는 남음)
-// 순이 바뀌면 다시 뽑을 수 있으니, 금이 넉넉하면 순마다 계속 병사로 바꿀 수 있음 (인구는 뽑지 않으면 다시 늚)
+// 징병: 성에서 금으로 병사를 뽑음 (1명당 10금). 인구가 바닥날 때까지(1천은 남김) 얼마든지 — 뽑은 만큼 인구가 줄고, 인구가 줄면 금 수입도 줄어 듦(바닥나면 절반)
 export const draftCost = (c, s) => (s && hasPolicy(s, c.owner, 'conscript') ? 9 : 10);
-export const draftLeft14 = (s, c) => Math.max(0, Math.floor((c.pop * 1000 * 0.2) / 1000) * 1000 - (c.draftT === s.turn ? c.draftN || 0 : 0));
+export const draftLeft14 = (s, c) => Math.max(0, Math.floor(((c.pop || 0) - 1) * 1000 / 1000) * 1000);
 export const draftMax14 = (s, c) => Math.max(0, Math.min(Math.floor(s.nations[c.owner].gold / draftCost(c, s) / 1000) * 1000, draftLeft14(s, c)));
 export function draft14(s, castleId, amt) {
   const c = s.castles[castleId];
@@ -1371,8 +1381,6 @@ export function draft14(s, castleId, amt) {
   if (amt < 100) return { ok: false, msg: '뽑을 수 없습니다.' };
   n.gold -= amt * draftCost(c, s);
   c.troops += amt;
-  if (c.draftT !== s.turn) { c.draftT = s.turn; c.draftN = 0; }
-  c.draftN += amt;
-  c.pop = Math.max(1, Math.round((c.pop - amt / 2000) * 10) / 10);
+  c.pop = Math.max(1, Math.round((c.pop - amt / 1000) * 10) / 10);
   return { ok: true, msg: `${c.name}에서 ${fmtTroops(amt)} 징병 (금 -${fmtGold(amt * draftCost(c, s))})` };
 }
