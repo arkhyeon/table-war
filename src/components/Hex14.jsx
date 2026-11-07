@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { uiConfirm } from '../dialog.js';
 import { BUILD, versionText } from '../version.js';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, planGenSpread, doGenSpread, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
@@ -1707,6 +1707,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
   );
   const food = me.food ?? 0, use = foodUse(game, pid);
   const turnsToHarvest = (((HARVEST_MONTH * 3 - (game.turn - 1)) % 36) + 36) % 36;
+  // 장수 나누기: 계획을 보여 주고 확인을 받은 뒤 보냄
+  const spreadPlan = useMemo(() => (game.spectator ? [] : planGenSpread(game, grid, pid)), [game, grid, pid]);
+  const spreadGens = async () => {
+    const plan = planGenSpread(gameRef.current, grid, pid);
+    if (!plan.length) return toast('장수가 이미 고르게 있습니다');
+    const by = new Map();
+    for (const m of plan) { const k = `${game.castles[m.from].name} → ${game.castles[m.to].name}`; if (!by.has(k)) by.set(k, []); by.get(k).push(game.generals[m.g].name); }
+    const lines = [...by].map(([k, v]) => `${k}: ${v.join('·')}`);
+    if (!(await uiConfirm(`장수 ${plan.length}명을 보낼까요? (병사 1천씩 데리고 걸어감)\n\n${lines.slice(0, 12).join('\n')}${lines.length > 12 ? `\n… 외 ${lines.length - 12}곳` : ''}`))) return;
+    act((s) => doGenSpread(s, grid, pid, planGenSpread(s, grid, pid)));
+  };
   // 재야·포로 모두 등용 (인재 탭·할 일 목록에서 같이 씀)
   const recruitAll = () => act((s) => {
     let tried = 0; const got = [];
@@ -1766,11 +1777,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
       if (!miss.length) continue;
       out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} 업무 담당 없음`, sub: miss.map((r) => ROLES[r]).join('·') + ' 담당이 비었습니다', go: goC(c), act: { label: '알아서 맡기기', tip: '머무는 장수 중 알맞은 사람에게 맡깁니다 (이 성은 앞으로도 자동)', fn: () => act((s) => { const x = s.castles[c.id]; x.auto = true; autoJobs(s, x); return { ok: true, msg: `${c.name}: 업무를 맡겼습니다` }; }) } });
     }
+    // 할 일: 장수가 한 성에 몰려 있음
+    if (spreadPlan.length >= 2) { const from = new Map(); for (const m of spreadPlan) from.set(m.from, (from.get(m.from) || 0) + 1); const top = [...from].sort((a, b) => b[1] - a[1])[0]; out.push({ id: 'spread', sev: 'todo', icon: '👥', title: `장수가 몰려 있음 — ${spreadPlan.length}명 나눌 수 있음`, sub: `${g.castles[top[0]].name} 등에서 장수가 모자란 성으로`, act: { label: '장수 나누기', fn: spreadGens } }); }
     // 할 일: 충성이 낮은 장수
     const low = Object.values(g.generals).filter((x) => x.nation === pid && x.status === 'active' && !x.ruler && loyalOf(x) < 40);
     if (low.length) out.push({ id: 'loy', sev: low.some((x) => loyalOf(x) < 30) ? 'danger' : 'todo', icon: '💔', title: `충성 낮은 장수 ${low.length}명 (떠날 수 있음)`, sub: low.slice(0, 4).map((x) => `${x.name} 충${loyalOf(x)}`).join(' · '), act: { label: `전체 포상 ${fmtGold(rewardCost(g, pid))}`, disabled: me.gold < rewardCost(g, pid), fn: () => act((s) => rewardAll(s, pid)) } });
     return out;
-  }, [game, pid, grid]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [game, pid, grid, spreadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
   // 순이 바뀌면(첫날) 할 일 목록을 저절로 엶
   const todoTurn = useRef(null);
   useEffect(() => { if (playing || game.spectator || game.day !== 0 || todoTurn.current === game.turn) return; todoTurn.current = game.turn; if (todoAuto && todos.length) setTodoOpen(true); }, [game, playing]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1796,8 +1809,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 장수 카드: 1줄 이름(+담당), 2줄 충성·능력치, 3줄 특성·전법
   const GenCard = ({ g, loyal = true }) => { const tn = tacticName(g); return (
     <div className="gen-main">
-      <div className="gen-top"><b>{g.name}</b><Job g={g} /></div>
-      <div className="gen-line">{loyal && <Loyal g={g} />}<Stats g={g} traits={false} /></div>
+      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} /></div>
+      <div className="gen-line"><Stats g={g} traits={false} /></div>
       {((g.traits || []).length > 0 || tn) && <div className="gen-tags"><Traits g={g} />{tn && <span className="tac" title="전법">「{tn}」</span>}</div>}
     </div>); };
   const SortBar = ({ v, set }) => <div className="gsort" role="group" aria-label="장수 줄 세우기">{GSORT.map(([k, l]) => <button key={k} className={'xs' + (v === k ? ' on' : '')} aria-pressed={v === k} onClick={() => set(k)} title={k === 'loyal' ? '충성 낮은 순' : `${l} 높은 순`}>{l}</button>)}</div>;
@@ -1878,7 +1891,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <label style={{ display: 'block', marginTop: 4 }}>
                     <input type="checkbox" checked={!!selCastle.auto} disabled={playing} onChange={(e) => act((s) => { const c = s.castles[selCastle.id]; c.auto = e.target.checked; if (c.auto) autoJobs(s, c); })} /> 담당관 자동 배치 (위임)
                   </label>
-                  <div className="muted" style={{ fontSize: 11 }}>농업·상업 담당은 정치가 높을수록 빨리 오르고, 징병 담당은 통솔만큼 자원병을 더 모읍니다.</div>
+                  {(() => { const f = jobGen(game, selCastle, 'farm'), t = jobGen(game, selCastle, 'trade'), d = jobGen(game, selCastle, 'draft'); return (
+                    <div className="job-eff">
+                      <div>🌾 농업 {f ? <>— {f.name}: 수확 +{Math.round(f.pol * 0.5)}% · 인구 +{(f.pol / 40).toFixed(1)}천/순 · 농업 +{Math.round(3 + f.pol / 6)}/순</> : <span className="muted">— 비었음 (농업이 오르지 않고 인구 회복이 느림)</span>}</div>
+                      <div>💰 상업 {t ? <>— {t.name}: 금 +{Math.round(t.pol * 0.5)}% · 상업 +{Math.round(3 + t.pol / 6)}/순</> : <span className="muted">— 비었음 (상업이 오르지 않음)</span>}</div>
+                      <div>💂 징병 {d ? <>— {d.name}: 자원병 +{d.lead * 3}명/순</> : <span className="muted">— 비었음</span>}</div>
+                      <small className="muted">정치·통솔이 높을수록 효과가 큽니다. 상업·농업은 상한(인구×10)까지 오르고, 맡고 있는 동안 금·수확 보너스가 붙습니다.</small>
+                    </div>); })()}
                 </>
               ) : null}
             </div>
@@ -2121,6 +2140,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6 }}>
                 <button className="sm" disabled={playing || me.gold < rewardCost(game, pid)} title="충성 35 아래면 다른 나라로 떠날 수 있습니다. 금이 바닥나면 충성이 떨어집니다." onClick={() => act((s) => rewardAll(s, pid))}>🎁 전체 포상 (금 {fmtGold(rewardCost(game, pid))}, 충성 +12)</button>
+                <button className="sm" disabled={playing || !spreadPlan.length} title="장수가 몰린 성에서 모자란 성으로 보냅니다 (전선 성 4명·후방 3명 목표, 군주·담당관은 그대로). 누르면 어디서 어디로 가는지 먼저 보여 줍니다" onClick={spreadGens}>👥 장수 나누기{spreadPlan.length ? ` (${spreadPlan.length}명)` : ' (고르게 있음)'}</button>
                 {(() => { const off = game.castles.filter((c) => c.owner === pid && c.kind !== 'pass' && !c.auto); return <button className="sm" disabled={playing || !off.length} title="모든 내 성의 농업·상업·징병 담당을 머무는 장수 중에서 알아서 고르게 합니다 (새로 얻는 성은 성마다 따로 켬). 상업·농업은 누구든 맡으면 상한까지 오르고, 징병은 통솔이 높을수록 자원병이 많습니다" onClick={() => act((s) => { let k = 0; for (const c of s.castles) if (c.owner === pid && c.kind !== 'pass' && !c.auto) { c.auto = true; autoJobs(s, c); k++; } return { ok: k > 0, msg: `${k}개 성: 업무를 알아서 맡깁니다` }; })}>👔 모든 성 업무 알아서{off.length ? ` (${off.length}곳)` : ' (모두 켜짐)'}</button>; })()}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>

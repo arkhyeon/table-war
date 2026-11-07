@@ -650,6 +650,38 @@ export const unitStats = (s, u) => {
   const ta = 1 + t14(gs, '명장') + t14(gs, '맹장') + t14(gs, '책략'), td = 1 + t14(gs, '책략');
   return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid * ta, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid * td, intel: best('intel') };
 };
+// 장수 나누기: 장수가 몰린 성에서 모자란 성으로 (사람이 버튼을 누를 때만). 성마다 목표 인원 — 적과 맞닿은 성 4명, 후방 3명(내정 담당 셋)
+// 군주·담당관은 그대로 두고 남는 장수만, 받는 쪽이 전선이면 무력+통솔 높은 장수를, 후방이면 정치 높은 장수를 보냄. 가장 가까운 성부터
+export function planGenSpread(s, grid, pid) {
+  const mine = s.castles.filter((c) => c.owner === pid && c.kind !== 'pass');
+  const at = new Map(mine.map((c) => [c.id, []]));
+  for (const g of Object.values(s.generals)) if (g.nation === pid && g.status === 'active' && (g.unit === null || g.unit === undefined) && at.has(g.castle)) at.get(g.castle).push(g);
+  const R = 8 * (grid.k || 1);
+  const front = new Map(mine.map((c) => [c.id, s.castles.some((x) => x.owner !== null && x.owner !== pid && x.owner >= 0 && enemy(s, pid, x.owner) && grid.dist(x.tile, c.tile) <= R)]));
+  const want = (c) => (front.get(c.id) ? 4 : 3);
+  const isJob = (c, g) => Object.values(c.jobs || {}).includes(g.id);
+  const moves = [];
+  const needs = mine.filter((c) => at.get(c.id).length < want(c)).sort((a, b) => (front.get(b.id) - front.get(a.id)) || (at.get(a.id).length - want(a)) - (at.get(b.id).length - want(b)));
+  for (const c of needs) {
+    let need = want(c) - at.get(c.id).length, guard = 0;
+    while (need > 0 && guard++ < 12) {
+      const donors = mine.filter((d) => d !== c && at.get(d.id).length > want(d) && d.troops >= 1500 && at.get(d.id).some((g) => !g.ruler && !isJob(d, g))).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile));
+      const d = donors[0];
+      if (!d) break;
+      const pool = at.get(d.id).filter((g) => !g.ruler && !isJob(d, g));
+      const g = pool.sort((a, b) => (front.get(c.id) ? b.war + b.lead - (a.war + a.lead) : b.pol - a.pol))[0];
+      moves.push({ g: g.id, from: d.id, to: c.id });
+      at.set(d.id, at.get(d.id).filter((x) => x !== g)); at.get(c.id).push(g);
+      need--;
+    }
+  }
+  return moves;
+}
+export function doGenSpread(s, grid, pid, moves) {
+  let ok = 0;
+  for (const m of moves) { const g = s.generals[m.g]; if (!g || g.castle !== m.from || g.unit != null) continue; const r = summonGeneral(s, grid, m.g, m.to, 1000); if (r.ok) ok++; }
+  return { ok: ok > 0, msg: ok ? `장수 ${ok}명이 모자란 성으로 떠났습니다 (병사 1천씩 호위)` : '보낼 수 있는 장수가 없습니다 (보내는 성 병력이 1,500 넘어야 함)' };
+}
 // 장수 부르기: 다른 내 성의 장수가 병력을 이끌고 이 성으로 행군해 옴
 export function summonGeneral(s, grid, gid, toCid, troops) {
   const g = s.generals[gid], to = s.castles[toCid];
