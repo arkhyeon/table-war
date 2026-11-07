@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf, bordering } from './hex14gov.js';
+import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf, bordering } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -442,8 +442,9 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   // 4) 시장: 병량이 3년 치 넘게 쌓이고 금이 모자라면 팔고, 금이 넘치는데 병량이 모자라면 삼
   if (!scope) {
     const use = Math.max(1000, foodUse(s, nid));
+    const toHarvest = (((HARVEST_MONTH * 3 - (s.turn - 1)) % 36) + 36) % 36 || 36; // 다음 가을 수확까지 남은 순
     if (n.food > use * 108 && n.gold < 60000) trade(s, nid, 'sell', Math.round((n.food - use * 72) / 1000) * 1000);
-    else if (n.gold > 150000 && n.food < use * 40) trade(s, nid, 'buy', Math.round((n.gold - 100000) / 2 / 1000) * 1000);
+    else if (n.food < use * (toHarvest + 3) && n.gold > 30000) trade(s, nid, 'buy', Math.round(Math.min((n.gold - 20000) / 2, ((use * (toHarvest + 6) - n.food) / 1.5)) / 1000) * 1000); // 수확까지 모자라면 금으로 사 둠
   }
   // 5) 시설 먼저(시장·성벽), 남는 금은 팍팍 징병: 녹봉 몇 순 치만 남기고 장수 있는 성(위협받는 곳 먼저)에 뽑아 둠 — 출진 비용이 없으니 쌓아 둘 까닭이 없음
   //    인구가 너무 줄어든 성(20 아래)은 위협받을 때만 뽑음 (인구가 곧 자원병·금 수입)
@@ -451,7 +452,9 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   const floor = scope ? 200000 : Math.max(8000, gensN * 600);
   // 남는 금의 몫: 싸우는 중이면 85%, 아니면 65%를 징병에, 나머지로 시장·성벽
   const share = wars.size || mine.some((c) => threatNear(s, grid, c) > 0) ? 0.85 : n.strat === 'build' ? 0.45 : 0.65;
-  if (n.gold > floor && n.food > foodUse(s, nid) * 20) {
+  // 징병은 다음 수확까지(+4순) 먹일 병량이 있을 때만 — 뽑은 병사도 먹어야 함
+  const toH = (((HARVEST_MONTH * 3 - (s.turn - 1)) % 36) + 36) % 36 || 36;
+  if (n.gold > floor && n.food > foodUse(s, nid) * (toH + 4) * 1.15) {
     const budget = (n.gold - floor) * (scope ? 1 : share);
     const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
     const k = Math.max(1, Math.min(6, hub.length));

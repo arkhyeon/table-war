@@ -27,7 +27,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [showSaves, setShowSaves] = useState(false);
   const [cloudHas, setCloudHas] = useState(false); // 클라우드에 저장이 있으면 이어하기 버튼을 보임
   useEffect(() => { let on = true; cloudList(SLOT_COUNT).then((m) => on && setCloudHas(Object.keys(m).length > 0)); return () => { on = false; }; }, []);
-  const [rules, setRules] = useState({ revealMap: true, revealTroops: false, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
+  const [rules, setRules] = useState({ revealMap: true, revealTroops: true, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
   const baseScn = SCENARIOS.find((s) => s.id === scnId);

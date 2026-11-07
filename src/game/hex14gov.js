@@ -24,7 +24,7 @@ import { initPeople, peopleTurn } from './hex14people.js';
 import { makeVassal, vassalTurn } from './hex14vassal.js';
 
 export const ROLES = { farm: '농업', trade: '상업', draft: '징병' };
-const FOOD_PER = 0.02; // 병사 1명이 한 순(10일)에 먹는 병량
+const FOOD_PER = 0.04; // 병사 1명이 한 순(10일)에 먹는 병량 (0.02였을 땐 병량이 늘 170순 치씩 남아 징병을 막지 못했음)
 export const SALARY = 200; // 장수 녹봉 (금/순)
 export const SORTIE_COST = 0.5; // 출진: 병사 1명당 금
 export const HARVEST_MONTH = 7; // 8월(가을) 상순에 수확
@@ -34,6 +34,7 @@ export function initGov(s, rng) {
   ensureTraits(s);
   for (const c of s.castles) {
     const pass = c.kind === 'pass';
+    c.pop0 = c.pop; // 처음 인구: 금 수입 기준 (징병으로 인구가 줄면 수입도 줄어 듦)
     c.devMax = pass ? 0 : Math.round(c.pop * 10);
     c.farm = pass ? 0 : Math.round(c.pop * (4 + rng() * 2));
     c.trade = pass ? 0 : Math.round(c.pop * (4 + rng() * 2));
@@ -378,7 +379,9 @@ export const sprawlOf = () => 1;
 const traitGold = (s, c) => { const g = castleGens(s, c); return 1 + t14(g, '정치') + (c.port ? t14(g, '교역') : 0) + nationT(s, c.owner, '상업'); };
 // 특성: 머무는 장수의 모병·인덕 (자원병 명/순)
 const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 100); };
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
+// 인구와 금: 처음 인구 그대로면 100%, 징병으로 인구가 바닥나면 절반 (사이는 비례) — 처음보다 늘면 그대로 100%
+export const popGold = (c) => { const ref = c.pop0 || (c.popMax ? c.popMax / 1.2 : c.pop) || 1; return 0.5 + 0.5 * Math.max(0, Math.min(1, (c.pop || 0) / ref)); };
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * popGold(c) * (c.founding ? 0.3 : 1)));
 export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1 + (jobGen(s, c, 'farm') ? t14([jobGen(s, c, 'farm')], '농정') : 0)) * c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 2 : 1) * (1 + 1 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER * (hasPolicy(s, nid, 'farming') ? 0.7 : 1));
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
