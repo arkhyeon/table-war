@@ -1045,6 +1045,9 @@ export function stepDay(s, grid) {
     if (f.hp <= 0 && u.order?.kind === 'fort') { u.order = null; u.path = []; }
   }
   // 3) 공성: 성 수비대와 내구를 깎고, 수비대가 반격
+  // 여러 부대가 한 성을 치면 성의 반격(화살)은 나눠 맞음 (들판 싸움의 반격처럼) — 병력 비율대로
+  const siegeSum = new Map();
+  for (const [u, c] of sieges) siegeSum.set(c, (siegeSum.get(c) || 0) + u.troops);
   for (const [u, c] of sieges) {
     if (!enemy(s, u.nation, c.owner) || u.dead) continue;
     const a = unitStats(s, u);
@@ -1063,7 +1066,7 @@ export function stepDay(s, grid) {
     // 약소국은 결사 항전: 수비병 피해 −15%
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * (isSmall(s, c.owner) ? 0.85 : 1) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
-    const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련'));
+    const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련')) * (u.troops / Math.max(1, siegeSum.get(c) || u.troops));
     u.troops -= sback;
     if (!s.spectator && (u.nation === s.playerId || c.owner === s.playerId)) { (s.btl ||= []).push({ turn: s.turn, day: s.day, siege: true, a: u.id, an: u.nation, al: leader(s, u)?.name, c: c.id, dn: c.owner, cn: c.name, walled, wall: Math.round(wall), dmg: Math.round(kill), back: Math.round(sback), ratio: a.atk / 100, guard: guardT, engine: !!u.siege }); if (s.btl.length > 120) s.btl.splice(0, s.btl.length - 120); }
     u.morale -= walled ? 0.5 : 0;
