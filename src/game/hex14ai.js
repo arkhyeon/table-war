@@ -525,7 +525,7 @@ export function aiIdle(s, grid) {
   for (const u of s.units) {
     if (u.dead || u.path.length || u.order?.kind === 'fort') continue;
     const n = s.nations[u.nation];
-    if (!n?.alive || (u.nation === s.playerId && !s.spectator)) continue; // 플레이어 부대(군단 제외)는 건드리지 않음
+    if (!n?.alive || (u.nation === s.playerId && !s.spectator && !u.corps)) continue; // 플레이어 부대(군단 제외)는 건드리지 않음
     if (u.order?.kind === 'castle' && enemy(s, u.nation, s.castles[u.order.id]?.owner) && grid.dist(u.tile, s.castles[u.order.id].tile) <= 1) continue; // 공성 중
     const home = nearestCastle(s, grid, u.tile, u.nation);
     if ((u.troops < u.max * 0.3 || u.morale < 25) && home) { order(s, grid, u, 'castle', home.id); continue; }

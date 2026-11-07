@@ -956,7 +956,7 @@ export function stepDay(s, grid) {
   const hits = new Map(); // 대상 → [{공격자, 피해}]
   const sieges = [];
   for (const u of s.units) {
-    if (u.routed) continue; // 패주 중인 부대는 싸우지 않고 물러남
+    if (u.routed || u.troops <= 0) continue; // 패주 중인 부대는 싸우지 않고 물러남 (병력이 바닥난 부대도)
     const adj = grid.nb[u.tile];
     let tgt = null;
     if (u.order?.kind === 'unit') { const t = s.units.find((x) => x.id === u.order.id); if (t && adj.includes(t.tile) && enemy(s, u.nation, t.nation)) tgt = t; }
@@ -1018,7 +1018,7 @@ export function stepDay(s, grid) {
     const dt = unitStats(s, t);
     const mul = total / Math.max(1e-9, list.reduce((a, x) => a + x.dmg, 0));
     for (const { u, dmg, rec } of list) {
-      const back = (t.troops * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length * (1 - t14(gensOf(s, u.gens), '노련')) / (1 + t14(gensOf(s, u.gens), '매복'));
+      const back = (Math.max(0, t.troops) * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length * (1 - t14(gensOf(s, u.gens), '노련')) / (1 + t14(gensOf(s, u.gens), '매복'));
       if (rec) { rec.dmg = Math.round(dmg * mul); rec.back = Math.round(back); rec.pincer = pincer; rec.extra = mul / pincer; }
       u.troops -= back;
       u.morale -= (back / Math.max(1, u.troops)) * 30;
@@ -1047,9 +1047,9 @@ export function stepDay(s, grid) {
   // 3) 공성: 성 수비대와 내구를 깎고, 수비대가 반격
   // 여러 부대가 한 성을 치면 성의 반격(화살)은 나눠 맞음 (들판 싸움의 반격처럼) — 병력 비율대로
   const siegeSum = new Map();
-  for (const [u, c] of sieges) siegeSum.set(c, (siegeSum.get(c) || 0) + u.troops);
+  for (const [u, c] of sieges) if (u.troops > 0) siegeSum.set(c, (siegeSum.get(c) || 0) + u.troops);
   for (const [u, c] of sieges) {
-    if (!enemy(s, u.nation, c.owner) || u.dead) continue;
+    if (!enemy(s, u.nation, c.owner) || u.dead || u.troops <= 0) continue; // 그날 들판 싸움에서 병력이 바닥난 부대는 공성 못 함 (음수 병력이 성을 되살리던 문제)
     const a = unitStats(s, u);
     // 성벽이 남아 있으면 수비병 피해가 크게 줄고 반격이 셈. 성벽부터 깎아야 함
     const walled = c.dur > 0;
