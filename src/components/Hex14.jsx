@@ -638,6 +638,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
   const [booted, setBooted] = useState(false); // 처음 지도 그림을 마쳤는지
+  const [moreOpen, setMoreOpen] = useState(false); // 폰: 위 막대의 소리·속도·나가기 버튼을 ⋯ 메뉴로 접어 둠
+  useEffect(() => { if (!moreOpen) return undefined; const off = (e) => { if (!e.target.closest?.('.tb-btns, .tb-more')) setMoreOpen(false); }; window.addEventListener('pointerdown', off, true); return () => window.removeEventListener('pointerdown', off, true); }, [moreOpen]);
   const [tourOn, setTourOn] = useState(false); // 가이드 투어 (첫 판에 저절로, 도움말에서 다시)
   const [sheetH, setSheetH] = useState(() => { try { return +localStorage.getItem('tw-sheetH') || 40; } catch { return 40; } }); // 폰 바텀시트 높이(vh)
   useEffect(() => { try { localStorage.setItem('tw-sheetH', String(Math.round(sheetH))); } catch { /* 무시 */ } }, [sheetH]);
@@ -2647,17 +2649,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
 
   return (
     <div className="h14">
-      <div className="topbar h14-top">
-        <b className="tb-nation"><span className="chip" style={{ background: me.color }} /> {me.name}</b>
+      <div className={'topbar h14-top' + (moreOpen ? ' more-open' : '')}>
+        <b className="tb-nation" title={me.name}><span className="chip" style={{ background: me.color }} /> <span className="tb-nname" style={{ borderBottom: `2px solid ${me.color}` }}>{me.name}</span></b>
         <div className="tb-stats">
-          <span className="pill">📅 {dateOf(game, startYear)} <span className="lbl-long">{game.day + 1}일</span></span>
-          <span className="pill" title="내 도읍 날씨예요. 날씨는 지역마다 다릅니다(위도·계절). 눈: 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
+          {(() => { const [y, ...rest] = dateOf(game, startYear).split(' '); return <span className="pill"><span className="tb-cal">📅 </span><span className="tb-year">{y} </span>{rest.join(' ')} <span className="lbl-long">{game.day + 1}일</span><span className="tb-wic" title={weatherText(game)}> {weatherText(game).split(' ')[0]}</span></span>; })()}
+          {(() => { const [ic, ...rest] = weatherText(game).split(' '); return <span className="pill tb-weather" title={`${weatherText(game)} — 내 도읍 날씨예요. 날씨는 지역마다 다릅니다(위도·계절). 눈: 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함`}>{ic}<span className="tb-wtx"> {rest.join(' ')}</span></span>; })()}
           <span className="pill">💰 {fmtGold(me.gold)} <small style={{ color: inc < 0 ? 'var(--danger)' : 'var(--ok)' }}>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</small></span>
           <span className={'pill' + (food < use * 6 ? ' bad' : '')}>🍚 {fmtTroops(food)}</span>
-          <span className="pill">🏯 {myCities}<small>/{cities.length}</small></span>
-          <span className="pill">⚑ {myUnits.length}</span>
+          <span className="pill" title={`내 성 ${myCities} / 전체 ${cities.length}`}>🏯 {myCities}<small className="tb-total">/{cities.length}</small></span>
+          <span className="pill tb-units">⚑ {myUnits.length}</span>
         </div>
-        <div className="tb-btns">
+        <button className="icon tb-more" aria-label="메뉴 (소리·속도·나가기)" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>⋯</button>
+        <div className="tb-btns" onClick={(e) => e.stopPropagation()}>
           <button className="icon" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
           <button className="icon" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
           <button className="icon" title={stopIdle ? "순 끝까지 넘길 때 내 부대가 도착하면 멈춤 (켬)" : "순 끝까지 넘길 때 부대가 도착해도 멈추지 않음 (끔)"} style={{ opacity: stopIdle ? 1 : 0.45 }} onClick={() => setStopIdle((v) => { try { localStorage.setItem('h14.stopIdle', v ? '0' : '1'); } catch {} return !v; })}>⏸️</button>
@@ -2670,8 +2673,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
           <canvas ref={canvas} style={{ width: '100%', height: '100%', display: 'block', touchAction: 'none', background: '#1a4064' }} />
           <div className="map-vignette" aria-hidden />
           <div className="map-ctrl">
-            <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.4); }}>＋</button>
-            <button onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.4); }}>－</button>
+            <button className="zoom-btn" title="확대 (폰은 두 손가락으로)" onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.4); }}>＋</button>
+            <button className="zoom-btn" title="축소" onClick={() => { const r = wrap.current.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.4); }}>－</button>
             <button className="h14-menu" title="세력·외교·인재" onClick={() => { setSel(null); setSheet(true); }}>📋</button>
             {report && <button title="지난 순 결과 다시 보기" disabled={playing} onClick={() => setReportOpen((v) => !v)}>📊</button>}
             <button className="panel-toggle" title={`${panelOff ? '오른쪽 패널 펴기' : '오른쪽 패널 접기 (지도 넓게)'} — 단축키 P`} onClick={() => setPanelOff(!panelOff)}>{panelOff ? '⇤' : '⇥'}</button>
@@ -2894,7 +2897,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           )}
         </div>
         {!booted && <div className="boot-loading"><div className="spinner" /><b>지도를 그리는 중…</b><small className="muted">바다·지형·영토를 그리고 있어요 (큰 지도는 몇 초 걸려요)</small></div>}
-        <div className={'h14-panel' + (sheet ? ' open' : '')} style={{ '--sheet-h': `${sheetH}vh` }}>
+        <div className={'h14-panel' + (sheet ? ' open' : '') + (sel ? ' has-sel' : '')} style={{ '--sheet-h': `${sheetH}vh` }}>
           {/* 폰: 손잡이를 위아래로 끌어 높이 조절 (짧게 누르면 작게↔크게), 아주 내리면 닫힘 */}
           <div
             className="h14-grip"

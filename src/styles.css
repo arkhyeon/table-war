@@ -816,3 +816,46 @@ details.sub-card > summary small { margin-left: auto; overflow: hidden; text-ove
 .map-ctrl .todo-btn.ping { animation: todoPing 1.4s ease-in-out infinite; }
 @keyframes todoPing { 0%, 100% { box-shadow: 0 0 0 0 #ffb34700; } 50% { box-shadow: 0 0 0 6px #ffb34766; } }
 @media (prefers-reduced-motion: reduce) { .map-ctrl .todo-btn.ping { animation: none; outline: 2px solid #ffb347; } }
+/* ── 폰 화면 다시 짜기 (실기기 피드백: PC 화면을 욱여넣은 느낌, 지도가 너무 좁음) ── */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.tb-more { display: none; }
+@media (max-width: 760px) {
+  /* 위 막대: 한 줄. 연도·날씨 글자는 숨기고, 넘치면 옆으로 밀어 봄. 소리·속도·나가기는 ⋯ 메뉴로 */
+  .h14 .h14-top { flex-wrap: nowrap; gap: 6px; padding: 4px 6px; position: relative; z-index: 30; }
+  .h14-top .tb-nation { flex: 0 1 auto; max-width: 62px; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
+  .h14-top .tb-nname { overflow: hidden; text-overflow: ellipsis; }
+  .h14-top .tb-stats { order: 0; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; gap: 4px; scrollbar-width: none; -webkit-overflow-scrolling: touch; mask-image: linear-gradient(90deg, #000 92%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 92%, transparent); }
+  .h14-top .tb-stats::-webkit-scrollbar { display: none; }
+  .h14-top .tb-stats .pill { flex: 0 0 auto; padding: 3px 7px; font-size: 12px; white-space: nowrap; }
+  .tb-year, .tb-wtx, .tb-units { display: none; }
+  .h14-top .tb-more { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 34px; height: 30px; font-size: 18px; font-weight: 700; }
+  .h14-top .tb-btns { display: none; }
+  .h14-top.more-open .tb-btns { display: flex; position: absolute; right: 6px; top: calc(100% + 4px); gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--line2); border-radius: 14px; box-shadow: 0 10px 28px #000b; }
+  .h14-top.more-open .tb-btns button.icon { width: 40px; height: 40px; font-size: 18px; }
+  /* 아래 시트: 내용만큼만 (빈 칸이 많은 중립 성 등에서 지도를 덜 가림), 성·부대를 고르면 탭 줄은 숨김 (📋로 메뉴) */
+  .h14-panel { height: auto; }
+  .h14-panel.has-sel .tabs-top { display: none; }
+  .h14-panel.has-sel { padding-top: 18px; }
+  /* 설정 화면 아래 막대: 고른 나라 / 게임 시작(넓게) / 나머지 둘 — iOS에서 흐림 효과 위 글자가 반쯤 지워지던 것 때문에 흐림 끔 */
+  .start-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .start-bar .start-sel { grid-column: 1 / -1; flex: none; margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
+  .start-bar button.primary { grid-column: 1 / -1; grid-row: 2; padding: 12px; font-size: 16px; white-space: nowrap; }
+  .start-bar button:not(.primary) { font-size: 12.5px; padding: 8px 6px; white-space: nowrap; min-width: 0; }
+}
+/* 터치 폰: 확대·축소는 두 손가락으로 — 버튼은 숨겨 지도를 넓게 */
+@media (max-width: 760px) and (pointer: coarse) { .map-ctrl .zoom-btn { display: none; } }
+@media (max-width: 760px) {
+  .h14-top .tb-nation { flex: 0 0 auto; max-width: 74px; }
+  .h14-top .tb-stats { gap: 3px; }
+  .h14-top .tb-stats .pill { padding: 3px 6px; }
+  .tb-cal, .tb-total { display: none; }
+}
+.tb-wic { display: none; }
+@media (max-width: 760px) { .tb-wic { display: inline; } .h14-top .tb-weather { display: none; } }
+@media (max-width: 760px) {
+  .h14 .h14-top { gap: 4px; padding: 4px 4px 4px 8px; }
+  .h14-top .tb-stats .pill { padding: 2px 6px; font-size: 11.5px; }
+  .h14-top .tb-stats .pill small { font-size: 10.5px; margin-left: 1px; }
+  .h14-top .tb-more { width: 28px; }
+  .h14-top .tb-nation .chip { display: none; } /* 나라 색은 이름 글자색으로 */
+}
