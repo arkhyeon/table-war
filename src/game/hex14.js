@@ -12,7 +12,7 @@ import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits } from './hex14g
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack, outlawGrow } from './hex14outlaw.js';
-import { meritCredit, meritCreditCastle, meritTurn } from './hex14merit.js';
+import { meritCredit, meritCreditCastle, meritTurn, mapTraitWeights } from './hex14merit.js';
 import { t14, castleGens } from './hex14traits.js';
 
 // 칸 배열(주인·관할)은 Int16Array로 둠: 일반 배열은 structuredClone을 거치면 다시 복사할 때 몇 배 느려짐 (하루마다 상태를 복사하므로)
@@ -601,6 +601,7 @@ export function createHex14(world, base) {
     startYear: getScenario(base.scenarioId)?.startYear ?? 200, turn: 1, day: 0, nations, generals, castles, owner, district: Int16Array.from(district), units: [], nextUnit: 1, log: [], fx: [], rs: base.rs || 1, over: null,
   };
   initGov(st, makeRng(`gov0:${base.seed}`)); ensureTraits(st);
+  st.traitW = mapTraitWeights(st, grid); // 공적 특성 후보를 지도에 맞게 (사막 없는 지도엔 「사막」이 잘 안 나옴)
   rollWeather(st, grid);
   // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
   st.kmScale = Math.min(2, 30 / kmOf(getScenario(base.scenarioId)));

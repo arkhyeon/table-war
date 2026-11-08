@@ -392,7 +392,7 @@ export const sprawlOf = () => 1;
 // 특성: 머무는 장수의 정치·교역, 나라의 상업
 const traitGold = (s, c) => { const g = castleGens(s, c); return 1 + t14(g, '정치') + (c.port ? t14(g, '교역') : 0) + nationT(s, c.owner, '상업'); };
 // 특성: 머무는 장수의 모병·인덕 (자원병 명/순)
-const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 100); };
+const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 300); }; // 인덕: 사람이 모여듦 (등급마다 +15·30·51명/순)
 // 인구와 금: 처음 인구 그대로면 100%, 징병으로 인구가 바닥나면 절반 (사이는 비례) — 처음보다 늘면 그대로 100%
 export const popGold = (c) => { const ref = c.pop0 || (c.popMax ? c.popMax / 1.2 : c.pop) || 1; return 0.5 + 0.5 * Math.max(0, Math.min(1, (c.pop || 0) / ref)); };
 export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * popGold(c) * (1 + (jobGen(s, c, 'trade')?.pol || 0) * 0.005) * (c.founding ? 0.3 : 1))); // 상업 담당: 맡고 있는 동안 금 +정치×0.5%

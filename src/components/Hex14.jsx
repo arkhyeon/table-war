@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { answerOffer, nextMerit, traitName } from '../game/hex14merit.js';
+import { answerOffer, nextMerit, traitName, offerOpts, MERIT_STEPS } from '../game/hex14merit.js';
 import { uiConfirm } from '../dialog.js';
 import HexTour from './HexTour.jsx';
 import { BUILD, versionText } from '../version.js';
@@ -661,7 +661,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
   const [booted, setBooted] = useState(false); // 처음 지도 그림을 마쳤는지
-  const [offerGid, setOfferGid] = useState(null); // 특성 익히기 제안 창 (특성이 가득 찬 내 장수)
+  const [offerGid, setOfferGid] = useState(null); // 공적 특성 고르기 창 (내 장수)
+  const [offerPick, setOfferPick] = useState(null); // 가득 찬 장수가 새 특성을 골랐을 때: 무엇을 잊을지 고르는 단계
   const [cmodal, setCmodal] = useState(null); // 성 작업 창: draft·recv·jobs·build·fort (출진은 sortieOpen)
   const [moreOpen, setMoreOpen] = useState(false); // 폰: 위 막대의 소리·속도·나가기 버튼을 ⋯ 메뉴로 접어 둠
   useEffect(() => { if (!moreOpen) return undefined; const off = (e) => { if (!e.target.closest?.('.tb-btns, .tb-more')) setMoreOpen(false); }; window.addEventListener('pointerdown', off, true); return () => window.removeEventListener('pointerdown', off, true); }, [moreOpen]);
@@ -1973,7 +1974,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 할 일: 장수가 한 성에 몰려 있음
     if (spreadPlan.length >= 2) { const from = new Map(); for (const m of spreadPlan) from.set(m.from, (from.get(m.from) || 0) + 1); const top = [...from].sort((a, b) => b[1] - a[1])[0]; out.push({ id: 'spread', sev: 'todo', icon: '👥', title: `장수가 몰려 있음 — ${spreadPlan.length}명 나눌 수 있음`, sub: `${g.castles[top[0]].name} 등에서 장수가 모자란 성으로`, act: { label: '장수 나누기', fn: spreadGens } }); }
     // 할 일: 특성이 가득 찬 장수가 새 특성을 익힐 수 있음 (무엇을 잊을지 고르기)
-    for (const o of g.traitOffers || []) { const gg = g.generals[o.gid]; if (gg && gg.status === 'active' && gg.nation === pid) out.push({ id: 'offer' + o.gid, sev: 'todo', icon: '✨', title: `${gg.name} 새 특성 「${traitName(o.trait)}」`, sub: '특성이 가득 차서 하나를 잊어야 배울 수 있어요', act: { label: '고르기', primary: true, fn: () => setOfferGid(o.gid) } }); }
+    for (const o of g.traitOffers || []) { const gg = g.generals[o.gid]; if (gg && gg.status === 'active' && gg.nation === pid && !out.some((x) => x.id === 'offer' + o.gid)) out.push({ id: 'offer' + o.gid, sev: 'todo', icon: '✨', title: `${gg.name} 공적 — 새 특성 고르기`, sub: offerOpts(o).map((x) => (x[2] ? `${x[0]}${['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][x[1]]}↑` : traitName(x))).join(' · '), act: { label: '고르기', primary: true, fn: () => { setOfferPick(null); setOfferGid(o.gid); } } }); }
     // 할 일: 충성이 낮은 장수
     const low = Object.values(g.generals).filter((x) => x.nation === pid && x.status === 'active' && !x.ruler && loyalOf(x) < 40);
     if (low.length) out.push({ id: 'loy', sev: low.some((x) => loyalOf(x) < 30) ? 'danger' : 'todo', icon: '💔', title: `충성 낮은 장수 ${low.length}명 (떠날 수 있음)`, sub: low.slice(0, 4).map((x) => `${x.name} 충${loyalOf(x)}`).join(' · '), act: { label: `전체 포상 ${fmtGold(rewardCost(g, pid))}`, disabled: me.gold < rewardCost(g, pid), fn: () => act((s) => rewardAll(s, pid)) } });
@@ -2073,7 +2074,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 장수 카드: 1줄 이름(+담당), 2줄 충성·능력치, 3줄 특성·전법
   const GenCard = ({ g, loyal = true, pick = false }) => { const tn = tacticName(g); return (
     <div className="gen-main">
-      <div className="gen-top"><b data-tip={pick ? undefined : `${g.name} · 공적 ${fmtTroops(g.merit || 0)}${nextMerit(g) ? ` — ${fmtTroops(nextMerit(g))}이면 특성을 하나 익히거나 올림 (적 병사를 쓰러뜨리거나 내정을 맡으면 쌓임)` : ' — 더 익힐 수 없음'}`}>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} />{(game.traitOffers || []).some((o) => o.gid === g.id) && <button className="xs offer-badge" title="새 특성을 익힐 수 있어요" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOfferGid(g.id); }}>✨ 새 특성</button>}</div>
+      <div className="gen-top"><b data-tip={pick ? undefined : `${g.name} · 공적 ${fmtTroops(g.merit || 0)}${nextMerit(g) ? ` — ${fmtTroops(nextMerit(g))}이면 특성을 하나 익히거나 올림 (적 병사를 쓰러뜨리거나 내정을 맡으면 쌓임)` : ' — 더 익힐 수 없음'}`}>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} />{(game.traitOffers || []).some((o) => o.gid === g.id) && <button className="xs offer-badge" title="새 특성을 익힐 수 있어요" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOfferPick(null); setOfferGid(g.id); }}>✨ 새 특성</button>}</div>
       <div className="gen-line"><Stats g={g} traits={false} /><Traits g={g} />{tn && <span className="tac" data-tip={tacticTip(g)} role="button" tabIndex={0}>「{tn}」</span>}</div>
     </div>); };
   const SortBar = ({ v, set }) => <div className="gsort" role="group" aria-label="장수 줄 세우기">{GSORT.map(([k, l]) => <button key={k} className={'xs' + (v === k ? ' on' : '')} aria-pressed={v === k} onClick={() => set(k)} title={k === 'loyal' ? '충성 낮은 순' : `${l} 높은 순`}>{l}</button>)}</div>;
@@ -2950,16 +2951,39 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {(() => {
             const o = offerGid && (game.traitOffers || []).find((x) => x.gid === offerGid); const gg = o && game.generals[o.gid];
             if (!o || !gg) return null;
-            const desc = (t) => `${t[0]} ${TIER_NAME[t[1]]} — ${tdesc(t[0], t[1])}`;
-            const done = (idx) => { act((s) => answerOffer(s, o.gid, idx)); setOfferGid(null); };
+            const opts = offerOpts(o), full = (gg.traits || []).length >= 3;
+            const tiers = (k) => [1, 2, 3].map((t) => `${['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][t]} ${tdesc(k, t)}`).join('\n');
+            const close = () => { setOfferGid(null); setOfferPick(null); };
+            const done = (pick, forget) => { act((s) => answerOffer(s, o.gid, pick, forget)); close(); };
+            const choose = (i) => { const x = opts[i]; if (x[2] || !full) done(i, null); else setOfferPick(i); };
+            const more = (game.traitOffers || []).filter((x) => x.gid === o.gid).length - 1;
+            const step = MERIT_STEPS[(o.lv || 1) - 1];
             return (
-              <CModal open title={<>✨ {gg.name}의 새 특성</>} onClose={() => setOfferGid(null)}>
-                <div className="offer-new"><Face g={gg} size={40} col={me.color} /><div><div className="muted" style={{ fontSize: 12 }}>공적을 쌓아 새로 익힐 수 있는 특성</div><b className={`trait t${o.trait[1]}`} style={{ fontSize: 13 }}>{traitName(o.trait)}</b><div style={{ fontSize: 12.5, marginTop: 2 }}>{tdesc(o.trait[0], o.trait[1])}</div></div></div>
-                <div className="muted" style={{ fontSize: 12.5, margin: '10px 0 4px' }}>특성은 3개까지예요. 하나를 잊고 배울까요?</div>
-                {(gg.traits || []).map((t, i) => (
-                  <div key={i} className="line-row"><span className="line-tx"><b><span className={`trait t${t[1]}`}>{traitName(t)}</span></b><small className="muted">{desc(t)}</small></span><button className="sm" onClick={() => done(i)}>잊고 배우기</button></div>
-                ))}
-                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}><button onClick={() => done(null)}>배우지 않기</button></div>
+              <CModal open title={<>✨ {gg.name} — 새 특성 고르기<Help t={`공적(쓰러뜨린 적 병사 수·내정 담당 기간)이 ${MERIT_STEPS.map((v) => fmtTroops(v)).join('·')}에 이를 때마다 무작위 후보 3가지 중 하나를 고릅니다. 새 특성이나 가진 특성 한 단계 올리기가 섞여 나와요. 특성은 3개까지라, 가득 찼을 때 새 특성을 고르면 하나를 잊어야 합니다. 등급 Ⅰ→Ⅱ→Ⅲ으로 갈수록 효과가 커지고, 부대에서는 함께 간 장수 중 가장 높은 등급 하나가 적용돼요.`} /></>} onClose={close}>
+                <div className="offer-head"><Face g={gg} size={36} col={me.color} /><div><b>{gg.name}</b><small className="muted"> 공적 {fmtTroops(gg.merit || 0)}{step ? ` · ${fmtTroops(step)} 달성` : ''}{more > 0 ? ` · 남은 고르기 ${more}번` : ''}</small><div className="gen-line" style={{ marginTop: 2 }}><Traits g={gg} /></div></div></div>
+                {offerPick === null ? (
+                  <>
+                    <div className="muted" style={{ fontSize: 12.5, margin: '10px 0 6px' }}>하나를 고르세요{full ? ' (특성이 3개라 새 특성을 고르면 하나를 잊어야 해요)' : ''}</div>
+                    <div className="offer-opts">
+                      {opts.map((x, i) => (
+                        <button key={i} className={'offer-opt' + (x[2] ? ' up' : '')} onClick={() => choose(i)}>
+                          <span className="oo-top"><span className={`trait t${x[1]}`}>{traitName(x)}</span><span className="oo-kind">{x[2] ? `올리기 ${['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][x[1] - 1]}→${['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][x[1]]}` : T14[x[0]]?.cat === 'civ' ? '새 · 문관' : '새 · 무관'}</span><span className="help-q" role="button" tabIndex={0} data-tip={`${x[0]} 등급별 효과\n${tiers(x[0])}`} onClick={(e) => e.stopPropagation()}>?</span></span>
+                          <span className="oo-desc">{x[2] ? `${tdesc(x[0], x[1] - 1)} → ${tdesc(x[0], x[1])}` : tdesc(x[0], x[1])}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="row" style={{ justifyContent: 'space-between', marginTop: 10 }}><button className="sm" onClick={close}>나중에</button><button className="sm" onClick={() => done(null)}>이번엔 고르지 않기</button></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="offer-new" style={{ marginTop: 10 }}><div><div className="muted" style={{ fontSize: 12 }}>새로 익힐 특성</div><b className={`trait t${opts[offerPick][1]}`} style={{ fontSize: 13 }}>{traitName(opts[offerPick])}</b><div style={{ fontSize: 12.5, marginTop: 2 }}>{tdesc(opts[offerPick][0], opts[offerPick][1])}</div></div></div>
+                    <div className="muted" style={{ fontSize: 12.5, margin: '10px 0 4px' }}>무엇을 잊을까요?</div>
+                    {(gg.traits || []).map((t, i) => (
+                      <div key={i} className="line-row"><span className="line-tx"><b><span className={`trait t${t[1]}`}>{traitName(t)}</span></b><small className="muted">{tdesc(t[0], t[1])}</small></span><button className="sm" onClick={() => done(offerPick, i)}>잊고 배우기</button></div>
+                    ))}
+                    <div className="row" style={{ justifyContent: 'flex-start', marginTop: 8 }}><button className="sm" onClick={() => setOfferPick(null)}>← 다른 후보 보기</button></div>
+                  </>
+                )}
               </CModal>
             );
           })()}
