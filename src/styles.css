@@ -759,3 +759,16 @@ details.sub-card > summary small { margin-left: auto; overflow: hidden; text-ove
   .tb-stats .lbl-long { display: none; }
   .tb-stats .pill { font-size: 12px; }
 }
+/* 출진 장수 고르기: 카드 줄 */
+.pick-row { display: grid; grid-template-columns: auto 26px minmax(0, 1fr); gap: 8px; align-items: center; padding: 6px 8px; margin: 4px 0; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; background: var(--panel); }
+.pick-row.on { border-color: var(--accent, #ffb347); background: color-mix(in srgb, var(--accent, #ffb347) 10%, var(--panel)); }
+.pick-row input { margin: 0; }
+/* 지도 위 부대 안내: 한 줄 */
+.unit-hint { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.unit-hint .uh-tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.unit-hint .uh-btns { display: flex; gap: 4px; flex: 0 0 auto; }
+.unit-hint .xs { padding: 4px 8px; }
+.tip-more { margin-top: 6px; font-size: 12px; }
+.tip-more > summary { cursor: pointer; color: var(--muted); }
+.tip-more > div { margin-top: 4px; font-size: 11.5px; line-height: 1.5; }
+@media (max-width: 760px) { .unit-hint .uh-tx .muted { display: none; } }

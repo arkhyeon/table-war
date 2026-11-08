@@ -41,7 +41,7 @@ export function startBuild(s, cid, k) {
   if (why) return { ok: false, msg: why };
   s.nations[c.owner].gold -= buildCost(s, c, k);
   c.build = { type: k, left: BUILDINGS[k].turns };
-  return { ok: true, msg: `${c.name}: ${BUILDINGS[k].name} 공사 시작 (${BUILDINGS[k].turns}턴)` };
+  return { ok: true, msg: `${c.name}: ${BUILDINGS[k].name} 공사 시작 (${BUILDINGS[k].turns}순)` };
 }
 
 export function cancelBuild(s, cid) {
@@ -85,8 +85,8 @@ export function foundCity(s, grid, tile, nid, name) {
   let nm = name || `${s.castles.reduce((a, c) => (grid.dist(c.tile, tile) < grid.dist(a.tile, tile) ? c : a)).name} 신성`;
   for (let k = 2; used.has(nm); k++) nm = `${name || '신성'} ${k}`;
   s.castles.push({ id, tile, region: grid.region[tile], name: nm, kind: 'city', owner: nid, troops: 500, dur: 300, maxDur: 1500, pop: 5, capital: false, bandit: null, port: grid.water.some((w, t) => w && grid.dist(t, tile) <= 3), devMax: 300, farm: 50, trade: 50, jobs: { farm: null, trade: null, draft: null }, auto: true, founding: FOUND_TURNS, bld: {} });
-  log(s, `🏗️ ${s.nations[nid].name}이(가) ${nm}을(를) 세우기 시작했습니다 (${FOUND_TURNS}턴).`, 'info', [nid]);
-  return { ok: true, msg: `${nm} 축성 시작! ${FOUND_TURNS}턴 뒤 완공됩니다.` };
+  log(s, `🏗️ ${s.nations[nid].name}이(가) ${nm}을(를) 세우기 시작했습니다 (${FOUND_TURNS}순).`, 'info', [nid]);
+  return { ok: true, msg: `${nm} 축성 시작! ${FOUND_TURNS}순 뒤 완공됩니다.` };
 }
 
 // 한 턴마다: 공사 진행, 새 도시 완공 시 관할 다시 나눔

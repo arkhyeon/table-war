@@ -1060,7 +1060,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       labelJobs.sort((a, b) => a.pri - b.pri);
       for (const { c, cx, cy, col, S, pri } of labelJobs) {
         if (pri === 4 && k * sz < 3.2) continue;
-        const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}${c.founding ? ` (공사 ${c.founding}턴)` : ''}`;
+        const label = `${c.capital ? '♛' : ''}${c.port ? '⚓' : ''}${c.name}${c.founding ? ` (공사 ${c.founding}순)` : ''}`;
         ctx.font = `bold ${fs}px sans-serif`;
         const tw = ctx.measureText(label).width + fs * 0.6;
         const ly = cy + sz * 0.7 + sz * 0.38 + fs * 0.95; // 성벽 막대 바로 아래 (크게 확대해도 이름이 성에서 멀어지지 않게)
@@ -1910,14 +1910,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <button className="primary big-act" disabled={!castleGens.length || selCastle.troops < 1500} onClick={() => setSortieOpen(true)}>⚔️ 출진 <small>{castleGens.length ? `장수 ${castleGens.length}명 · 병력 ${fmtTroops(selCastle.troops)}` : '장수 없음'}</small></button>
               ) : (
                 <div className="card" style={{ background: 'var(--panel)' }}>
-                  <b>출진할 장수 (최대 3명)</b>
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}><b>⚔️ 출진할 장수</b><small className="muted">최대 3명 · {pickG.length}명 고름</small></div>
                   {castleGens.map((g) => (
-                    <label key={g.id} style={{ display: 'block', fontSize: 13 }}>
+                    <label key={g.id} className={'pick-row' + (pickG.includes(g.id) ? ' on' : '')}>
                       <input type="checkbox" checked={pickG.includes(g.id)} onChange={(e) => {
                         const nx = e.target.checked ? [...pickG, g.id].slice(-3) : pickG.filter((x) => x !== g.id);
                         setPickG(nx);
                         setAmt(Math.max(0, Math.min(commandCap(game, nx), selCastle.troops - 500)));
-                      }} /> <Face g={g} col={me.color} /> {g.name}<Loyal g={g} /><Job g={g} /> <small className="muted"><Stats g={g} keys={['war', 'lead', 'intel']} />{tacticName(g) ? ` · 「${tacticName(g)}」` : ''}</small>
+                      }} /><Face g={g} size={26} col={me.color} /><GenCard g={g} />
                     </label>
                   ))}
                   <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(Math.min(amt, maxAmt))} / 지휘 한도 {fmtTroops(cap)}</div>
@@ -2102,10 +2102,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {selCastle.owner !== null && (selCastle.owner === pid || Object.keys(selCastle.bld || {}).length > 0) && (
             <details className="sub-card" open={!!selCastle.build}>
               <summary className="row" style={{ justifyContent: 'space-between' }}><b>🏗️ 시설 {selCastle.build ? '· 🔨 공사 중' : ''}</b><small className="muted">{usedSlots(selCastle)}/{slotsOf(selCastle)}칸</small></summary>
-              {selCastle.founding && <div>🔨 새 도시 공사 중 — {selCastle.founding}턴 남음</div>}
+              {selCastle.founding && <div>🔨 새 도시 공사 중 — {selCastle.founding}순 남음</div>}
               {selCastle.build && (
                 <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>🔨 {BUILDINGS[selCastle.build.type].icon} {BUILDINGS[selCastle.build.type].name} — {selCastle.build.left}턴 남음</span>
+                  <span>🔨 {BUILDINGS[selCastle.build.type].icon} {BUILDINGS[selCastle.build.type].name} — {selCastle.build.left}순 남음</span>
                   {selCastle.owner === pid && !playing && <button className="sm" onClick={() => act((s) => cancelBuild(s, selCastle.id))}>멈춤</button>}
                 </div>
               )}
@@ -2114,7 +2114,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 return (
                   <div key={k} className="line-row">
                     <span className="line-tx" title={b.desc}><b>{b.icon} {b.name} <small className="muted">{lv(selCastle, k)}/{b.max}</small></b><small className="muted">{b.desc}</small></span>
-                    {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>짓기 {fmtGold(buildCost(game, selCastle, k))} · {b.turns}턴</button>}
+                    {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>짓기 {fmtGold(buildCost(game, selCastle, k))} · {b.turns}순</button>}
                   </div>
                 );
               })}
@@ -2166,7 +2166,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
             {selUnit.nation === pid && !playing && (
               <>
-                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>지도를 누르면 이동, 적 부대를 누르면 공격, 적 성을 누르면 공략, 내 성을 누르면 입성.</div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>지도를 눌러: 이동 · 공격 · 공략 · 입성</div>
                 <div className="row" style={{ marginTop: 6, gap: 6 }}>
                   <button onClick={() => act((s) => { const u = s.units.find((x) => x.id === selUnit.id); const h = nearestCastle(s, grid, u.tile, pid); return h ? order(s, grid, u, 'castle', h.id) : { ok: false, msg: '돌아갈 성이 없습니다.' }; })}>🏠 귀환</button>
                   <button onClick={() => act((s) => { const u = s.units.find((x) => x.id === selUnit.id); u.path = []; u.order = null; return { ok: true, msg: '정지' }; })}>✋ 정지</button>
@@ -2187,7 +2187,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     </div>
                   );
                 })()}
-                <div className="muted" style={{ fontSize: 11 }}>진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대 매일 공격 · 목책: 바로 세움, 적이 못 지나가고 옆에 온 적은 그날 멈춤(이동하며 여러 개로 길 막기). 진지·망루는 부대가 그 칸에 멈춰 지어야 합니다.</div>
+                <details className="tip-more"><summary>⛺ 진지·망루·목책은?</summary><div className="muted">진지: 안의 아군 피해 −30%·보급 거점·사기 회복 · 망루: 2칸 안 적 부대 매일 공격 · 목책: 바로 세움, 적이 못 지나가고 옆에 온 적은 그날 멈춤(이동하며 여러 개로 길 막기). 진지·망루는 부대가 그 칸에 멈춰 지어야 합니다.</div></details>
               </>
             )}
           </div>
@@ -2248,7 +2248,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <div className="qa-grid three">
                 <button className="qa" disabled={playing || me.gold < 10000} onClick={() => act((s) => trade(s, pid, 'buy', 10000))}>🌾 병량 사기<small>금 1만 → {fmtTroops(10000 * MARKET.buy)}</small></button>
                 <button className="qa" disabled={playing || food < 10000} onClick={() => act((s) => trade(s, pid, 'sell', 10000))}>💰 병량 팔기<small>1만 → 금 {fmtGold(10000 * MARKET.sell)}</small></button>
-                <button className="qa" disabled={playing || me.gold < FOUND_COST} onClick={() => { setFounding(true); setSheet(false); toast('지도에서 새 도시 자리를 누르세요.'); }}>🏗️ 새 도시<small>금 {fmtGold(FOUND_COST)} · {FOUND_TURNS}턴</small></button>
+                <button className="qa" disabled={playing || me.gold < FOUND_COST} onClick={() => { setFounding(true); setSheet(false); toast('지도에서 새 도시 자리를 누르세요.'); }}>🏗️ 새 도시<small>금 {fmtGold(FOUND_COST)} · {FOUND_TURNS}순</small></button>
               </div>
               <div className="sec">
                 <div className="row sec-h" style={{ justifyContent: 'space-between' }}><span>📜 정책</span><small className="muted">{(me.policies || []).length}/{policySlots(game, pid)}칸 · 펼칠 때 금 {fmtGold(POLICY_COST)}, 순마다 {fmtGold(POLICY_UPKEEP)}</small></div>
@@ -2441,7 +2441,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
               <div className="kbd-help">⌨️ PC 단축키: <kbd>Space</kbd> 진행(고른 날 수) · <kbd>Shift</kbd>+<kbd>Space</kbd> 순 끝까지 · <kbd>1</kbd>~<kbd>5</kbd> 탭 · <kbd>T</kbd> 할 일 · <kbd>P</kbd> 패널 접기 · <kbd>Esc</kbd> 선택 해제</div>
               <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-                <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 턴 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
+                <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 순 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
                 <li>금은 상업에서 매 턴, 병량은 농업에서 가을(8월)에 한 해 몫이 들어옵니다. 병사는 병량을 먹고, 병량이 떨어지면 흩어집니다.</li>
                 <li>적 부대 옆 칸에 들어서면 그날은 더 못 갑니다(통제 구역). 여러 방향에서 치면 <b>협공</b>(+30%씩).</li>
                 <li>무력·통솔·지력 70 이상 장수는 <b>돌격·일제사격·화계</b> 전법을 씁니다.</li>
@@ -2485,7 +2485,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>
                 <li>🏳️ 패주: 사기가 꺾인 부대는 가까운 내 성으로 걸어서 물러납니다. 물러나는 동안은 싸우지 않고 받는 피해가 30% 늘어 쫓아가면 잡을 수 있습니다.</li>
-                <li>👑 견제: 한 나라가 도시의 30~45%를 차지하면 다른 나라들이 견제합니다(정전을 잘 안 받아 주고 서로 동맹). 45%를 넘거나 300턴이 지나면 견제가 풀리고 작은 나라들이 속국으로 잘 들어옵니다.</li>
+                <li>👑 견제: 한 나라가 도시의 30~45%를 차지하면 다른 나라들이 견제합니다(정전을 잘 안 받아 주고 서로 동맹). 45%를 넘거나 300순이 지나면 견제가 풀리고 작은 나라들이 속국으로 잘 들어옵니다.</li>
                 <li>🔁 약조 연장: 정전·동맹이 6순 이하로 남으면 외교 탭에서 연장을 청할 수 있습니다.</li>
                 <li>➕ 경유지: 부대를 고른 뒤 지도를 꾹 누르거나(폰) Shift+클릭(PC)하면 다음 목적지가 이어서 붙습니다(최대 8개).</li>
                 <li>📜 정책: 세력 탭에서 둔전·상업 장려·징병령·축성 장려·인재 등용·군비 확장·수군 육성 중 칸만큼 펼칩니다(도시 8곳마다 1칸).</li>
@@ -2500,7 +2500,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <div className="log-filter seg">{[['all', '전체'], ['mine', '우리 나라'], ['war', '전투·함락']].map(([k, l]) => <button key={k} className={logF === k ? 'on' : ''} onClick={() => setLogF(k)}>{l}</button>)}</div>
               {!game.log.length && <div className="todo-empty">아직 기록이 없습니다. 날을 진행하면 전투·외교·내정 소식이 쌓여요.</div>}
               {game.log.filter((l) => logF === 'all' || (logF === 'mine' ? l.nations?.includes(pid) : /battle|capture/.test(l.kind || '') || /함락|전멸|패주|사로잡/.test(l.text))).slice(0, 120).map((l, i) => (
-                <div key={i} className={'log-line' + (l.nations?.includes(pid) ? ' mine' : '') + (l.nations?.includes(pid) && /함락|무너|멸망|사로잡|반란|떠났|끝납|배신/.test(l.text) ? ' alert' : '')}>[{l.turn}턴{l.day ? ` ${l.day}일` : ''}] {l.text}</div>
+                <div key={i} className={'log-line' + (l.nations?.includes(pid) ? ' mine' : '') + (l.nations?.includes(pid) && /함락|무너|멸망|사로잡|반란|떠났|끝납|배신/.test(l.text) ? ' alert' : '')}>[{l.turn}순{l.day ? ` ${l.day}일` : ''}] {l.text}</div>
               ))}
             </div>
           )}
@@ -2544,7 +2544,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
           {sendGen && <div className="map-hint">➡️ {game.generals[sendGen]?.name}을(를) 보낼 내 성을 누르세요 (병력 {fmtTroops(callAmt)}) <button className="hint-clear" onClick={() => setSendGen(null)}>✕ 취소</button></div>}
           {founding && <div className="map-hint">🏗️ 초록 칸 중 새 도시 자리를 누르세요 ({spots?.length || 0}곳) <button className="sm" onClick={() => setFounding(false)}>취소</button></div>}
-          {selUnit && selUnit.nation === pid && !playing && <div className="map-hint">⚑ {gensOf(game, selUnit.gens)[0]?.name} 부대 {fmtTroops(selUnit.troops)} — {chain ? '누르는 곳이 차례로 경유지가 됨' : '눌러서 명령 · 꾹 눌러(PC는 Shift+클릭) 경유지 추가'}{selUnit.queue?.length ? ` (대기 ${selUnit.queue.length})` : ''} <button className={'sm' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동)" onClick={() => setChain((v) => !v)}>➕ 이어서 명령 {chain ? '켬' : '끔'}</button>{selUnit.queue?.length ? <><button className="sm" title="마지막에 넣은 경유지 하나만 취소" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️ 하나 취소</button><button className="sm" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = []; return { ok: true, msg: '경유지를 모두 지웠습니다' }; })}>모두 지우기</button></> : null} <button className="sm h14-menu" onClick={() => setSheet(true)}>ℹ️ 부대 정보·명령</button> <button className="hint-clear" onClick={() => { setSel(null); setChain(false); }}>✕ 선택 해제</button></div>}
+          {selUnit && selUnit.nation === pid && !playing && (
+            <div className="map-hint unit-hint">
+              <span className="uh-tx"><b>⚑ {gensOf(game, selUnit.gens)[0]?.name} {fmtTroops(selUnit.troops)}</b> <span className="muted">{chain ? '누르는 곳이 차례로 경유지' : '지도를 눌러 이동·공격'}{selUnit.queue?.length ? ` · 경유 ${selUnit.queue.length}` : ''}</span></span>
+              <span className="uh-btns">
+                <button className={'xs' + (chain ? ' primary' : '')} title="켜면 누른 곳들을 차례대로 이어서 감 (망루 부수고 → 성 치고 → 이동). PC는 Shift+클릭, 폰은 꾹 누르기로도 경유지 추가" onClick={() => setChain((v) => !v)}>➕ 이어서{chain ? ' 켬' : ''}</button>
+                {selUnit.queue?.length ? <button className="xs" title="마지막 경유지 하나 취소 (모두 지우려면 길게)" onClick={() => act((s) => { const su = s.units.find((x) => x.id === selUnit.id); su.queue = su.queue.slice(0, -1); return { ok: true, msg: `경유지 하나 취소 (${su.queue.length}개 남음)` }; })}>↩️</button> : null}
+                <button className="xs h14-menu" title="부대 정보·명령" onClick={() => setSheet(true)}>ℹ️</button>
+                <button className="xs hint-clear" title="선택 해제 (Esc)" onClick={() => { setSel(null); setChain(false); }}>✕</button>
+              </span>
+            </div>
+          )}
           
           <div className="end-turn-box">
             <button className="sm" disabled={playing || !!game.over} onClick={() => runTurn(true)} title="이번 순(10일)이 끝날 때까지 한 번에">⏩ 순 끝까지 <span className="lbl-long">({DAYS - game.day}일)</span></button>
@@ -2621,7 +2631,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     <span className="ord-eta">{u.path.length ? `${d}일` : '도착'}</span>
                   </button>); })}
                 {convoys.map((v, i) => <div key={'v' + i} className="ord-row"><span>🚚 {fmtTroops(v.troops)}</span><span className="muted">{game.castles[v.from]?.name} → {game.castles[v.to]?.name}</span><span className="ord-eta">{Math.max(0, v.arrive - absDay(game))}일</span></div>)}
-                {builds.map((c) => <button key={'b' + c.id} className="ord-row" onClick={() => goTo(c)}><span>🔨 {c.name}</span><span className="muted">{c.founding ? '새 도시' : BUILDINGS[c.build.type]?.name}</span><span className="ord-eta">{c.founding || c.build.left}턴</span></button>)}
+                {builds.map((c) => <button key={'b' + c.id} className="ord-row" onClick={() => goTo(c)}><span>🔨 {c.name}</span><span className="muted">{c.founding ? '새 도시' : BUILDINGS[c.build.type]?.name}</span><span className="ord-eta">{c.founding || c.build.left}순</span></button>)}
                 {forts.map((f) => <div key={'f' + f.id} className="ord-row"><span>{FORTS[f.kind].icon} {FORTS[f.kind].name}</span><span className="muted">공사 중</span><span className="ord-eta">{f.left}일</span></div>)}
               </details>
             );
@@ -2655,7 +2665,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
             );
           })()}
-          {!playing && !game.spectator && !game.over && todoOpen && (() => {
+          {!playing && !game.spectator && !game.over && todoOpen && !(report && reportOpen) && !game.inbox?.length && !game.eventsQ?.length && (() => {
             const T = todos;
             const groups = [['danger', '🚨 위급'], ['todo', '📝 할 일']];
             return (
@@ -2697,7 +2707,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div className="rep-grid">
                     <span>💰 금</span><span>{fmtGold(S.gold[2])} {dv(S.gold[0], S.gold[2], fmtGold)}</span>
                     <small>{S.full ? <>명령에 씀 {sg(S.gold[1] - S.gold[0])}{fmtGold(Math.abs(S.gold[1] - S.gold[0]))} · </> : null}정산 {sg(S.gold[2] - S.gold[1])}{fmtGold(Math.abs(S.gold[2] - S.gold[1]))}</small>
-                    <span>🌾 식량</span><span>{fmtGold(S.food[2])} {dv(S.food[0], S.food[2], fmtGold)}</span>
+                    <span>🌾 병량</span><span>{fmtGold(S.food[2])} {dv(S.food[0], S.food[2], fmtGold)}</span>
                     <small>{S.full ? <>순 동안 {sg(S.food[1] - S.food[0])}{fmtGold(Math.abs(S.food[1] - S.food[0]))} · </> : null}정산 {sg(S.food[2] - S.food[1])}{fmtGold(Math.abs(S.food[2] - S.food[1]))}</small>
                     <span>⚔️ 병력</span><span>{fmtTroops(S.troops[2])} {dv(S.troops[0], S.troops[2], fmtTroops)}</span>
                     <small>출진 {fmtTroops(S.field)} · 전투 손실 −{fmtTroops(S.rows.reduce((a, r) => a + r.myLoss, 0))} · 적에게 −{fmtTroops(S.rows.reduce((a, r) => a + r.foeLoss, 0))}</small>

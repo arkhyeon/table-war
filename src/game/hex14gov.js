@@ -187,7 +187,7 @@ export function renewPact(s, a, b, rng = Math.random) {
   if (!p || p.type === 'vassal') return { ok: false, msg: '연장할 약조가 없습니다.' };
   if (p.until - s.turn > RENEW_WINDOW) return { ok: false, msg: `아직 ${p.until - s.turn}순 남았습니다 (${RENEW_WINDOW}순 이하일 때 연장).` };
   const n = s.nations[a];
-  if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
+  if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 순에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
   if (rng() < renewChance(s, a, b)) {
     p.until += p.type === 'ally' ? 36 : 18;
@@ -200,7 +200,7 @@ export function renewPact(s, a, b, rng = Math.random) {
 export function propose(s, a, b, type, rng = Math.random) {
   if (pactOf(s, a, b)) return { ok: false, msg: '이미 맺은 약조가 있습니다.' };
   const n = s.nations[a];
-  if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 턴에 이미 사신을 보냈습니다.' };
+  if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 순에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
   if (b === s.playerId && !s.spectator) {
     // 플레이어에게는 나라마다 석 달에 한 번, 한 번에 한 통만
@@ -280,7 +280,7 @@ export function recruitChance(s, g, nid, cityId) {
 export function recruit(s, gid, nid, rng = Math.random) {
   const g = s.generals[gid];
   if (!g) return { ok: false, msg: '없는 장수입니다.' };
-  if (g.tried === s.turn) return { ok: false, msg: '이번 턴에는 이미 설득했습니다.' };
+  if (g.tried === s.turn) return { ok: false, msg: '이번 순에는 이미 설득했습니다.' };
   if (isRuler(g)) return { ok: false, msg: `${g.name}은(는) 한 나라의 군주였던 사람이라 신하가 되지 않습니다.` };
   const city = g.status === 'free' ? s.castles[g.castle] : s.castles[g.heldAt]?.owner === nid ? s.castles[g.heldAt] : s.castles.find((c) => c.owner === nid); // 포로는 갇힌 성(잡힌 곳 가까운 성)에서 일함
   if (!city || (g.status === 'free' && city.owner !== nid)) return { ok: false, msg: '내 도시에 있는 재야만 등용할 수 있습니다.' };
@@ -305,7 +305,7 @@ export function ransomChance(s, g, price) {
 export function offerRansom(s, by, gid, price, rng = Math.random) {
   const g = s.generals[gid];
   if (!g || g.status !== 'prisoner' || g.captor !== by) return { ok: false, msg: '내 포로가 아닙니다.' };
-  if (g.ransomAsked === s.turn) return { ok: false, msg: '이번 턴에 이미 몸값을 불렀습니다.' };
+  if (g.ransomAsked === s.turn) return { ok: false, msg: '이번 순에 이미 몸값을 불렀습니다.' };
   const payer = s.nations[g.nation];
   if (!payer?.alive) return { ok: false, msg: '돌려보낼 나라가 없습니다.' };
   g.ransomAsked = s.turn;
