@@ -709,3 +709,30 @@ details[open] > summary.sec-h::before { transform: rotate(90deg); }
 @media (max-width: 760px) { .panel-toggle { display: none; } .stat-tiles b { font-size: 14px; } }
 .qa-grid.three .qa { font-size: 11.5px; padding: 6px 7px; }
 .qa-grid.three .qa, .qa-grid .qa { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ── 성·부대 정보 다듬기 ── */
+.ci-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.ci-head h3 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
+.ci-owner { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--oc, #888) 22%, transparent); color: var(--text); border: 1px solid color-mix(in srgb, var(--oc, #888) 55%, transparent); }
+.ci-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #ffffff12; color: var(--muted); }
+.act-card { margin: 10px 0 4px; display: flex; flex-direction: column; gap: 8px; padding: 10px; border-radius: 12px; background: var(--panel2, #1f2329); border: 1px solid var(--line); }
+.big-act { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 10px 12px; font-size: 16px; border-radius: 12px; }
+.big-act small { font-size: 11px; font-weight: 600; opacity: 0.85; }
+.draft-row { gap: 6px; align-items: center; margin-top: 4px; }
+.sub-card { margin-top: 10px; padding: 9px 10px; border-radius: 12px; background: var(--panel2, #1f2329); border: 1px solid var(--line); font-size: 13px; }
+details.sub-card > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+details.sub-card > summary::-webkit-details-marker { display: none; }
+details.sub-card > summary::before { content: '▸'; color: var(--muted); transition: transform 0.15s; display: inline-block; }
+details.sub-card[open] > summary::before { transform: rotate(90deg); }
+details.sub-card[open] > summary { margin-bottom: 6px; }
+.kv-free { margin-top: 2px; }
+.mini-bar { display: block; height: 4px; border-radius: 3px; background: #0006; margin-top: 4px; overflow: hidden; }
+.mini-bar i { display: block; height: 100%; border-radius: 3px; }
+.log-filter { margin-bottom: 8px; }
+.log-filter button { flex: 1; }
+.h14-side > .card { border-radius: 14px; }
+.stat-tiles > div { transition: background 0.15s; }
+.gen-row { transition: background 0.12s, border-color 0.12s; }
+.gen-row:hover { border-color: var(--line2, #3a3f47); }
+details.sub-card > summary { justify-content: flex-start !important; }
+details.sub-card > summary b { white-space: nowrap; }
+details.sub-card > summary small { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
