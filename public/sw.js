@@ -1,7 +1,7 @@
 // 오프라인 실행용: 받은 파일을 캐시해 두고, 네트워크가 없으면 캐시로 응답
-const CACHE = 'table-war-v1';
+const CACHE = 'table-war-v2';
 self.addEventListener('install', (e) => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()))); // 옛 캐시 지움
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(

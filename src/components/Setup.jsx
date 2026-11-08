@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILD, versionText } from '../version.js';
+import InstallCard from './InstallCard.jsx';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
 import SaveSlots from './SaveSlots.jsx';
@@ -139,6 +140,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
           </div>
           <button className={tourSeen() ? '' : 'primary'} onClick={startTutorial}>튜토리얼 시작 ▶</button>
         </div>
+        <InstallCard />
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         {showSaves && (
           <div style={{ marginTop: 12 }}>

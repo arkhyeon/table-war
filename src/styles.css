@@ -864,3 +864,10 @@ b.hl, .hl { color: var(--accent, #ffb347); }
 .offer-opt.up .oo-kind { color: var(--ok, #8fe08a); }
 .oo-desc { font-size: 12.5px; color: var(--text); }
 .tip-pop { white-space: pre-line; }
+
+.install-card { margin-top: 8px; position: relative; padding-right: 36px; }
+@media (max-width: 560px) { .tut-card.install-card { flex-direction: row; align-items: center; } }
+.install-card .install-go { padding: 8px 16px; }
+.install-card .install-x { position: absolute; top: 4px; right: 6px; font-size: 13px; opacity: .6; }
+.install-help { display: block; margin-top: 6px; color: var(--text, #e8e8e8); line-height: 1.5; }
+.install-help a { color: var(--accent, #f0b94a); word-break: break-all; }
