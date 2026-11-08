@@ -1707,6 +1707,24 @@ export default function Hex14({ world, game, setGame, onExit }) {
   );
   const food = me.food ?? 0, use = foodUse(game, pid);
   const turnsToHarvest = (((HARVEST_MONTH * 3 - (game.turn - 1)) % 36) + 36) % 36;
+  // 내정 부르기: 빈 담당에 맞는 장수 — 다른 내 성에서 담당 없이 있는, 무력 85 이하(싸움꾼은 빼고), 군주·출진 중 제외, 그 성의 마지막 장수는 빼지 않음
+  const jobCands = (gm, c, role) => {
+    const held = new Set(); const cnt = new Map();
+    for (const x of gm.castles) if (x.owner === pid) for (const id of Object.values(x.jobs || {})) if (id) held.add(id);
+    for (const g of Object.values(gm.generals)) if (g.nation === pid && g.status === 'active' && g.unit == null && g.castle != null) cnt.set(g.castle, (cnt.get(g.castle) || 0) + 1);
+    const key = role === 'draft' ? 'lead' : 'pol';
+    return Object.values(gm.generals).filter((g) => g.nation === pid && g.status === 'active' && !g.ruler && g.unit == null && g.castle != null && g.castle !== c.id && !held.has(g.id) && g.war <= 85 && (cnt.get(g.castle) || 0) >= 2 && gm.castles[g.castle]?.troops >= 1500)
+      .map((g) => ({ g, d: grid.dist(gm.castles[g.castle].tile, c.tile) })).sort((a, b) => b.g[key] - a.g[key] || a.d - b.d);
+  };
+  const callForJob = (cid, role, gid) => act((s) => {
+    const c = s.castles[cid], g = s.generals[gid];
+    if (!g || g.castle == null) return { ok: false, msg: '부를 수 없는 장수입니다.' };
+    const r = summonGeneral(s, grid, gid, cid, Math.min(callAmt, s.castles[g.castle].troops - 500));
+    if (!r.ok) return r;
+    for (const rr of Object.keys(ROLES)) if (c.jobs?.[rr] === gid) c.jobs[rr] = null;
+    c.jobs = c.jobs || {}; c.jobs[role] = gid;
+    return { ok: true, msg: `${g.name}이(가) ${c.name}(으)로 갑니다 — 도착하면 ${ROLES[role]}을 맡습니다` };
+  });
   // 장수 나누기: 계획을 보여 주고 확인을 받은 뒤 보냄
   const spreadPlan = useMemo(() => (game.spectator ? [] : planGenSpread(game, grid, pid)), [game, grid, pid]);
   const spreadGens = async () => {
@@ -1770,12 +1788,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const o = p.a === pid ? p.b : p.a;
       out.push({ id: 'pc' + o, sev: 'todo', icon: '🤝', title: `${g.nations[o]?.name}와(과) ${PACT[p.type] || p.type} ${p.until - g.turn}순 뒤 끝남`, sub: '끝나면 서로 칠 수 있습니다', act: { label: '연장 청하기', disabled: me.lastAsk?.[o] === g.turn, fn: () => act((s) => renewPact(s, pid, o)) } });
     }
-    // 할 일: 업무 담당이 빈 성 (자동 맡김을 켜지 않은 성)
+    // 할 일: 업무 담당이 빈 성 — 성 안에 맡길 사람이 있으면 「알아서 맡기기」, 없으면 다른 성에서 놀고 있는 알맞은 장수 「부르기」
     for (const c of mine) {
-      if (c.kind === 'pass' || c.auto || !gensAt.get(c.id)) continue;
-      const miss = Object.keys(ROLES).filter((r) => !jobGen(g, c, r));
+      if (c.kind === 'pass') continue;
+      const miss = Object.keys(ROLES).filter((r) => !jobGen(g, c, r) && !(c.jobs?.[r] && g.generals[c.jobs[r]]?.unit != null));
       if (!miss.length) continue;
-      out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} 업무 담당 없음`, sub: miss.map((r) => ROLES[r]).join('·') + ' 담당이 비었습니다', go: goC(c), act: { label: '알아서 맡기기', tip: '머무는 장수 중 알맞은 사람에게 맡깁니다 (이 성은 앞으로도 자동)', fn: () => act((s) => { const x = s.castles[c.id]; x.auto = true; autoJobs(s, x); return { ok: true, msg: `${c.name}: 업무를 맡겼습니다` }; }) } });
+      const free = Object.values(g.generals).filter((x) => x.castle === c.id && x.status === 'active' && x.nation === pid && x.unit == null && !x.ruler && !Object.values(c.jobs || {}).includes(x.id));
+      if (free.length) {
+        if (c.auto) continue; // 자동 맡김이면 순이 끝날 때 알아서 채움
+        out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} 업무 담당 없음`, sub: miss.map((r) => ROLES[r]).join('·') + ' 담당이 비었습니다', go: goC(c), act: { label: '알아서 맡기기', tip: '머무는 장수 중 알맞은 사람에게 맡깁니다 (이 성은 앞으로도 자동)', fn: () => act((s) => { const x = s.castles[c.id]; x.auto = true; autoJobs(s, x); return { ok: true, msg: `${c.name}: 업무를 맡겼습니다` }; }) } });
+        continue;
+      }
+      const role = miss[0], best = jobCands(g, c, role)[0];
+      if (!best) continue;
+      const kv = role === 'draft' ? `통${best.g.lead}` : `정${best.g.pol}`;
+      out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} ${miss.map((r) => ROLES[r]).join('·')} 담당 없음`, sub: `추천: ${best.g.name}(${kv}) — ${g.castles[best.g.castle].name}에서 놀고 있음`, go: goC(c), act: { label: `${best.g.name} 부르기`, tip: `${g.castles[best.g.castle].name}에서 걸어와 도착하면 ${ROLES[role]}을 맡습니다`, fn: () => callForJob(c.id, role, best.g.id) } });
     }
     // 할 일: 장수가 한 성에 몰려 있음
     if (spreadPlan.length >= 2) { const from = new Map(); for (const m of spreadPlan) from.set(m.from, (from.get(m.from) || 0) + 1); const top = [...from].sort((a, b) => b[1] - a[1])[0]; out.push({ id: 'spread', sev: 'todo', icon: '👥', title: `장수가 몰려 있음 — ${spreadPlan.length}명 나눌 수 있음`, sub: `${g.castles[top[0]].name} 등에서 장수가 모자란 성으로`, act: { label: '장수 나누기', fn: spreadGens } }); }
@@ -1860,7 +1887,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               {selCastle.owner === pid ? (
                 <>
                   {Object.entries(ROLES).map(([role, label]) => (
-                    <div key={role} className="row" style={{ gap: 6, marginTop: 4, alignItems: 'center' }}>
+                    <div key={role} className="job-slot"><div className="row" style={{ gap: 6, marginTop: 4, alignItems: 'center' }}>
                       <span style={{ width: 34 }}>{label}</span>
                       <select disabled={selCastle.auto || playing} value={jobGen(game, selCastle, role)?.id || (selCastle.jobs?.[role] && game.generals[selCastle.jobs[role]]?.unit ? selCastle.jobs[role] : '')} onChange={(e) => act((s) => {
                         const c = s.castles[selCastle.id];
@@ -1881,11 +1908,26 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         <option value="">(없음)</option>
                         {castleGens.map((g) => <option key={g.id} value={g.id}>{g.name} ({role === 'draft' ? `통${g.lead}` : `정${g.pol}`}){jobOf(g) && jobOf(g) !== role ? ` · ${ROLES[jobOf(g)]} 담당` : ''}</option>)}
                         {(() => {
-                          const far = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && g.castle !== null && g.castle !== undefined && g.castle !== selCastle.id).sort((a, b) => (role === 'draft' ? b.lead - a.lead : b.pol - a.pol)).slice(0, 12);
-                          return far.length ? <optgroup label="다른 성에서 불러와 맡기기 (병력 데리고 옴)">{far.map((g) => <option key={g.id} value={'call:' + g.id}>{g.name} ({role === 'draft' ? `통${g.lead}` : `정${g.pol}`}) · {game.castles[g.castle].name}{jobOf(g) ? ` · ${ROLES[jobOf(g)]} 담당` : ''}</option>)}</optgroup> : null;
+                          const far = jobCands(game, selCastle, role).slice(0, 12).map((x) => x.g);
+                          return far.length ? <optgroup label="다른 성에서 불러와 맡기기 (담당 없는 장수, 무력 85 이하)">{far.map((g) => <option key={g.id} value={'call:' + g.id}>{g.name} ({role === 'draft' ? `통${g.lead}` : `정${g.pol}`}) · {game.castles[g.castle].name}</option>)}</optgroup> : null;
                         })()}
                         {selCastle.jobs?.[role] && !jobGen(game, selCastle, role) && game.generals[selCastle.jobs[role]]?.unit && <option value={selCastle.jobs[role]} disabled>{game.generals[selCastle.jobs[role]].name} (오는 중)</option>}
                       </select>
+                    </div>
+                    {selCastle.owner === pid && !jobGen(game, selCastle, role) && !(selCastle.jobs?.[role] && game.generals[selCastle.jobs[role]]?.unit) && (() => {
+                      // 이 성에 맡길 사람이 없으면: 다른 성에서 놀고 있는 알맞은 장수 추천 (무력 85 이하, 담당 없음)
+                      const here = castleGens.filter((g) => !jobOf(g) && !g.ruler);
+                      if (here.length) return <div className="job-rec muted">이 성의 {here.slice(0, 2).map((g) => g.name).join('·')}에게 맡길 수 있어요 (위에서 고르기)</div>;
+                      const c3 = jobCands(game, selCastle, role).slice(0, 3);
+                      if (!c3.length) return <div className="job-rec muted">맡길 장수가 없습니다 — 다른 성에도 담당 없는 장수(무력 85 이하)가 없어요</div>;
+                      const k = role === 'draft' ? '통' : '정', kv = (g) => (role === 'draft' ? g.lead : g.pol);
+                      return (
+                        <div className="job-rec">
+                          <span className="muted">💡 추천</span>
+                          {c3.map(({ g, d }, i) => <button key={g.id} className={'xs' + (i === 0 ? ' primary' : '')} disabled={playing} title={`${game.castles[g.castle].name}에서 ${d}칸 — 병사를 조금 데리고 걸어와 도착하면 ${label}을 맡습니다`} onClick={() => callForJob(selCastle.id, role, g.id)}>{g.name} {k}{kv(g)} · {game.castles[g.castle].name}</button>)}
+                        </div>
+                      );
+                    })()}
                     </div>
                   ))}
                   <label style={{ display: 'block', marginTop: 4 }}>
