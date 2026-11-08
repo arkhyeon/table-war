@@ -13,6 +13,7 @@ import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack, outlawGrow } from './hex14outlaw.js';
 import { meritCredit, meritCreditCastle, meritTurn, mapTraitWeights } from './hex14merit.js';
+import { randomTraits } from './histtraits.js';
 import { t14, castleGens } from './hex14traits.js';
 
 // 칸 배열(주인·관할)은 Int16Array로 둠: 일반 배열은 structuredClone을 거치면 다시 복사할 때 몇 배 느려짐 (하루마다 상태를 복사하므로)
@@ -602,6 +603,8 @@ export function createHex14(world, base) {
   };
   initGov(st, makeRng(`gov0:${base.seed}`)); ensureTraits(st);
   st.traitW = mapTraitWeights(st, grid); // 공적 특성 후보를 지도에 맞게 (사막 없는 지도엔 「사막」이 잘 안 나옴)
+  // 「역사 능력치」를 껐을 때: 처음 특성도 지도에 맞춰 다시 뽑음 (사막 없는 지도에서 「사막」을 들고 시작하지 않게)
+  if (!st.opts?.histStats) for (const g of Object.values(st.generals)) if (!g.boss && g.status !== 'gone') g.traits = randomTraits(makeRng(`trait14:${base.seed}:${g.id}`), st.traitW);
   rollWeather(st, grid);
   // 촘촘한 지역 지도(칸이 30km보다 작음)는 부대가 칸 단위로 더 빨리 움직여 실제 하루 거리를 맞춤
   st.kmScale = Math.min(2, 30 / kmOf(getScenario(base.scenarioId)));
@@ -642,6 +645,8 @@ export const log = (s, text, kind = 'info', nations = []) => {
 export const gensOf = (s, ids) => ids.map((id) => s.generals[id]).filter(Boolean);
 const leader = (s, u) => gensOf(s, u.gens).reduce((a, b) => (b.lead + b.war > a.lead + a.war ? b : a), { name: '?', lead: -1, war: -1 });
 const has = (g, t) => (g.traits || []).some(([x]) => x === t);
+// 의술: 잃은 병사 가운데 이만큼은 다쳤을 뿐이라 쉬면 돌아옴
+function wound(s, u, loss) { if (!(loss > 0) || u.outlaw) return; const v = t14(gensOf(s, u.gens), '의술'); if (v) u.wounded = (u.wounded || 0) + loss * v; }
 const has14 = (s, u, t) => gensOf(s, u.gens).some((g) => has(g, t));
 export const unitStats = (s, u) => {
   const gs = gensOf(s, u.gens);
@@ -649,7 +654,7 @@ export const unitStats = (s, u) => {
   // 부장 보좌: 부장 하나마다 공격·방어 +12% (둘까지) — 둘이 따로 나가 협공하는 것과 비슷하게
   const aid = 1 + 0.12 * Math.min(2, Math.max(0, gs.length - 1));
   // 특성: 명장·맹장 공격↑, 책략 공격·방어↑
-  const ta = 1 + t14(gs, '명장') + t14(gs, '맹장') + t14(gs, '책략'), td = 1 + t14(gs, '책략');
+  const ta = 1 + t14(gs, '명장') + t14(gs, '맹장') + t14(gs, '책략') + t14(gs, '고무') / 3, td = 1 + t14(gs, '책략'); // 고무: 북돋운 병사가 더 세게 침
   return { atk: (40 + best('war') * 0.4 + best('lead') * 0.6) * aid * ta, def: (40 + best('lead') * 0.6 + best('intel') * 0.4) * aid * td, intel: best('intel') };
 };
 // 장수 나누기: 장수가 몰린 성에서 모자란 성으로 (사람이 버튼을 누를 때만). 성마다 목표 인원 — 적과 맞닿은 성 4명, 후방 3명(내정 담당 셋)
@@ -1075,7 +1080,7 @@ export function stepDay(s, grid) {
     // 지형·상황 특성: 기마(평원·사막·동토), 산악(산·구릉), 돌격(병력 열세), 위압(적 방어↓), 화공(맑은 날 숲·구릉)
     const tg = gensOf(s, tgt.gens);
     const tb = (1 + (tr === T.PLAINS || tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '기마') : 0) + (tr === T.MOUNTAIN || tr === T.HILLS ? t14(ug, '산악') : 0)
-      + (u.troops < tgt.troops ? t14(ug, '돌격') : 0) + (tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '사막') : 0) + (tr === T.FOREST || tr === T.HILLS ? t14(ug, '화공') : 0)
+      + (u.troops < tgt.troops ? t14(ug, '돌격') : u.troops > tgt.troops ? t14(ug, '추격') : 0) /* 돌격: 열세일 때 · 추격: 우세할 때 몰아붙임 */ + (tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '사막') : 0) + (tr === T.FOREST || tr === T.HILLS ? t14(ug, '화공') : 0)
       + (grid.river[tgt.tile] ? t14(ug, '도하') / 2 : 0)) / (1 - t14(ug, '위압')) / (1 + t14(tg, '매복'));
     let dmg = tb * (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
     // 일기토
@@ -1097,10 +1102,10 @@ export function stepDay(s, grid) {
       const fire = tac.kind === 'fire' ? fireMult(s, grid, tgt.tile) * (1 + t14([tac.g], '화공') / 2) : 1;
       if (tac.kind === 'guard') { u.guard = 2; }
       else dmg *= tac.mult * fire;
-      tgt.morale -= tac.morale * (tac.kind === 'scare' ? 1.5 : 1);
+      tgt.morale -= tac.morale * (tac.kind === 'scare' ? 1.5 : 1) * (1 - t14(gensOf(s, tgt.gens), '고무'));
       s.fx.push({ type: 'tactic', tile: u.tile, to: tgt.tile, text: `${tac.g.name} 「${tac.name}」`, nation: u.nation, unique: !!tac.unique });
       if (tac.kind === 'fire') for (const t of grid.nb[tgt.tile]) { const o = occ.get(t); if (o && o !== tgt && enemy(s, u.nation, o.nation)) { const x = dmg * 0.4; o.troops -= x; s.fx.push({ type: 'hit', tile: t, amt: Math.round(x) }); } }
-      if (tac.kind === 'shout') for (const o of s.units) if (enemy(s, u.nation, o.nation) && grid.dist(o.tile, u.tile) <= 2) { o.morale -= tac.morale; o.stun = 1; }
+      if (tac.kind === 'shout') for (const o of s.units) if (enemy(s, u.nation, o.nation) && grid.dist(o.tile, u.tile) <= 2) { o.morale -= tac.morale * (1 - t14(gensOf(s, o.gens), '고무')); o.stun = 1; }
       if (u.nation === s.playerId || tgt.nation === s.playerId) log(s, `🔥 ${tac.g.name}의 「${tac.name}」!${tac.kind === 'guard' ? ' 진을 굳게 쳤습니다' : ` ${leader(s, tgt).name} 부대 ${fmtTroops(Math.round(dmg))} 피해`}`, 'battle', [u.nation, tgt.nation]);
     }
     s.fx.push({ type: 'clash', a: u.tile, b: tgt.tile });
@@ -1117,7 +1122,8 @@ export function stepDay(s, grid) {
     // 공성병기를 끼고 있는 부대는 들판 싸움에 취약 (기습당하면 +35% 피해)
     const total = list.reduce((a, x) => a + x.dmg, 0) * pincer * (t.guard > 0 ? 0.5 : 1) * (inCamp ? 0.7 : 1) * (t.siege ? 1.35 : 1) * (t.routed ? 1.3 : 1);
     t.troops -= total;
-    t.morale -= (total / Math.max(1, t.troops + total)) * 60 + (pincer > 1 ? 5 : 0);
+    t.morale -= ((total / Math.max(1, t.troops + total)) * 60 + (pincer > 1 ? 5 : 0)) * (1 - t14(gensOf(s, t.gens), '고무'));
+    wound(s, t, total);
     s.fx.push({ type: 'hit', tile: t.tile, amt: Math.round(total), pincer: pincer > 1 });
     // 반격: 맞은 부대가 때린 부대들에게 되갚음 (협공당하면 나눠짐)
     const dt = unitStats(s, t);
@@ -1126,7 +1132,8 @@ export function stepDay(s, grid) {
       const back = (Math.max(0, t.troops) * 0.012 * (dt.atk / unitStats(s, u).def)) / list.length * (1 - t14(gensOf(s, u.gens), '노련')) / (1 + t14(gensOf(s, u.gens), '매복'));
       if (rec) { rec.dmg = Math.round(dmg * mul); rec.back = Math.round(back); rec.pincer = pincer; rec.extra = mul / pincer; }
       u.troops -= back;
-      u.morale -= (back / Math.max(1, u.troops)) * 30;
+      u.morale -= (back / Math.max(1, u.troops)) * 30 * (1 - t14(gensOf(s, u.gens), '고무'));
+      wound(s, u, back);
       meritCredit(s, u, dmg * mul); meritCredit(s, t, back); // 공적: 쓰러뜨린 적 병사 수
       s.fx.push({ type: 'hit', tile: u.tile, amt: Math.round(back) });
     }
@@ -1174,6 +1181,7 @@ export function stepDay(s, grid) {
     meritCredit(s, u, kill);
     const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련')) * (u.troops / Math.max(1, siegeSum.get(c) || u.troops));
     u.troops -= sback;
+    wound(s, u, sback);
     meritCreditCastle(cg, sback);
     if (!s.spectator && (u.nation === s.playerId || c.owner === s.playerId)) { (s.btl ||= []).push({ turn: s.turn, day: s.day, siege: true, a: u.id, an: u.nation, al: leader(s, u)?.name, c: c.id, dn: c.owner, cn: c.name, walled, wall: Math.round(wall), dmg: Math.round(kill), back: Math.round(sback), ratio: a.atk / 100, guard: guardT, engine: !!u.siege }); if (s.btl.length > 120) s.btl.splice(0, s.btl.length - 120); }
     u.morale -= walled ? 0.5 : 0;
@@ -1192,7 +1200,9 @@ export function stepDay(s, grid) {
     // 사기 회복: 보급되면 +1, 싸우지 않고 내 땅에서 쉬면 +3, 내 진지 안이면 +6
     const rest = !hits.has(u) && ![...hits.values()].some((l) => l.some((x) => x.u === u)) && !sieges.some(([x]) => x === u);
     const camp = (s.forts || []).some((f) => f.tile === u.tile && f.kind === 'camp' && f.owner === u.nation && !f.left);
-    u.morale = Math.min(100, u.morale + (!rest ? 1 : camp ? 6 : s.owner[u.tile] === u.nation ? 3 : 1));
+    u.morale = Math.min(100, u.morale + (!rest ? 1 : (camp ? 6 : s.owner[u.tile] === u.nation ? 3 : 1) + Math.round(t14(gensOf(s, u.gens), '고무') * 6)));
+    // 의술: 쉬는 날 다친 병사가 조금씩 돌아옴 (하루에 남은 부상병의 1/4, 적어도 50명)
+    if (rest && u.wounded > 0) { const h = Math.min(u.wounded, Math.max(50, u.wounded * 0.25), Math.max(0, (u.max || u.troops) - u.troops)); u.troops += h; u.wounded = Math.max(0, u.wounded - Math.max(h, 50)); }
   }
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {

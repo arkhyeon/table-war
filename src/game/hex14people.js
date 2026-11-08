@@ -1,4 +1,5 @@
 // ───────── 삼국지14식 모드: 충성·배신, 나이·수명, 계략 (가볍게: 포상은 한 번에, 계략은 버튼 셋) ─────────
+import { nationT } from './hex14traits.js';
 import { makeRng } from './rng.js';
 import { fmtGold } from './format.js';
 import { log, enemy } from './hex14.js';
@@ -66,7 +67,7 @@ export const SCHEMES = {
 const bestIntel = (s, nid, cid) => Math.max(30, ...Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active' && (cid === undefined || g.castle === cid)).map((g) => g.intel));
 export function schemeChance(s, nid, c, k) {
   const me = bestIntel(s, nid), them = bestIntel(s, c.owner, c.id);
-  let p = 0.45 + (me - them) / 100;
+  let p = 0.45 + (me - them) / 100 + nationT(s, nid, '첩보') - (c.owner !== null && c.owner >= 0 ? nationT(s, c.owner, '첩보') / 2 : 0); // 첩보: 우리 계략↑, 적 계략↓
   if (k === 'bribe') {
     const t = schemeTarget(s, c);
     if (!t) return 0;

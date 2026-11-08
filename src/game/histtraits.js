@@ -638,14 +638,16 @@ export const histTraitsOf = (name) => (HIST_TRAITS[name]?.length ? HIST_TRAITS[n
 
 // 「역사 능력치 사용」을 껐을 때: 특성 1~3개 무작위 (등급도 무작위, 능력치와 따로)
 const ALL = Object.keys(T14);
-export function randomTraits(rng) {
+// W: 지도에 맞춘 무게 (사막 없는 지도엔 「사막」이 드묾 — hex14merit mapTraitWeights)
+export function randomTraits(rng, W = {}) {
   const r = rng(), n = r < 0.45 ? 1 : r < 0.8 ? 2 : 3;
   const out = [];
   while (out.length < n) {
-    const k = ALL[Math.floor(rng() * ALL.length)];
-    if (out.some(([x]) => x === k)) continue;
-    const q = rng();
-    out.push([k, q < 0.5 ? 1 : q < 0.85 ? 2 : 3]);
+    const pool = ALL.filter((k) => !out.some(([x]) => x === k));
+    let sum = pool.reduce((a, k) => a + (W[k] ?? 1), 0), q = rng() * sum, k = pool[0];
+    for (const x of pool) { q -= W[x] ?? 1; if (q <= 0) { k = x; break; } }
+    const tq = rng();
+    out.push([k, tq < 0.5 ? 1 : tq < 0.85 ? 2 : 3]);
   }
   return out;
 }
