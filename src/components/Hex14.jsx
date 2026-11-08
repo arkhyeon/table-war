@@ -31,6 +31,9 @@ const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o
 // 칸마다 같은 값이 나오는 작은 난수
 const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
 const isPhone = () => window.innerWidth <= 760; // 폰 화면 (아래 시트 배치)
+// 굵은 글자 폭: 글자마다 한 번만 재고 크기에 비례해 씀 (매 장면 수백 번 재면 확대·끌기가 끊겼음 — 프로파일)
+const TWC = new Map(); let twCtx = null;
+const textW = (text, px) => { let w = TWC.get(text); if (w === undefined) { twCtx = twCtx || document.createElement('canvas').getContext('2d'); twCtx.font = 'bold 100px sans-serif'; w = twCtx.measureText(text).width; if (TWC.size > 4000) TWC.clear(); TWC.set(text, w); } return (w * px) / 100; };
 // 폰은 그림 메모리를 아낌: 바탕 지도 2048점, 화면 배율 2까지, 확대 조각 36장까지 (폰 브라우저가 메모리가 모자라면 페이지를 꺼 버려 처음 화면으로 돌아갔음)
 const mapScale = (grid) => Math.min(3, (isPhone() ? 1600 : 4096) / Math.max(grid.W, grid.H));
 const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(Math.max(grid.W, grid.wrap ? grid.period + grid.size * 2 : 0) * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
@@ -859,7 +862,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const TL = (() => {
       const L = land.current, B0 = L.base, want = k * dpr, vx0 = view.current.x, vw = cw / k, vh = ch / k;
       const need = want > B0.sc * 1.6 && !(grid.wrap && vx0 + vw > grid.period);
-      if (!need) return null;
+      if (!need) { if (L.tileQ) L.tileQ.list = []; return null; } // 축소하면 남은 확대 조각 그리기를 멈춤 (예전엔 안 보이는 조각을 계속 그려 축소가 끊겼음)
       L.tiles = L.tiles || new Map();
       const lv = Math.round(Math.log2(want / B0.sc) * 2) / 2, sc = Math.min(B0.sc * 2 ** lv, 12), TW = 512 / sc; // 배율은 √2 단계로 (확대 중 조금씩 바뀔 때마다 새로 그리지 않게)
       const tx0 = Math.floor(vx0 / TW), tx1 = Math.floor((vx0 + vw) / TW), ty0 = Math.max(0, Math.floor(vy / TW)), ty1 = Math.floor((vy + vh) / TW);
@@ -881,6 +884,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
         L.tileT = setTimeout(function pump() {
           L.tileT = null;
           const Q = L.tileQ; if (!Q || !Q.list.length) return;
+          // 조각 하나 그릴 때마다 화면 전체를 다시 그리지 않고 다음 화면 갱신 때 한 번만
+          const pumpDraw = () => { if (!L.pumpRaf) L.pumpRaf = requestAnimationFrame(() => { L.pumpRaf = 0; draw(); }); };
+          // 손가락으로 끌거나 확대하는 동안엔 조각을 그리지 않음 (조각 하나 그리는 데 폰에서 0.1~0.4초 — 그동안 화면이 멈춰 뚝뚝 끊겼음)
+          if (pointers.current.size || performance.now() - (L.gestureT || 0) < 220) { L.tileT = setTimeout(pump, 150); return; }
           // 타일마다 가장자리를 4점씩 더 그려 이웃 타일과 겹치게 함: 딱 맞대면 점 아래 자리에서 맞닿아 바탕색 실선이 비쳐 보임
           const pad = 4 / Q.sc;
           const job = Q.list.shift(), r = { x: job.tx * Q.TW - pad, y: job.ty * Q.TW - pad, w: Q.TW + pad * 2, h: Q.TW + pad * 2, sc: Q.sc };
@@ -888,21 +895,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
           // 영토 그림: 타일마다 따로 둠 → 땅 주인이 바뀌면 이것만 다시 그림 (지형은 그대로 — 예전엔 지형까지 통째로 다시 그려 느렸음)
           const ownLayer = (old) => { const oc = old || document.createElement('canvas'); oc.width = Math.ceil(r.w * r.sc); oc.height = Math.ceil(r.h * r.sc); const ox = oc.getContext('2d'); ox.setTransform(1, 0, 0, 1, 0, 0); ox.clearRect(0, 0, oc.width, oc.height); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y); drawOwnerTiles(grid, s2, ox, tilesIn(grid, r, grid.size * 3)); return oc; };
           const oldT = L.tiles.get(job.key);
-          if (oldT && oldT.comp && oldT.own) { ownLayer(oldT.own); oldT.stale = false; oldT.used = L.frame || 0; draw(); if (Q.list.length) L.tileT = setTimeout(pump, Q.list[0].slow ? 120 : 0); return; }
+          if (oldT && oldT.comp && oldT.own) { ownLayer(oldT.own); oldT.stale = false; oldT.used = L.frame || 0; pumpDraw(); if (Q.list.length) L.tileT = setTimeout(pump, Q.list[0].slow ? 120 : 0); return; }
           const T = paintTerrain(grid, world, r);
           const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(T.rcv, 0, 0); T.rcv.width = 0; T.rcv.height = 0; // 강은 지형에 합침
           if (oldT?.comp && oldT.comp !== T.cv) { oldT.comp.width = 0; oldT.comp.height = 0; } if (oldT?.own) { oldT.own.width = 0; oldT.own.height = 0; }
           L.tiles.set(job.key, { ...r, comp: T.cv, own: ownLayer(null), used: L.frame || 0, stale: false });
           // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
           const MAXT = Math.max(isPhone() ? 24 : 72, (L.tileNeed || 0) + 6); if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const o3 = L.tiles.get(k2)?.own; if (o3) { o3.width = 0; o3.height = 0; } const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
-          draw();
+          pumpDraw();
           if (Q.list.length) L.tileT = setTimeout(pump, 0);
         }, 0);
       }
       const all = vis.every((key) => { const t = L.tiles.get(key); return t && (!t.stale || !!t.own); });
       // 확대·축소 직후 새 배율 타일이 아직 없으면: 이웃 배율에서 그려 둔 타일을 늘이거나 줄여 먼저 보여 줌 (흐린 전체 지도 대신)
       const fallback = [];
-      if (!all) for (const l2 of [lv - 0.5, lv + 0.5, lv - 1, lv + 1]) {
+      const gest = pointers.current.size > 0 || performance.now() - (L.gestureT || 0) < 220;
+      if (!all && !gest) for (const l2 of [lv - 0.5, lv + 0.5, lv - 1, lv + 1]) {
         const TW2 = 512 / Math.min(B0.sc * 2 ** l2, 12);
         for (let ty = Math.max(0, Math.floor(vy / TW2)); ty <= Math.floor((vy + vh) / TW2); ty++) for (let tx = Math.floor(vx0 / TW2); tx <= Math.floor((vx0 + vw) / TW2); tx++) { const t = L.tiles.get(`${l2}|${tx}|${ty}`); if (t) fallback.push(t); }
       }
@@ -1122,9 +1130,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
         // 확대했을 때만 병력을 이름 옆에 한 줄로 (예전엔 이름 아래 두 줄이라 겹침이 많았음)
         const showN = k * sz > 4.5, num = showN ? numOf(c.owner, c.tile, c.troops) : '';
         ctx.font = `bold ${fs}px sans-serif`;
-        const nw = ctx.measureText(label).width;
+        const nw = textW(label, fs);
         ctx.font = `bold ${fs * 0.82}px sans-serif`;
-        const tw2 = showN ? ctx.measureText(num).width + fs * 0.4 : 0;
+        const tw2 = showN ? textW(num, fs * 0.82) + fs * 0.4 : 0;
         const tw = nw + tw2 + fs * 0.6;
         const ly = cy + sz * 0.7 + sz * 0.38 + fs * 0.95; // 성벽 막대 바로 아래 (크게 확대해도 이름이 성에서 멀어지지 않게)
         const bh = fs * 1.25;
@@ -1320,7 +1328,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const mineU = u.nation === pid;
       const lab = mineU || on || k * sz > 7 ? `${g?.name || ''} ${numOf(u.nation, u.tile, u.troops)}` : numOf(u.nation, u.tile, u.troops);
       ctx.font = `bold ${fs * 0.78}px sans-serif`;
-      const lw = ctx.measureText(lab).width + fs * 0.4, lh = fs, ly0 = top - fs * 1.05;
+      const lw = textW(lab, fs * 0.78) + fs * 0.4, lh = fs, ly0 = top - fs * 1.05;
       const hitC = placed.some(([x, y, w, h]) => Math.abs(x - cx) * 2 < w + lw && y < ly0 + lh && ly0 < y + h);
       const free = on || (!labels.some(([lx, ly, w]) => Math.abs(lx - cx) * 2 < (w || lw) + lw && Math.abs(ly - top) < lh) && (mineU || !hitC));
       if (k * sz > 4.5 && free) {
@@ -1397,13 +1405,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const ambient = !lively && (wk === 'rain' || wk === 'snow' || wk === 'wind' || s.units.length);
     const busy = lively || ambient;
     cancelAnimationFrame(raf.current); clearTimeout(ambT.current);
-    // 한 장면 그리는 데 걸린 시간(평균)만큼 쉬었다 다음 장면 — 느린 폰에서 그림이 계산(하루 진행)을 밀어내지 않게 (그림에 CPU 절반 이하)
+    // 아주 느린 폰에서만 장면 사이를 조금 쉼 (계산할 틈) — 부드러움이 먼저라 그림 시간의 절반만, 최대 0.06초
     const LC = land.current, dt = performance.now() - now;
     LC.drawAvg = LC.drawAvg ? LC.drawAvg * 0.8 + dt * 0.2 : dt;
     LC.frames = (LC.frames || 0) + 1; LC.drawSum = (LC.drawSum || 0) + dt;
-    const rest = LC.drawAvg > 14 ? Math.min(250, LC.drawAvg * 1.2) : 0;
+    const rest = LC.drawAvg > 24 ? Math.min(60, LC.drawAvg * 0.5) : 0;
     if (lively) { if (rest) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, rest); else raf.current = requestAnimationFrame(draw); }
-    else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, Math.max(80, rest * 2));
+    else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, Math.max(80, rest));
   };
   // 화면(React)이 다시 그려질 때마다 지도를 통째로 다시 그리지 않고, 다음 프레임에 한 번만 (생각 중 표시처럼 자주 바뀌는 것 때문에 큰 지도를 수십 번 그리던 것 막음)
   const drawQ = useRef(0);
@@ -1441,8 +1449,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
       meritTest: async (gid) => { const M = await import('../game/hex14merit.js'); return act((s) => { const g = s.generals[gid]; for (let k = 0; k < 6 && !(s.traitOffers || []).some((o) => o.gid === gid); k++) { g.merit = M.nextMerit(g) ?? 1e9; M.meritTurn(s); } return { ok: true, offers: (s.traitOffers || []).length, traits: g.traits.map(M.traitName).join(','), lv: g.meritLv }; }); }, // 시험용: 공적을 채워 특성 제안 띄우기
       showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
       paintMs: () => land.current.paintMs,
-      canvasParts: () => { const L = land.current, mb = (c) => Math.round(((c?.width || 0) * (c?.height || 0) * 4) / 1e5) / 10; return { base: mb(L.base?.cv), river: mb(L.base?.rcv), owners: mb(L.over), comp: mb(L.comp), screen: mb(canvas.current), tiles: Math.round([...(L.tiles?.values() || [])].reduce((a, t) => a + mb(t.comp), 0)), tileN: L.tiles?.size || 0, stat: Math.round(Object.values(L.statC || {}).reduce((a, c) => a + mb(c?.cv), 0)), snow: mb(L.snow), fog: mb(L.fog), baseSize: `${L.base?.cv?.width}x${L.base?.cv?.height}` }; },
-      canvasMB: () => { const L = land.current, px = (c) => (c?.width || 0) * (c?.height || 0); let t = px(L.base?.cv) + px(L.base?.rcv) + px(L.over) + px(L.comp) + px(canvas.current); for (const x of L.tiles?.values() || []) t += px(x.comp); for (const c of Object.values(L.statC || {})) t += px(c?.cv); return Math.round((t * 4) / 1e6); }, // 시험용: 지도 그림 메모리(MB) // 시험용: 처음 지도 그림에 걸린 시간
+      canvasParts: () => { const L = land.current, mb = (c) => Math.round(((c?.width || 0) * (c?.height || 0) * 4) / 1e5) / 10; return { base: mb(L.base?.cv), river: mb(L.base?.rcv), owners: mb(L.over), comp: mb(L.comp), screen: mb(canvas.current), tiles: Math.round([...(L.tiles?.values() || [])].reduce((a, t) => a + mb(t.comp) + mb(t.own), 0)), maxCv: Math.max(L.base?.cv?.width || 0, L.base?.cv?.height || 0), tileN: L.tiles?.size || 0, stat: Math.round(Object.values(L.statC || {}).reduce((a, c) => a + mb(c?.cv), 0)), snow: mb(L.snow), fog: mb(L.fog), baseSize: `${L.base?.cv?.width}x${L.base?.cv?.height}` }; },
+      canvasMB: () => { const L = land.current, px = (c) => (c?.width || 0) * (c?.height || 0); let t = px(L.base?.cv) + px(L.base?.rcv) + px(L.over) + px(L.comp) + px(canvas.current); for (const x of L.tiles?.values() || []) t += px(x.comp) + px(x.own); for (const c of Object.values(L.statC || {})) t += px(c?.cv); return Math.round((t * 4) / 1e6); }, // 시험용: 지도 그림 메모리(MB) // 시험용: 처음 지도 그림에 걸린 시간
       sfx: (k) => sfx(k),
       mood: (m) => { setMood(m); setMood(m); },
       grid: () => grid,
@@ -1479,6 +1487,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const x = v.x + (px - r.left) / v.k;
     return [grid.wrap ? ((x % grid.period) + grid.period) % grid.period : x, v.y + (py - r.top) / v.k];
   };
+  // 손가락 움직임마다 바로 그리지 않고 다음 화면 갱신 때 한 번만 그림 (두 손가락이면 움직임이 두 배로 와서 같은 장면을 두 번 그렸음)
+  const gq = useRef(0);
+  const drawSoon = () => { land.current.gestureT = performance.now(); if (gq.current) return; gq.current = requestAnimationFrame(() => { gq.current = 0; draw(); }); };
   const onDown = (e) => {
     if (e.target !== canvas.current) return; // 지도 위 버튼은 지도 누르기로 치지 않음
     pointers.current.set(e.pointerId, [e.clientX, e.clientY]);
@@ -1513,7 +1524,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     clearTimeout(pressT.current);
     view.current.x = d.vx - dx / view.current.k;
     view.current.y = d.vy - dy / view.current.k;
-    draw();
+    drawSoon();
   };
   const onUp = (e) => {
     shiftRef.current = !!e.shiftKey; // PC: Shift+클릭은 경유지 추가
@@ -1522,6 +1533,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     drag.current = null;
     clearTimeout(pressT.current);
     if (d && !d.moved && !d.pinch && !d.long) tap(e.clientX, e.clientY);
+    else if (d && !pointers.current.size) setTimeout(() => draw(), 240); // 손을 떼면 선명한 조각 그리기를 다시 시작
   };
   const zoomAt = (px, py, f) => {
     const v = view.current;
@@ -1529,7 +1541,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const nk = Math.max(0.5, grid.wrap ? wrap.current.clientHeight / grid.H : 0, Math.min(14, v.k * f));
     const r = wrap.current.getBoundingClientRect();
     v.k = nk; v.x = wx - (px - r.left) / nk; v.y = wy - (py - r.top) / nk;
-    draw();
+    drawSoon();
   };
   const onWheel = (e) => zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.15 : 1 / 1.15);
 
@@ -1849,12 +1861,29 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const cities = game.castles.filter((c) => c.kind !== 'pass');
   const myCities = cities.filter((c) => c.owner === pid).length;
   const myUnits = game.units.filter((u) => u.nation === pid);
+  // 진행 중(하루·순 재생)에는 무거운 내정 계산(수입·할 일·장수 배치·내 성 목록)을 다시 하지 않고 진행이 끝나면 한 번에 고침 (큰 판에서 매일 다시 계산해 화면이 끊겼음)
+  const calmRef = useRef(game); if (!playing) calmRef.current = game; const calmGame = calmRef.current;
   const inc = useMemo(
     () =>
       game.castles.filter((c) => c.owner === pid).reduce((a, c) => a + castleIncome(game, grid, c), 0) -
       Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active').length * 200 - game.castles.filter((c) => c.owner === pid).reduce((a, c) => a + Object.values(c.bld || {}).reduce((x, y) => x + y, 0) * 300, 0) - (me.policies || []).length * POLICY_UPKEEP,
-    [game, grid, pid],
+    [calmGame, grid, pid], // eslint-disable-line react-hooks/exhaustive-deps
   );
+  // 내 성 목록 (진행 중엔 다시 세지 않음)
+  const cityRows = useMemo(() => {
+    const mine = game.castles.filter((c) => c.owner === pid);
+    const R10 = 8 * (grid.k || 1);
+    // 성마다 한 번만 셈 (예전엔 정렬하며 비교할 때마다 모든 부대·장수를 다시 훑어 큰 판에서 화면이 멈칫했음)
+    const foes = game.units.filter((u) => enemy(game, pid, u.nation));
+    const thM = new Map(mine.map((c) => [c.id, foes.reduce((a, u) => (grid.dist(u.tile, c.tile) <= R10 ? a + u.troops : a), 0)]));
+    const gnM = new Map(); for (const g of Object.values(game.generals)) if (g.status === 'active' && g.castle != null) gnM.set(g.castle, (gnM.get(g.castle) || 0) + 1);
+    const threat = (c) => thM.get(c.id) || 0, gn = (c) => gnM.get(c.id) || 0;
+    const goldM = new Map(mine.map((c) => [c.id, goldOf(game, c)])), gold = (c) => goldM.get(c.id) || 0;
+    const key = { name: (c) => c.name, troops: (c) => -c.troops, gens: (c) => -gn(c), gold: (c) => -goldM.get(c.id), threat: (c) => -threat(c) }[csort] || ((c) => -c.troops);
+    const kv = new Map(mine.map((c) => [c.id, key(c)]));
+    const list = mine.slice().sort((a, b) => { const x = kv.get(a.id), y = kv.get(b.id); return x < y ? -1 : x > y ? 1 : 0; });
+    return { list, threat, gn, gold };
+  }, [calmGame, csort, pid, grid]); // eslint-disable-line react-hooks/exhaustive-deps
   const food = me.food ?? 0, use = foodUse(game, pid);
   const turnsToHarvest = (((HARVEST_MONTH * 3 - (game.turn - 1)) % 36) + 36) % 36;
   // 내정 부르기: 빈 담당에 맞는 장수 — 다른 내 성에서 담당 없이 있는, 무력 85 이하(싸움꾼은 빼고), 군주·출진 중 제외, 그 성의 마지막 장수는 빼지 않음
@@ -1883,7 +1912,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     return n ? { ok: true, msg: `장수 ${n}명이 담당 빈 성으로 갑니다 — 도착하면 업무를 맡습니다` } : { ok: false, msg: '부를 수 있는 장수가 없습니다.' };
   });
   // 장수 나누기: 계획을 보여 주고 확인을 받은 뒤 보냄
-  const spreadPlan = useMemo(() => (game.spectator ? [] : planGenSpread(game, grid, pid)), [game, grid, pid]);
+  const spreadPlan = useMemo(() => (game.spectator ? [] : planGenSpread(game, grid, pid)), [calmGame, grid, pid]); // eslint-disable-line react-hooks/exhaustive-deps
   const spreadGens = async () => {
     const plan = planGenSpread(gameRef.current, grid, pid);
     if (!plan.length) return toast('장수가 이미 고르게 있습니다');
@@ -1978,7 +2007,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const low = Object.values(g.generals).filter((x) => x.nation === pid && x.status === 'active' && !x.ruler && loyalOf(x) < 40);
     if (low.length) out.push({ id: 'loy', sev: low.some((x) => loyalOf(x) < 30) ? 'danger' : 'todo', icon: '💔', title: `충성 낮은 장수 ${low.length}명 (떠날 수 있음)`, sub: low.slice(0, 4).map((x) => `${x.name} 충${loyalOf(x)}`).join(' · '), act: { label: `전체 포상 ${fmtGold(rewardCost(g, pid))}`, disabled: me.gold < rewardCost(g, pid), fn: () => act((s) => rewardAll(s, pid)) } });
     return out;
-  }, [game, pid, grid, spreadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [calmGame, pid, grid, spreadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
   // 순이 바뀌면(첫날) 할 일 목록을 저절로 엶
   const todoTurn = useRef(null);
   const [todoPing, setTodoPing] = useState(false); // 저절로 열지 않은 순: 할 일 버튼을 반짝여 알림
@@ -2444,12 +2473,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <details className="sec" open>
                 <summary className="sec-h">🏯 내 성 {game.castles.filter((c) => c.owner === pid).length}곳 <small className="muted">눌러서 그 성으로</small></summary>
                 {(() => {
-                  const mine = game.castles.filter((c) => c.owner === pid);
-                  const R10 = 8 * (grid.k || 1);
-                  const threat = (c) => game.units.filter((u) => enemy(game, pid, u.nation) && grid.dist(u.tile, c.tile) <= R10).reduce((a, u) => a + u.troops, 0);
-                  const gn = (c) => Object.values(game.generals).filter((g) => g.castle === c.id && g.status === 'active').length;
-                  const key = { name: (c) => c.name, troops: (c) => -c.troops, gens: (c) => -gn(c), gold: (c) => -goldOf(game, c), threat: (c) => -threat(c) }[csort] || ((c) => -c.troops);
-                  const list = mine.slice().sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+                  const { list, threat, gn, gold } = cityRows;
                   const H = ({ k, children }) => <th className={'sortable' + (csort === k ? ' on' : '')} onClick={() => setCsort(k)}>{children}{csort === k ? ' ▾' : ''}</th>;
                   return (
                     <table className="city-table">
@@ -2460,7 +2484,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                             <td>{c.kind === 'pass' ? '⛩️' : c.capital ? '♛' : ''}{c.port ? '⚓' : ''}{c.name}{(game.corps || []).some((co) => co.cities.includes(c.id)) ? ' 🎖️' : ''}{c.build ? ' 🔨' : ''}</td>
                             <td>{fmtTroops(c.troops)}</td>
                             <td>{gn(c)}</td>
-                            <td>{c.kind === 'pass' ? '-' : fmtGold(goldOf(game, c))}</td>
+                            <td>{c.kind === 'pass' ? '-' : fmtGold(gold(c))}</td>
                             <td className={th > c.troops * 0.6 ? 'bad' : th ? 'warn' : 'muted'}>{th ? fmtTroops(th) : '·'}</td>
                           </tr>); })}
                       </tbody>
