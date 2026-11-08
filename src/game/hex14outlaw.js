@@ -72,7 +72,9 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   if (spot < 0) return false;
   const kind = kindOf(grid, spot);
   const avg = owned.reduce((a, c) => a + c.troops, 0) / owned.length;
-  const troops = Math.round(Math.max(5000, Math.min(25000, avg * (0.75 + rng() * 0.7))) / 1000) * 1000; // 꽤 아프게
+  // 도적이 그동안 이기고 성을 깰수록 새로 일어나는 무리도 커짐 (최대 1.6배)
+  const st = s.outlawStats || {}, fame = Math.min(0.6, ((st.kill || 0) + (st.smash || 0) * 2) * 0.03);
+  const troops = Math.round(Math.max(5000, Math.min(25000 * (1 + fame), avg * (0.75 + rng() * 0.7) * (1 + fame))) / 1000) * 1000; // 꽤 아프게
   const gid = `out_${s.turn}_${spot}`;
   const boss = BOSS[Math.floor(rng() * BOSS.length)];
   const name = `${kind} ${rankOf(troops)} ${boss}`;
@@ -113,6 +115,27 @@ export function outlawDay(s, grid, rng) {
   }
 }
 
+// 도적 무리가 이길 때마다 세를 불림: 흩어진 병사·백성이 모여들고 사기가 오르며 두목이 단련됨
+export function outlawGrow(s, u, add, morale, stat, why, nations = []) {
+  if (!u || u.dead) return;
+  const cap = 40000;
+  const before = u.troops;
+  u.troops = Math.min(cap, Math.round((u.troops + add) / 100) * 100);
+  u.max = Math.max(u.max || 0, u.troops);
+  u.morale = Math.min(100, (u.morale || 0) + morale);
+  u.wins = (u.wins || 0) + 1;
+  const g = s.generals[u.gens[0]];
+  if (g) {
+    g.war = Math.min(99, g.war + stat); g.lead = Math.min(99, g.lead + stat);
+    // 세 번 이길 때마다 특성 한 단계 (최대 Ⅲ)
+    if (u.wins % 3 === 0) { const tr = (g.traits || []).find(([, t]) => t < 3); if (tr) tr[1] += 1; }
+    if (g.boss) g.name = `${g.kind} ${rankOf(u.troops)} ${g.boss}`;
+  }
+  const gained = u.troops - before;
+  if (gained >= 1000) s.fx.push({ type: 'tactic', tile: u.tile, text: `세력 +${fmtTroops(gained)}`, nation: u.nation });
+  if (gained >= 2000 && why) log(s, `🏴 ${g?.name || '도적'} 무리가 ${why} 세를 불렸습니다 (+${fmtTroops(gained)}, 이제 ${fmtTroops(u.troops)})`, 'bad', nations);
+}
+
 // 도적이 성을 깨면: 차지하지 않고 그 성은 주인 없는 중립 성이 됨 (수비병도 중립 성만큼 다시 모임), 도적은 다음 먹잇감으로
 export function outlawSack(s, grid, c, u) {
   const old = c.owner;
@@ -134,6 +157,8 @@ export function outlawSack(s, grid, c, u) {
   u.order = null; u.path = [];
   s.fx.push({ type: 'capture', tile: c.tile, text: `${c.name} 중립화` });
   s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.smash++;
+  // 성을 깨면 그 고을의 불만 백성이 무리에 들어옴 (인구가 많을수록)
+  outlawGrow(s, u, c.kind === 'pass' ? 1500 : 3000 + Math.round((c.pop || 0) * 60), 25, 3, `${c.name}을(를) 깨고`, old !== null && old >= 0 ? [old] : []);
   log(s, `🔥 ${gensOf(s, u.gens)[0]?.name}의 ${u.outlaw || '도적'}이(가) ${c.name}${old !== null && old >= 0 ? `(${s.nations[old]?.name})` : ''}을(를) 무너뜨렸습니다! 성은 주인 없는 땅이 되고, 도적은 다음 먹잇감을 찾아 떠납니다.`, 'bad', [old]);
   return old;
 }

@@ -1,3 +1,4 @@
+import { histTraitsOf, randomTraits } from './histtraits.js';
 // 장수 특성: 무관(mil)·문관(civ), 등급 Ⅰ~Ⅲ마다 효과 차등
 // scope: army=동행 부대, region=주둔 지역, nation=국가 전체(가장 높은 장수 기준)
 const pct = (v) => `${Math.round(v * 100)}%`;
@@ -74,8 +75,13 @@ export function roleOf(g) {
 const tierFor = (v) => (v >= 93 ? 3 : v >= 82 ? 2 : 1);
 
 // 원본 데이터의 단일 특성 → 등급 있는 특성 목록
-export function initTraits(g, rng) {
+// mode.random: 「역사 능력치 사용」을 껐을 때 — 특성 1~3개 무작위 (능력치와 따로)
+// 그 밖엔 역사 속 특기 표(1~3개)를 쓰고, 표에 없으면 장수 자료의 특성 하나
+export function initTraits(g, rng, mode = {}) {
   const role = roleOf(g);
+  if (mode.random) return { role, traits: randomTraits(rng) };
+  const hist = histTraitsOf(g.name);
+  if (hist) return { role, traits: hist };
   const base = g.trait && TRAITS[g.trait] ? g.trait : role === 'civ' ? '정치' : '명장';
   const key = TRAITS[base].cat === 'civ' ? Math.max(g.pol, g.intel) : Math.max(g.war, g.lead);
   const traits = [[base, tierFor(key)]];

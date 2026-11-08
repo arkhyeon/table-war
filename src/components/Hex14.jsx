@@ -31,7 +31,7 @@ const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o
 const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
 const isPhone = () => window.innerWidth <= 760; // 폰 화면 (아래 시트 배치)
 // 폰은 그림 메모리를 아낌: 바탕 지도 2048점, 화면 배율 2까지, 확대 조각 36장까지 (폰 브라우저가 메모리가 모자라면 페이지를 꺼 버려 처음 화면으로 돌아갔음)
-const mapScale = (grid) => Math.min(3, (isPhone() ? 2048 : 4096) / Math.max(grid.W, grid.H));
+const mapScale = (grid) => Math.min(3, (isPhone() ? 1600 : 4096) / Math.max(grid.W, grid.H));
 const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(Math.max(grid.W, grid.wrap ? grid.period + grid.size * 2 : 0) * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
 const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) => Math.max(0, Math.min(255, Math.round(v * f))); return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`; };
 
@@ -863,10 +863,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
       L.tiles = L.tiles || new Map();
       const lv = Math.round(Math.log2(want / B0.sc) * 2) / 2, sc = Math.min(B0.sc * 2 ** lv, 12), TW = 512 / sc; // 배율은 √2 단계로 (확대 중 조금씩 바뀔 때마다 새로 그리지 않게)
       const tx0 = Math.floor(vx0 / TW), tx1 = Math.floor((vx0 + vw) / TW), ty0 = Math.max(0, Math.floor(vy / TW)), ty1 = Math.floor((vy + vh) / TW);
-      const vis = [], want2 = [];
+      const vis = [], want2 = []; let needN = 0; // needN: 지금 화면+둘레에 필요한 조각 수 (이보다 적게 남기면 버렸다 다시 그리기를 끝없이 되풀이함)
       const frame = (L.frame = (L.frame || 0) + 1);
       for (let ty = ty0 - 1; ty <= ty1 + 1; ty++) for (let tx = tx0 - 1; tx <= tx1 + 1; tx++) {
         if (tx < 0 || ty < 0 || tx * TW > grid.W || ty * TW > grid.H) continue;
+        needN++;
         const key = `${lv}|${tx}|${ty}`, t = L.tiles.get(key), inView = tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1;
         if (inView) vis.push(key);
         if (t) t.used = frame;
@@ -874,7 +875,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       }
       // 그릴 차례: 화면 안 → 가운데 가까운 순, 옛 그림이 있는 것보다 없는 것 먼저
       want2.sort((a, b) => (b.inView - a.inView) || (!!L.tiles.get(a.key) - !!L.tiles.get(b.key)) || a.d - b.d);
-      L.tileQ = { list: want2, lv, sc, TW };
+      L.tileQ = { list: want2, lv, sc, TW }; L.tileNeed = needN;
       if (want2.length && !L.tileT) {
         L.tileT = setTimeout(function pump() {
           L.tileT = null;
@@ -891,7 +892,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           const oldT = L.tiles.get(job.key); if (oldT?.comp && oldT.comp !== T.cv) { oldT.comp.width = 0; oldT.comp.height = 0; } // 다시 그린 조각: 옛 그림 해제
           L.tiles.set(job.key, { ...r, comp: T.cv, used: L.frame || 0, stale: false });
           // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
-          const MAXT = isPhone() ? 36 : 72; if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
+          const MAXT = Math.max(isPhone() ? 24 : 72, (L.tileNeed || 0) + 6); if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
           draw();
           if (Q.list.length) L.tileT = setTimeout(pump, 0);
         }, 0);
@@ -1437,6 +1438,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       game: () => gameRef.current,
       showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
       paintMs: () => land.current.paintMs,
+      canvasParts: () => { const L = land.current, mb = (c) => Math.round(((c?.width || 0) * (c?.height || 0) * 4) / 1e5) / 10; return { base: mb(L.base?.cv), river: mb(L.base?.rcv), owners: mb(L.over), comp: mb(L.comp), screen: mb(canvas.current), tiles: Math.round([...(L.tiles?.values() || [])].reduce((a, t) => a + mb(t.comp), 0)), tileN: L.tiles?.size || 0, stat: Math.round(Object.values(L.statC || {}).reduce((a, c) => a + mb(c?.cv), 0)), snow: mb(L.snow), fog: mb(L.fog), baseSize: `${L.base?.cv?.width}x${L.base?.cv?.height}` }; },
       canvasMB: () => { const L = land.current, px = (c) => (c?.width || 0) * (c?.height || 0); let t = px(L.base?.cv) + px(L.base?.rcv) + px(L.over) + px(L.comp) + px(canvas.current); for (const x of L.tiles?.values() || []) t += px(x.comp); for (const c of Object.values(L.statC || {})) t += px(c?.cv); return Math.round((t * 4) / 1e6); }, // 시험용: 지도 그림 메모리(MB) // 시험용: 처음 지도 그림에 걸린 시간
       sfx: (k) => sfx(k),
       mood: (m) => { setMood(m); setMood(m); },

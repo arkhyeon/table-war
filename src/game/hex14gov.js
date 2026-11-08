@@ -8,7 +8,7 @@ import { T14, MAP14, t14, castleGens, nationT } from './hex14traits.js';
 export function ensureTraits(s) {
   for (const g of Object.values(s.generals)) {
     if (g.status === 'gone') continue;
-    if (!(g.traits || []).length) g.traits = initTraits(g, makeRng(`trait:${s.seed}:${g.id}`)).traits;
+    if (!(g.traits || []).length) g.traits = initTraits(g, makeRng(`trait:${s.seed}:${g.id}`), { random: !s.opts?.histStats }).traits;
     // 이 모드에 없는 특성은 비슷한 것으로 (겹치면 높은 등급 하나만)
     const m = new Map();
     for (const [t, tier] of g.traits) { const k = T14[t] ? t : MAP14[t]; if (k && T14[k] && !(m.get(k) >= tier)) m.set(k, tier); }
@@ -16,7 +16,7 @@ export function ensureTraits(s) {
   }
 }
 import { fmtTroops, fmtGold } from './format.js';
-import { POOLS } from './generals.js';
+import { POOLS, randomStats, fairTarget, gradeScore } from './generals.js';
 import { EXTRA, FREE_NAMES, RULERS } from './hex14roster.js';
 import { log, districtTiles, landShare } from './hex14.js';
 import { hasPolicy, POLICY_UPKEEP } from './hex14policy.js';
@@ -75,7 +75,8 @@ export function initGov(s, rng) {
       const m = open.reduce((a, b) => (b.got / b.mine.length < a.got / a.mine.length ? b : a));
       used.add(d.name);
       const id = `x_${m.n.id}_${m.k}`;
-      s.generals[id] = { id, pool: d.pool, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };
+      const st = statsFor(s, d, m.n.id, rng);
+      s.generals[id] = { id, pool: d.pool, name: d.name, war: st.war, lead: st.lead, intel: st.intel, pol: st.pol, trait: d.trait, traits: [], nation: m.n.id, castle: m.mine[m.k % m.mine.length].id, unit: null, status: 'active' };
       m.k += 1;
       m.got += 1;
     }
@@ -85,14 +86,22 @@ export function initGov(s, rng) {
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   for (let i = 0; i < Math.min(pool.length, Math.round(cities.length / 3)); i++) {
     const d = pool.splice(Math.floor(rng() * pool.length), 1)[0];
-    addFree(s, d, rng.pick(cities), `f0_${i}`);
+    addFree(s, d, rng.pick(cities), `f0_${i}`, rng);
   }
   for (const c of s.castles) if (c.owner !== null) autoJobs(s, c);
   initPeople(s, rng);
 }
 
-function addFree(s, d, c, id) {
-  s.generals[id] = { id, pool: d.pool, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, traits: d.trait ? [[d.trait, 1]] : [], nation: null, castle: c.id, unit: null, status: 'free' };
+// 「역사 능력치 사용」을 껐을 때: 이 모드가 더하는 장수도 능력치를 무작위로 (나라마다 총합은 공평하게)
+function statsFor(s, d, nid, rng) {
+  if (s.opts?.histStats) return d;
+  const mine = Object.values(s.generals).filter((g) => g.nation === nid && g.status === 'active').map((g) => Math.round(gradeScore(g)));
+  return randomStats(d, fairTarget(mine, rng), rng);
+}
+
+function addFree(s, d, c, id, rng) {
+  if (rng) d = statsFor(s, d, null, rng);
+  s.generals[id] = { id, pool: d.pool, name: d.name, war: d.war, lead: d.lead, intel: d.intel, pol: d.pol, trait: d.trait, traits: [], nation: null, castle: c.id, unit: null, status: 'free' };
 }
 
 // ── 외교 ──
@@ -542,7 +551,7 @@ function people(s, rng) {
     const pool = [...new Set(s.nations.flatMap((n) => n.pools || []))].flatMap((k) => [...(POOLS[k] || []), ...(EXTRA[k] || [])]).concat(POOLS.tk_free || [], EXTRA.tk_free || []).filter((x) => !used.has(x.name));
     if (pool.length) {
       const c = rng.pick(cities);
-      addFree(s, rng.pick(pool), c, `f${s.turn}_${Math.floor(rng() * 1e6)}`);
+      if (rng.shuffle) addFree(s, rng.pick(pool), c, `f${s.turn}_${Math.floor(rng() * 1e6)}`, rng); else addFree(s, rng.pick(pool), c, `f${s.turn}_${Math.floor(rng() * 1e6)}`);
     }
   }
   for (const n of s.nations) {

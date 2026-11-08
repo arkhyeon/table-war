@@ -11,7 +11,7 @@ import { PLACES, placeExists, placeName } from './places.js';
 import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
-import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';
+import { outlawTurn, outlawDay, outlawSack, outlawGrow } from './hex14outlaw.js';
 import { t14, castleGens } from './hex14traits.js';
 
 // 칸 배열(주인·관할)은 Int16Array로 둠: 일반 배열은 structuredClone을 거치면 다시 복사할 때 몇 배 느려짐 (하루마다 상태를 복사하므로)
@@ -1199,7 +1199,13 @@ export function stepDay(s, grid) {
     // 병력이 남았으면 패주: 그 자리에서 가까운 내 성으로 걸어서 물러남 (싸우지 않고, 쫓기면 잡힘)
     if (u.troops > 1000 && home && !u.routed) {
       u.routed = true; u.morale = 15; u.autoRet = false; u.queue = [];
-      if (order(s, grid, u, 'castle', home.id).ok) { log(s, `🏳️ ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 패주해 ${home.name}(으)로 물러납니다.`, 'battle', [u.nation]); continue; }
+      if (order(s, grid, u, 'castle', home.id).ok) {
+        log(s, `🏳️ ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 패주해 ${home.name}(으)로 물러납니다.`, 'battle', [u.nation]);
+        // 도적에게 패주하면 버리고 간 병사 일부가 도적에 들어감
+        const ob = s.units.filter((x) => x.outlaw && !x.dead && grid.dist(x.tile, u.tile) <= 2).sort((a, b) => grid.dist(a.tile, u.tile) - grid.dist(b.tile, u.tile))[0];
+        if (ob) outlawGrow(s, ob, Math.round((u.max || u.troops) * 0.15), 10, 1, `${s.nations[u.nation]?.name} 부대를 패주시키고`, [u.nation]);
+        continue;
+      }
     }
     if (u.routed && u.troops > 300) continue; // 패주 중에는 사기가 낮아도 계속 물러남
     u.dead = true;
@@ -1211,7 +1217,7 @@ export function stepDay(s, grid) {
       if (near && !s.nations[foe.nation]?.outlaw && (!home || rng() < 0.4 + t14(gensOf(s, foe.gens), '추격'))) { g.status = 'prisoner'; g.castle = null; g.captor = foe.nation; g.capTile = u.tile; g.heldAt = null; log(s, `⛓️ ${g.name}이(가) ${s.nations[foe.nation]?.name}에 사로잡혔습니다.`, 'battle', [u.nation, foe.nation]); }
       else if (home) { g.castle = home.id; } else { g.status = 'free'; g.nation = null; g.castle = nearestCastle(s, grid, u.tile, foe?.nation ?? -2)?.id ?? 0; }
     }
-    if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; }
+    if (near && s.nations[foe.nation]?.outlaw) { s.outlawStats = s.outlawStats || { rise: 0, smash: 0, kill: 0 }; s.outlawStats.kill = (s.outlawStats.kill || 0) + 1; outlawGrow(s, foe, Math.round((u.max || u.troops) * 0.3), 15, 2, `${s.nations[u.nation]?.name} 부대를 쳐부수고`, [u.nation]); } // 쓰러뜨린 부대의 흩어진 병사 일부가 도적에 합류
     log(s, `💥 ${s.nations[u.nation].name}의 ${gensOf(s, u.gens)[0]?.name} 부대가 전멸했습니다.`, 'battle', [u.nation]);
   }
   s.units = s.units.filter((u) => !u.dead);

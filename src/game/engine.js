@@ -260,7 +260,7 @@ export function addGeneral(s, data, nid, region, rng, ruler = false) {
     data = randomStats(data, fairTarget(mine.map((g) => g.base), rng, ruler), rng);
   }
   data = { ...data, base: Math.round(gradeScore(data)) };
-  const { role, traits } = initTraits(data, rng);
+  const { role, traits } = initTraits(data, rng, { random: !s.opts?.histStats });
   // 성격: 야심가(20%)는 충성이 잘 떨어져 봉기·계승 다툼을 일으키고, 충신(20%)은 배신하지 않음
   const pr = rng();
   const persona = ruler ? null : pr < 0.2 ? '야심' : pr < 0.4 ? '충신' : null;
