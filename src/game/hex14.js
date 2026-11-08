@@ -693,6 +693,7 @@ export function summonGeneral(s, grid, gid, toCid, troops) {
   if (to.owner !== g.nation) return { ok: false, msg: '내 성으로만 부를 수 있습니다.' };
   const r = sortie(s, grid, g.castle, [gid], Math.max(1000, troops));
   if (!r.ok) return r;
+  r.unit.transfer = true; // 장수 옮기기: 싸우러 가는 부대가 아님 (지도에서 다르게 보이고, 위험한 길은 돌아감)
   const o = order(s, grid, r.unit, 'castle', toCid);
   if (!o.ok) { s.castles[r.unit.home].troops += r.unit.troops; s.units = s.units.filter((x) => x !== r.unit); g.castle = r.unit.home; g.unit = null; return { ok: false, msg: '그 성까지 갈 길이 없습니다.' }; }
   return { ok: true, unit: r.unit, msg: `${g.name}이(가) ${fmtTroops(r.unit.troops)}을(를) 이끌고 ${to.name}(으)로 출발` };
@@ -796,12 +797,22 @@ function heap() {
 // 길찾기 (A*): 지나갈 수 없는 칸·다른 부대가 있는 칸은 피함 (목표 칸은 허용)
 // 길찾기용 작업 공간: 칸 수만큼의 숫자 배열을 지도마다 한 번 만들어 두고 다시 씀 (부를 때마다 Map을 만들지 않게)
 const pathWork = new WeakMap();
-export function findPath(s, grid, from, to, nation, navy = false) {
+// safe: 장수 옮기기처럼 싸우러 가는 게 아닌 부대 — 적 부대 둘레 2칸과 적 땅은 비싼 길로 쳐서 돌아감
+const dangerMap = (s, grid, nation) => {
+  const d = new Uint8Array(grid.N);
+  for (const u of s.units) {
+    if (!enemy(s, nation, u.nation)) continue;
+    d[u.tile] = 1; for (const a of grid.nb[u.tile]) { d[a] = 1; for (const b of grid.nb[a]) d[b] = 1; }
+  }
+  return d;
+};
+export function findPath(s, grid, from, to, nation, navy = false, safe = false) {
   if (from === to) return [];
   let W = pathWork.get(grid);
   if (!W) { W = { g: new Float64Array(grid.N), prev: new Int32Array(grid.N), mark: new Int32Array(grid.N), shut: new Int32Array(grid.N), gen: 0 }; pathWork.set(grid, W); }
   const gen = ++W.gen, gS = W.g, prev = W.prev, mark = W.mark, shut = W.shut;
   const occ = unitAt(s);
+  const danger = safe ? dangerMap(s, grid, nation) : null;
   // 성 자리 → 성 (성 자리는 안 움직임, 주인은 그때그때 봄)
   const cas = castleTiles(s, grid);
   const forts = s.forts?.length ? new Map(s.forts.map((f) => [f.tile, f])) : null;
@@ -827,7 +838,7 @@ export function findPath(s, grid, from, to, nation, navy = false) {
       const ef = forts && forts.get(nx);
       // 빠른 길로 가되, 목표 바로 옆(싸울 자리)은 땅을 고름 — 물 위에서 싸우면 약하므로 상륙해서 침
       const board = grid.sea[nx] && nx !== to && grid.dist(nx, to) === 1 ? 4 : grid.sea[nx] !== grid.sea[cur] ? 0.5 : 0;
-      const ng = gc + moveCost(grid, cur, nx) + board + (u ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0);
+      const ng = gc + moveCost(grid, cur, nx) + board + (u ? 2 : 0) + (ef && ef.owner !== nation && nx !== to ? 12 : 0) + (danger ? (danger[nx] ? 8 : 0) + (s.owner[nx] >= 0 && s.owner[nx] !== nation && enemy(s, nation, s.owner[nx]) ? 2 : 0) : 0);
       if (mark[nx] !== gen || ng < gS[nx]) {
         mark[nx] = gen; gS[nx] = ng; prev[nx] = cur;
         open.push(ng + grid.dist(nx, to), nx);
@@ -876,7 +887,7 @@ export function sortie(s, grid, castleId, gids, troops, siege = false) {
 export function order(s, grid, u, kind, id) {
   const tgtTile = kind === 'tile' ? id : kind === 'unit' ? s.units.find((x) => x.id === id)?.tile : kind === 'fort' ? s.forts?.find((f) => f.id === id)?.tile : s.castles[id]?.tile;
   if (tgtTile === undefined || tgtTile === null) return { ok: false, msg: '목표가 없습니다.' };
-  const path = findPath(s, grid, u.tile, tgtTile, u.nation, u.navy);
+  const path = findPath(s, grid, u.tile, tgtTile, u.nation, u.navy, !!u.transfer);
   if (!path) return { ok: false, msg: '갈 수 있는 길이 없습니다.' };
   u.order = { kind, id };
   u.path = path;
@@ -1025,7 +1036,7 @@ export function stepDay(s, grid) {
       const c = cas.get(nx);
       const ef = fortAt(s, nx);
       if ((enemyU && enemyU.nation !== u.nation) || (c && c.owner !== u.nation) || (ef && ef.owner !== u.nation)) break;
-      if (enemyU) { u.wait += 1; if (u.wait > 2) { const p = findPath(s, grid, u.tile, u.path[u.path.length - 1], u.nation, u.navy); u.path = p || []; u.wait = 0; } break; }
+      if (enemyU) { u.wait += 1; if (u.wait > 2) { const p = findPath(s, grid, u.tile, u.path[u.path.length - 1], u.nation, u.navy, !!u.transfer); u.path = p || []; u.wait = 0; } break; }
       const cost = moveCost(grid, u.tile, nx, s, u);
       // 이동력이 가득(3) 찼으면 아무리 험한 칸(눈 덮인 산 등)도 한 칸은 감
       if (u.mp < cost && u.mp < 3) break;
@@ -1180,7 +1191,8 @@ export function stepDay(s, grid) {
   }
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {
-    if (u.troops > 300 && u.morale > 5) continue;
+    // 사기가 바닥나도 병력이 절반 넘게 남았으면 버티며 싸움 (사기가 낮으면 피해는 덜 줌) — 갉아먹는 싸움이 되게
+    if (u.troops > 300 && (u.morale > 5 || u.troops >= (u.max || u.troops) * 0.5)) continue;
     const home = nearestCastle(s, grid, u.tile, u.nation);
     // 병력이 남았으면 패주: 그 자리에서 가까운 내 성으로 걸어서 물러남 (싸우지 않고, 쫓기면 잡힘)
     if (u.troops > 1000 && home && !u.routed) {

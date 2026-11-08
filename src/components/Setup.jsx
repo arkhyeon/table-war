@@ -281,7 +281,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
           </div>
         </div>
         <div className="row start-bar">
-          <span className="muted start-sel">
+          <span className="muted start-sel" key={`${scn.id}:${pid}:${hexCount ? 1 : 0}`}>
             <b style={{ color: 'var(--text)' }}>{scn.name}</b> · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
           <button className="sm" disabled={!ready} onClick={() => start(false, false)} title="지역 단위로 행동력을 써서 싸우는 예전 방식">

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { uiConfirm } from '../dialog.js';
 import HexTour from './HexTour.jsx';
 import { BUILD, versionText } from '../version.js';
@@ -29,7 +30,8 @@ const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o
 // 칸마다 같은 값이 나오는 작은 난수
 const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
 const isPhone = () => window.innerWidth <= 760; // 폰 화면 (아래 시트 배치)
-const mapScale = (grid) => Math.min(3, 4096 / Math.max(grid.W, grid.H));
+// 폰은 그림 메모리를 아낌: 바탕 지도 2048점, 화면 배율 2까지, 확대 조각 36장까지 (폰 브라우저가 메모리가 모자라면 페이지를 꺼 버려 처음 화면으로 돌아갔음)
+const mapScale = (grid) => Math.min(3, (isPhone() ? 2048 : 4096) / Math.max(grid.W, grid.H));
 const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(Math.max(grid.W, grid.wrap ? grid.period + grid.size * 2 : 0) * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
 const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) => Math.max(0, Math.min(255, Math.round(v * f))); return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`; };
 
@@ -628,6 +630,26 @@ export function battleRows(s, pid, turn) {
   }).sort((a, b) => b.myLoss + b.foeLoss - (a.myLoss + a.foeLoss));
 }
 
+// 성 작업 창(출진·징병·병력 받기·내정·시설·야전 시설): 패널 밖(문서 맨 위)에 띄움 — 폰에선 아래에서 올라오는 창
+function CModal({ open, title, onClose, children }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const k = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, [open, onClose]);
+  if (!open) return null;
+  return createPortal(
+    <div className="modal-bg cmodal-bg" onClick={onClose}>
+      <div className="modal cmodal" role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} onClick={(e) => e.stopPropagation()}>
+        <div className="cmodal-head"><b>{title}</b><button className="sm cmodal-x" aria-label="닫기" onClick={onClose}>✕</button></div>
+        <div className="cmodal-body">{children}</div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export default function Hex14({ world, game, setGame, onExit }) {
   const grid = useMemo(() => buildGrid(world), [world]);
   const polar = useMemo(() => { const bb = getScenario(world.scenarioId)?.bbox; return !!bb && bb[2] - bb[0] >= 359; }, [world]);
@@ -638,6 +660,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
   const [booted, setBooted] = useState(false); // 처음 지도 그림을 마쳤는지
+  const [cmodal, setCmodal] = useState(null); // 성 작업 창: draft·recv·jobs·build·fort (출진은 sortieOpen)
   const [moreOpen, setMoreOpen] = useState(false); // 폰: 위 막대의 소리·속도·나가기 버튼을 ⋯ 메뉴로 접어 둠
   useEffect(() => { if (!moreOpen) return undefined; const off = (e) => { if (!e.target.closest?.('.tb-btns, .tb-more')) setMoreOpen(false); }; window.addEventListener('pointerdown', off, true); return () => window.removeEventListener('pointerdown', off, true); }, [moreOpen]);
   const [tourOn, setTourOn] = useState(false); // 가이드 투어 (첫 판에 저절로, 도움말에서 다시)
@@ -647,6 +670,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
+  // 다른 것을 고르거나 날이 흐르기 시작하면 성 작업 창은 닫음
+  useEffect(() => { setCmodal(null); }, [sel?.type, sel?.id, playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (playing) setSortieOpen(false); }, [playing]); // eslint-disable-line react-hooks/exhaustive-deps
   const [peek, setPeek] = useState(false);
   const withSiege = false; // 공성병기는 들판에서 부대로 만듦
   const [stopIdle, setStopIdle] = useState(() => { try { return localStorage.getItem('h14.stopIdle') === '1'; } catch { return false; } }); // 순 끝까지 중 내 부대가 도착하면 멈춤 (기본 끔)
@@ -700,7 +726,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const gsortKey = (k) => (g) => (k === 'sum' ? g.war + g.lead + g.intel + g.pol : k === 'loyal' ? -(g.ruler ? 999 : loyalOf(g)) : g[k]);
   // 할 일 목록: 순이 바뀌면 저절로 열지(이 기기에 기억)
   const [todoOpen, setTodoOpen] = useState(false);
-  const [todoAuto, setTodoAutoRaw] = useState(() => { try { return localStorage.getItem('h14-todo-auto') !== '0'; } catch { return true; } });
+  const [todoAuto, setTodoAutoRaw] = useState(() => { try { return localStorage.getItem('h14-todo-auto') === '1'; } catch { return false; } }); // 기본은 저절로 열지 않음 (버튼만 반짝임)
   const setTodoAuto = (v) => { setTodoAutoRaw(v); try { localStorage.setItem('h14-todo-auto', v ? '1' : '0'); } catch {} };
   const [duel, setDuel] = useState(null);
   const skipDuel = useRef(null);
@@ -728,6 +754,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const pressT = useRef(null); // 꾹 누르기 타이머 (폰: 경유지 추가)
   const gameRef = useRef(game);
   gameRef.current = game;
+  // 게임 화면을 나갈 때 큰 그림(캔버스) 메모리를 바로 돌려줌 (폰 브라우저는 늦게 치워서 다음 판에서 메모리가 모자라 꺼지곤 함)
+  useEffect(() => () => {
+    const L = land.current, free = (c) => { if (c && c.width !== undefined) { c.width = 0; c.height = 0; } };
+    free(L.base?.cv); free(L.base?.rcv); free(L.over); free(L.comp); free(L.snow); free(L.fog);
+    for (const t of L.tiles?.values() || []) free(t.comp);
+    for (const c of Object.values(L.statC || {})) free(c?.cv);
+    L.tiles?.clear();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const selRef = useRef(sel);
   selRef.current = sel;
   const land = useRef({ key: null, img: null });
@@ -747,7 +781,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const cv = canvas.current, el = wrap.current, s = gameRef.current, sl = selRef.current;
     if (!cv || !el) return;
     const now = performance.now();
-    const cw = el.clientWidth, ch = el.clientHeight, dpr = window.devicePixelRatio || 1;
+    const cw = el.clientWidth, ch = el.clientHeight, dpr = Math.min(window.devicePixelRatio || 1, isPhone() ? 2 : 3);
     if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
     if (!view.current) {
       // 처음엔 내 수도 쪽을 크게
@@ -767,7 +801,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 조금 바뀌면 그 구역만 영토 그림·합친 그림·확대 조각에서 고침 (예전엔 날마다 큰 그림 세 장을 통째로 다시 합치고 확대 조각도 버렸음 → 날 바뀔 때 끊김)
       const L = land.current, prev = L.prev;
       const dPrev = L.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
-      const full = () => { L.ownVer = (L.ownVer || 0) + 1; L.over = paintOwners(grid, s, L.base.sc); for (const t of L.tiles?.values() || []) t.stale = true; };
+      const full = () => { L.ownVer = (L.ownVer || 0) + 1; if (L.over) { L.over.width = 0; L.over.height = 0; } L.over = paintOwners(grid, s, L.base.sc); for (const t of L.tiles?.values() || []) t.stale = true; };
       if (!prev || !dSame || !L.over) full();
       else {
         const changed = [];
@@ -840,7 +874,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(oc, 0, 0); cx3.drawImage(T.rcv, 0, 0); // 한 장으로 합침 (지형 위에 영토, 그 위에 강)
           L.tiles.set(job.key, { ...r, comp: T.cv, used: L.frame || 0, stale: false });
           // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
-          if (L.tiles.size > 72) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - 72); for (const [k2] of old) L.tiles.delete(k2); }
+          const MAXT = isPhone() ? 36 : 72; if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
           draw();
           if (Q.list.length) L.tileT = setTimeout(pump, 0);
         }, 0);
@@ -1186,6 +1220,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const [cx, cy] = posOf(u);
       if (!vis(cx, cy)) continue;
       if (FOG && u.nation !== pid && !SIGHT[u.tile]) continue; // 안개 속 적 부대는 안 보임
+      ctx.globalAlpha = u.transfer ? 0.7 : 1; // 장수 옮기는 부대는 옅게
       const n = s.nations[u.nation];
       const on = sl?.type === 'unit' && sl.id === u.id;
       const g = gensOf(s, u.gens)[0];
@@ -1227,6 +1262,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 대장 초상 (장수마다 다른 얼굴)
       const pr = sz * 1.05;
       if (g) ctx.drawImage(portraitCanvas(g, n.color), cx - pr, cy - sz * 0.55 - pr, pr * 2, pr * 2);
+      if (u.transfer) { // 옮기는 중 배지: 초상 오른쪽 위 파란 동그라미에 화살표
+        const r = sz * 0.55, bx = cx + pr * 0.95, by = cy - sz * 0.55 - pr * 0.8;
+        ctx.beginPath(); ctx.arc(bx, by, r, 0, 7); ctx.fillStyle = '#3d7bd9'; ctx.fill(); ctx.lineWidth = Math.max(sz * 0.08, px); ctx.strokeStyle = '#fff'; ctx.stroke();
+        ctx.font = `bold ${sz * 0.8}px sans-serif`; ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText('➜', bx, by + sz * 0.28);
+      }
       if (on || u.cut) { ctx.beginPath(); ctx.arc(cx, cy - sz * 0.55, pr + sz * 0.12, 0, 7); ctx.lineWidth = Math.max(sz * 0.22, 2 * px); ctx.strokeStyle = on ? '#ffe066' : '#ff7a3c'; ctx.stroke(); }
       // 공성병기를 끌고 다니는 부대: 초상 왼쪽 아래에 투석기
       if (u.siege) {
@@ -1270,6 +1310,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.fillText(lab, cx, top - fs * 0.35);
       }
     }
+    ctx.globalAlpha = 1;
     // 소식 고리: 함락·위협·전멸 자리에 3초 동안 퍼지는 고리
     if (pulses.current.length) {
       const nowP = performance.now();
@@ -1368,7 +1409,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
       showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
-      paintMs: () => land.current.paintMs, // 시험용: 처음 지도 그림에 걸린 시간
+      paintMs: () => land.current.paintMs,
+      canvasMB: () => { const L = land.current, px = (c) => (c?.width || 0) * (c?.height || 0); let t = px(L.base?.cv) + px(L.base?.rcv) + px(L.over) + px(L.comp) + px(canvas.current); for (const x of L.tiles?.values() || []) t += px(x.comp); for (const c of Object.values(L.statC || {})) t += px(c?.cv); return Math.round((t * 4) / 1e6); }, // 시험용: 지도 그림 메모리(MB) // 시험용: 처음 지도 그림에 걸린 시간
       sfx: (k) => sfx(k),
       mood: (m) => { setMood(m); setMood(m); },
       grid: () => grid,
@@ -1478,6 +1520,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const wide = Math.max(grid.size * 1.8, minR) ** 2, tight = Math.max(grid.size * 0.75, minR * 0.6) ** 2;
     let bu = null, du = wide;
     for (const u of game.units) {
+      if (u.transfer && u.nation === pid) continue; // 장수 옮기는 중인 내 부대는 누를 수 없음 (그 아래 땅·성이 눌림)
       const [x, y] = grid.center(u.tile);
       const d = Math.min((x - wx) ** 2 + (y - grid.size * 1.4 - wy) ** 2, (x - wx) ** 2 + (y - wy) ** 2);
       if (d < du && (u.tile === t || d < tight)) { du = d; bu = u; }
@@ -1668,7 +1711,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
         rows,
       };
       setReport(news.length || sum ? { news: news.slice(0, 8), sum } : null);
-      setReportOpen(true);
+      // 순 결과 창은 저절로 띄우지 않고 소식 카드 한 장으로 알림 (📊 보기로 펼침) — 매 순 창을 닫는 게 번거로웠음
+      if (sum) {
+        const dg = sum.gold[2] - sum.gold[0], ch = [sum.gained.length ? `+${sum.gained.length}성` : '', sum.lost.length ? `−${sum.lost.length}성` : ''].filter(Boolean).join(' ');
+        pushNews([{ icon: '📊', text: `${sum.turn}순 결과 · 금 ${dg >= 0 ? '+' : '−'}${fmtGold(Math.abs(dg))} · 성 ${sum.cities}곳${ch ? ` (${ch})` : ''}`, tone: sum.lost.length > sum.gained.length ? 'bad' : sum.gained.length ? 'good' : '', report: true }]);
+      }
       return snap;
     };
     const done = (snap) => {
@@ -1961,10 +2008,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
     { title: '🧑‍✈️ 장수 고르고 내보내기', target: (n) => { const go = document.querySelector('.sortie-go'); if (n < 3) go?.scrollIntoView({ block: 'center', behavior: 'smooth' }); return (go?.parentElement || document.querySelector('.h14-panel .act-card'))?.getBoundingClientRect(); }, before: () => { tourBase.current.units = myUnitN; setSheet(true); if (!sortieOpen) setSortieOpen(true); }, wait: () => myUnitN > (tourBase.current.units ?? myUnitN), doIt: '장수를 고르고 아래 「출진」을 누르세요', body: <>무력·통솔이 높은 장수가 잘 싸워요. 장수가 많을수록(최대 3명) 더 많은 병사를 데려가고 공·방이 오릅니다. 막대로 데려갈 병사 수를 정해요.</> },
     { title: '🎯 적 성 공략', target: foeC ? mapRect(foeC.tile, 170, 130) : null, before: () => { setSheet(false); focusOn(foeC?.tile); if (sel?.type !== 'unit' || game.units.find((u) => u.id === sel.id)?.nation !== pid) { const mine = game.units.filter((u) => u.nation === pid && !u.order); if (mine.length) setSel({ type: 'unit', id: mine[mine.length - 1].id }); } }, wait: () => game.units.some((u) => u.nation === pid && u.order && (u.order.kind !== 'castle' || game.castles[u.order.id]?.owner !== pid)), doIt: foeC ? `부대가 골라진 채로 ${foeC.name} 성(${game.nations[foeC.owner]?.name})을 누르세요` : '지도에서 갈 곳을 누르세요', body: <>부대(깃발)를 고른 뒤 지도를 누르면: 빈 땅은 <b>이동</b>, 적 부대는 <b>공격</b>, 적 성은 <b>공략</b>. 진로 끝 <b>○일</b>이 도착 예정일이고, 지나간 칸은 내 땅이 됩니다.</> },
     { title: '▶ 시간 진행', target: '.end-turn-box', before: () => { tourBase.current.day = nowDay; setSheet(false); }, wait: () => nowDay > (tourBase.current.day ?? nowDay) && !playing, doIt: '「하루 진행」을 눌러 보세요', body: <>누를 때마다 모든 나라가 하루씩 동시에 움직여요. <b>－/＋</b>로 한 번에 며칠(최대 10일), <b>⏩ 순 끝까지</b>는 이번 순 끝까지. PC는 <kbd>Space</kbd>.</> },
-    { title: '✅ 할 일 목록', target: '.todo-btn', body: <>위험한 성, 멈춘 부대, 등용할 인재, 끝나가는 약조, 빈 담당처럼 <b>챙길 일</b>을 모아 줘요. 줄을 누르면 그곳으로, 버튼으로 바로 처리. 순마다 저절로 열립니다.</> },
+    { title: '✅ 할 일 목록', target: '.todo-btn', body: <>위험한 성, 멈춘 부대, 등용할 인재, 끝나가는 약조, 빈 담당처럼 <b>챙길 일</b>을 모아 줘요. 줄을 누르면 그곳으로, 버튼으로 바로 처리. 새 순이 되면 이 버튼이 반짝여요.</> },
     { title: '📋 세력·외교·인재 탭', target: '.tabs-top', before: () => { setSel(null); setTab('home'); setSheet(true); }, body: <><b>세력</b>: 빠른 작업·내 성 표·정책 · <b>외교</b>: 정전·동맹·친선 · <b>인재</b>: 장수 목록·등용·포로 · <b>기록</b>: 지난 소식. PC는 <kbd>1</kbd>~<kbd>5</kbd>.</> },
     { title: '🤝 외교 요령', target: '.h14-panel .sec-h', before: () => { setSel(null); setTab('diplo'); setSheet(true); }, body: <>맞닿은 나라가 위에 나와요. 사방과 다 싸우면 버티기 어려우니, <b>센 이웃과는 정전</b>을 맺고 <b>한 곳을 집중</b>해서 치는 게 기본이에요.</> },
-    { title: '🎉 준비 끝!', before: () => { setTab('home'); setSheet(false); }, body: <>보낸 부대가 도착하면 성을 공략해요. 순이 끝나면 <b>결과 창</b>에 이기고 진 까닭이 나오고, 지도 왼쪽 아래 <b>소식 카드</b>로 함락·위협을 알려 줘요. 이 판은 <b>연습용</b>(자동 저장 안 됨)이에요. 🚪 나가서 원하는 나라로 시작하세요. 튜토리얼은 <b>처음 화면</b>에서 다시 할 수 있어요.</> },
+    { title: '🎉 준비 끝!', before: () => { setTab('home'); setSheet(false); }, body: <>보낸 부대가 도착하면 성을 공략해요. 지도 왼쪽 아래 <b>소식 카드</b>가 함락·위협과 <b>순 결과</b>(📊 보기)를 알려 줘요. 이 판은 <b>연습용</b>(자동 저장 안 됨)이에요. 🚪 나가서 원하는 나라로 시작하세요. 튜토리얼은 <b>처음 화면</b>에서 다시 할 수 있어요.</> },
   ];
   useEffect(() => { if (booted && game.tutorial && !game.spectator) setTourOn(true); }, [booted]); // eslint-disable-line react-hooks/exhaustive-deps
   // 튜토리얼 동안은 사신·사건 창을 띄우지 않음 (설명에만 집중) — 그리기 전에 비워서 깜박이지 않게
@@ -1992,8 +2039,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const GenCard = ({ g, loyal = true }) => { const tn = tacticName(g); return (
     <div className="gen-main">
       <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} /></div>
-      <div className="gen-line"><Stats g={g} traits={false} /></div>
-      {((g.traits || []).length > 0 || tn) && <div className="gen-tags"><Traits g={g} />{tn && <span className="tac" title="전법">「{tn}」</span>}</div>}
+      <div className="gen-line"><Stats g={g} traits={false} /><Traits g={g} />{tn && <span className="tac" title="전법">「{tn}」</span>}</div>
     </div>); };
   const SortBar = ({ v, set }) => <div className="gsort" role="group" aria-label="장수 줄 세우기">{GSORT.map(([k, l]) => <button key={k} className={'xs' + (v === k ? ' on' : '')} aria-pressed={v === k} onClick={() => set(k)} title={k === 'loyal' ? '충성 낮은 순' : `${l} 높은 순`}>{l}</button>)}</div>;
   // 지금 맡은 내정 (그 성 담당이면 배지)
@@ -2043,9 +2089,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
           </div>
           {selCastle.owner === pid && !playing && (
             <div className="col act-card">
-              {!sortieOpen ? (
-                <button className="primary big-act" disabled={!castleGens.length || selCastle.troops < 1500} onClick={() => setSortieOpen(true)}>⚔️ 출진 <small>{castleGens.length ? `장수 ${castleGens.length}명 · 병력 ${fmtTroops(selCastle.troops)}` : '장수 없음'}</small></button>
-              ) : (
+              <button className="primary big-act" disabled={!castleGens.length || selCastle.troops < 1500} onClick={() => setSortieOpen(true)}>⚔️ 출진 <small>{castleGens.length ? `장수 ${castleGens.length}명 · 병력 ${fmtTroops(selCastle.troops)}` : '장수 없음'}</small></button>
+              <CModal open={sortieOpen} title="⚔️ 출진" onClose={() => setSortieOpen(false)}>
                 <div className="card" style={{ background: 'var(--panel)' }}>
                   <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}><b>⚔️ 출진할 장수</b><small className="muted">최대 3명 · {pickG.length}명 고름</small></div>
                   {castleGens.map((g) => (
@@ -2080,19 +2125,41 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     }}>출진</button>
                   </div>
                 </div>
-              )}
-              {selCastle.kind !== 'pass' && (
+              </CModal>
+              {selCastle.kind !== 'pass' && (() => {
+                const dm = draftMax14(game, selCastle), jobsN = Object.keys(ROLES).filter((r) => jobGen(game, selCastle, r)).length;
+                const inbound = (game.convoys || []).filter((v) => v.to === selCastle.id).length;
+                return (
+                  <div className="act-grid">
+                    <button className="act-tile" onClick={() => setCmodal('draft')}><span>💂 징병</span><small>{dm >= 1000 ? `최대 ${fmtTroops(dm)}` : '뽑을 인구 없음'}</small></button>
+                    <button className="act-tile" onClick={() => setCmodal('recv')}><span>🚚 병력 받기</span><small>{inbound ? `오는 중 ${inbound}` : '다른 성에서'}</small></button>
+                    <button className="act-tile" onClick={() => setCmodal('jobs')}><span>👔 내정</span><small title={selCastle.auto ? '담당관 자동 배치 중' : undefined}>{selCastle.auto ? `자동 ${jobsN}/${Object.keys(ROLES).length}` : `담당 ${jobsN}/${Object.keys(ROLES).length}`}</small></button>
+                    <button className="act-tile" onClick={() => setCmodal('build')}><span>🏗️ 시설</span><small>{selCastle.build ? `공사 ${selCastle.build.left}순` : `${usedSlots(selCastle)}/${slotsOf(selCastle)}칸`}</small></button>
+                    <button className="act-tile" onClick={() => setCmodal('fort')}><span>⛺ 야전 시설</span><small title="진지·망루·목책">진지·망루</small></button>
+                  </div>
+                );
+              })()}
+              <CModal open={cmodal === 'draft'} title="💂 징병" onClose={() => setCmodal(null)}>
                 <div style={{ fontSize: 13 }}>
                   <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}><b>💂 징병</b><small className="muted" title="뽑은 만큼 인구가 줄고 금 수입도 줄어요 (인구가 바닥나면 절반)">1명당 {draftCost(selCastle, game)}금 · 뽑을 수 있는 인구 {fmtTroops(draftLeft14(game, selCastle))}</small></div>
                   <Slider min={0} max={draftMax14(game, selCastle)} step={1000} value={Math.min(draftAmt, draftMax14(game, selCastle))} onChange={(v) => setDraftAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
                   <div className="row draft-row">
                     <button className="sm" disabled={draftMax14(game, selCastle) < 1000} onClick={() => setDraftAmt(Math.floor(draftMax14(game, selCastle) / 2000) * 1000)}>절반</button>
                     <button className="sm" disabled={draftMax14(game, selCastle) < 1000} onClick={() => setDraftAmt(draftMax14(game, selCastle))}>최대 {fmtTroops(draftMax14(game, selCastle))}</button>
-                    <button className="primary sm" style={{ marginLeft: 'auto' }} disabled={Math.min(draftAmt, draftMax14(game, selCastle)) < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} 징병</button>
+                    <button className="primary sm" style={{ marginLeft: 'auto' }} disabled={Math.min(draftAmt, draftMax14(game, selCastle)) < 100} onClick={() => act((s) => draft14(s, selCastle.id, draftAmt))}>💂 {fmtTroops(Math.min(draftAmt, draftMax14(game, selCastle)))} 징병 <small style={{ opacity: 0.85 }}>· 금 {fmtGold(Math.min(draftAmt, draftMax14(game, selCastle)) * draftCost(selCastle, game))}</small></button>
                   </div>
                   
-                  <details className="sub-card">
-                    <summary><b>🚚 병력 받기</b><small className="muted" title="다른 내 성에서 장수 없이 병력만 · 수송대는 내 땅 길로 하루 1.5칸">다른 성에서 병력만</small></summary>
+                  {(() => {
+                    const after = selCastle.troops + Math.min(draftAmt, draftMax14(game, selCastle));
+                    const out = Math.max(0, Math.min(after - 500, castleGens.length ? commandCap(game, castleGens.slice(0, 3).map((g) => g.id)) : 0));
+                    const cost = Math.min(draftAmt, draftMax14(game, selCastle)) * draftCost(selCastle, game);
+                    return <div className="muted" style={{ fontSize: 11 }}>징병 후 수비 {fmtTroops(after)} · 장수 셋이 최대로 데리고 나가면 출진 {fmtTroops(out)} · 징병에 금 {fmtGold(cost)} (지금 {fmtGold(me.gold)})</div>;
+                  })()}
+                </div>
+              </CModal>
+              <CModal open={cmodal === 'recv'} title="🚚 병력 받기" onClose={() => setCmodal(null)}>
+                <div style={{ fontSize: 13 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>다른 내 성에서 장수 없이 병력만 받습니다 · 수송대는 내 땅 길로 하루 1.5칸</div>
                     {besieged(game, grid, selCastle) ? <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>포위당해 수송대가 들어올 수 없습니다. 장수가 부대로 데리고 와야 합니다.</div> : <>
                       <div style={{ fontSize: 12, marginTop: 4 }}>받을 병력 {fmtTroops(sendAmt)} <small className="muted">(남은 자리 {fmtTroops(Math.max(0, capOf(selCastle, game) - selCastle.troops))})</small></div>
                       <Slider min={1000} max={30000} step={1000} value={sendAmt} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
@@ -2108,16 +2175,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
                           {allDon > 5 && <button className="sm" style={{ marginTop: 4 }} onClick={() => setDonorsAll(donorsAll === selCastle.id ? null : selCastle.id)}>{donorsAll === selCastle.id ? '접기' : `더보기 (+${allDon - 5}곳, 먼 순서)`}</button>}</>;
                       })()}
                     </>}
-                  </details>
                   {(game.convoys || []).filter((v) => v.from === selCastle.id || v.to === selCastle.id).map((v, i) => <div key={i} className="muted" style={{ fontSize: 11 }}>🚚 {game.castles[v.from].name} → {game.castles[v.to].name} {fmtTroops(v.troops)} · {Math.max(0, v.arrive - absDay(game))}일 남음</div>)}
-                  {(() => {
-                    const after = selCastle.troops + Math.min(draftAmt, draftMax14(game, selCastle));
-                    const out = Math.max(0, Math.min(after - 500, castleGens.length ? commandCap(game, castleGens.slice(0, 3).map((g) => g.id)) : 0));
-                    const cost = Math.min(draftAmt, draftMax14(game, selCastle)) * draftCost(selCastle, game);
-                    return <div className="muted" style={{ fontSize: 11 }}>징병 후 수비 {fmtTroops(after)} · 장수 셋이 최대로 데리고 나가면 출진 {fmtTroops(out)} · 징병에 금 {fmtGold(cost)} (지금 {fmtGold(me.gold)})</div>;
-                  })()}
                 </div>
-              )}
+              </CModal>
             </div>
           )}
           <div className="sec-h row" style={{ justifyContent: 'space-between' }}><span>👥 장수 {castleGens.length}명</span>{castleGens.length > 1 && <SortBar v={gsort} set={setGsort} />}</div>
@@ -2139,6 +2199,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
               </div>
               {selCastle.owner === pid ? (
                 <>
+                  <button className="job-sum" onClick={() => setCmodal('jobs')} title="내정 담당 고르기·추천">
+                    {Object.entries(ROLES).map(([role, label]) => { const g = jobGen(game, selCastle, role); return <span key={role} className={g ? '' : 'none'}>{JOB_ICON[role]} {label} <b>{g ? g.name : '없음'}</b></span>; })}
+                    <span className="job-sum-go">›</span>
+                  </button>
+                  <CModal open={cmodal === 'jobs'} title={`👔 ${selCastle.name} 내정`} onClose={() => setCmodal(null)}>
                   {Object.entries(ROLES).map(([role, label]) => (
                     <div key={role} className="job-slot"><div className="row" style={{ gap: 6, marginTop: 4, alignItems: 'center' }}>
                       <span style={{ width: 34 }}>{label}</span>
@@ -2206,6 +2271,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       <div>💂 {d ? <><b>{d.name}</b> 자원병 +{fmtTroops(d.lead * 3)}/순</> : <span className="muted">징병 담당 없음</span>}</div>
                       <small className="muted">순마다 · 정치·통솔이 높을수록 큼</small>
                     </div>); })()}
+                  </CModal>
                 </>
               ) : null}
             </div>
@@ -2237,6 +2303,26 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </div>
           )}
           {selCastle.owner !== null && (selCastle.owner === pid || Object.keys(selCastle.bld || {}).length > 0) && (
+            selCastle.owner === pid ? (
+            <CModal open={cmodal === 'build'} title={`🏗️ ${selCastle.name} 시설 · ${usedSlots(selCastle)}/${slotsOf(selCastle)}칸`} onClose={() => setCmodal(null)}>
+              {selCastle.founding && <div>🔨 새 도시 공사 중 — {selCastle.founding}순 남음</div>}
+              {selCastle.build && (
+                <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>🔨 {BUILDINGS[selCastle.build.type].icon} {BUILDINGS[selCastle.build.type].name} — {selCastle.build.left}순 남음</span>
+                  {selCastle.owner === pid && !playing && <button className="sm" onClick={() => act((s) => cancelBuild(s, selCastle.id))}>멈춤</button>}
+                </div>
+              )}
+              {Object.entries(BUILDINGS).filter(([k, b]) => (selCastle.kind !== 'pass' || k === 'wall') && (!b.port || selCastle.port)).map(([k, b]) => {
+                const why = canBuild(game, selCastle, k);
+                return (
+                  <div key={k} className="line-row">
+                    <span className="line-tx" title={b.desc}><b>{b.icon} {b.name} <small className="muted">{lv(selCastle, k)}/{b.max}</small></b><small className="muted">{b.desc}</small></span>
+                    {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>짓기 {fmtGold(buildCost(game, selCastle, k))} · {b.turns}순</button>}
+                  </div>
+                );
+              })}
+            </CModal>
+            ) : (
             <details className="sub-card" open={!!selCastle.build}>
               <summary className="row" style={{ justifyContent: 'space-between' }}><b>🏗️ 시설 {selCastle.build ? '· 🔨 공사 중' : ''}</b><small className="muted">{usedSlots(selCastle)}/{slotsOf(selCastle)}칸</small></summary>
               {selCastle.founding && <div>🔨 새 도시 공사 중 — {selCastle.founding}순 남음</div>}
@@ -2256,13 +2342,15 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 );
               })}
             </details>
+            )
           )}
           {selCastle.owner === pid && !playing && selCastle.kind !== 'pass' && (
-            <details className="sub-card"><summary><b>⛺ 야전 시설 짓기</b><small className="muted" title="장수 없이 성 수비대가 지음 · 이 성 관할의 내 땅(초록 칸) · 성마다 시설 3개, 망루 2개까지 · 공격받는 중엔 못 지음">수비대가 관할 땅에</small></summary>
+            <CModal open={cmodal === 'fort'} title="⛺ 야전 시설 짓기" onClose={() => setCmodal(null)}>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>장수 없이 성 수비대가 이 성 관할의 내 땅(초록 칸)에 짓습니다 · 성마다 시설 3개, 망루 2개까지 · 공격받는 중엔 못 지음. 고른 뒤 지도에서 자리를 누르세요.</div>
                   <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
-                    {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
+                    {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setCmodal(null); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
                   </div>
-                  </details>
+            </CModal>
           )}
         </div>
       )}
@@ -2583,7 +2671,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>금은 상업에서 매 턴, 병량은 농업에서 가을(8월)에 한 해 몫이 들어옵니다. 병사는 병량을 먹고, 병량이 떨어지면 흩어집니다.</li>
                 <li>적 부대 옆 칸에 들어서면 그날은 더 못 갑니다(통제 구역). 여러 방향에서 치면 <b>협공</b>(+30%씩).</li>
                 <li>무력·통솔·지력 70 이상 장수는 <b>돌격·일제사격·화계</b> 전법을 씁니다.</li>
-                <li>깃발 아래 초록 막대는 병력, 파란 막대는 사기. 병력 300 이하나 사기 5 이하면 부대가 무너지고 장수는 가까운 성으로 도망칩니다.</li>
+                <li>깃발 아래 초록 막대는 병력, 파란 막대는 사기. 사기가 낮으면 주는 피해가 줄지만 계속 싸웁니다. 병력이 절반 아래로 줄고 사기도 바닥(5 이하)이면 패주해 가까운 성으로 물러나고, 병력 300 이하면 무너집니다.</li>
                 <li>사기는 싸우지 않고 내 땅에서 쉬면 하루 +3, 내 <b>진지</b> 안이면 +6 회복 — 성에 돌아갈 필요 없음.</li>
                 <li>내 도시·땅과 끊기면 보급이 끊겨 병력·사기가 줄어듭니다(주황 테두리).</li>
                 <li>장수 둘 이상이 한 부대로 나가면 능력은 가장 높은 장수 기준, 부장 하나마다 공·방 +12%(둘까지).</li>
@@ -2648,7 +2736,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   );
 
   return (
-    <div className="h14">
+    <div className={'h14' + (sheet ? ' sheet-open' : '')}>
       <div className={'topbar h14-top' + (moreOpen ? ' more-open' : '')}>
         <b className="tb-nation" title={me.name}><span className="chip" style={{ background: me.color }} /> <span className="tb-nname" style={{ borderBottom: `2px solid ${me.color}` }}>{me.name}</span></b>
         <div className="tb-stats">
@@ -2766,7 +2854,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <summary><b>📋 내 명령</b> <small className="muted">부대 {units.length}{convoys.length ? ` · 수송 ${convoys.length}` : ''}{builds.length + forts.length ? ` · 공사 ${builds.length + forts.length}` : ''}</small></summary>
                 {units.map((u) => { const d = etaOf(u); return (
                   <button key={'u' + u.id} className="ord-row" onClick={() => { setSel({ type: 'unit', id: u.id }); window.__h14?.focus(u.tile); }}>
-                    <span>{u.routed ? '🏳️' : '⚑'} {gensOf(game, u.gens)[0]?.name} <small className="muted">{fmtTroops(u.troops)}</small></span>
+                    <span>{u.routed ? '🏳️' : u.transfer ? '🚶' : '⚑'} {gensOf(game, u.gens)[0]?.name} <small className="muted">{fmtTroops(u.troops)}</small></span>
                     <span className="muted">{u.routed ? '패주 중' : what(u)}{u.queue?.length ? ` +${u.queue.length}` : ''}</span>
                     <span className="ord-eta">{u.path.length ? `${d}일` : '도착'}</span>
                   </button>); })}
@@ -2878,6 +2966,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <div key={n.id} className={`news-card ${n.tone || ''}`}>
                   <span className="news-ic">{n.icon}</span>
                   <span className="news-tx">{n.text}</span>
+                  {n.report && <button className="xs" title="지난 순 결과 자세히" onClick={() => { setReportOpen(true); setNews((v) => v.filter((x) => x.id !== n.id)); }}>보기</button>}
                   {n.tile != null && <button className="xs" title="그 자리로" onClick={() => { focusTile(n.tile); pulses.current.push({ tile: n.tile, t0: performance.now(), col: '#ffd166' }); draw(); }}>📍</button>}
                   <button className="xs news-x" aria-label="닫기" onClick={() => setNews((v) => v.filter((x) => x.id !== n.id))}>✕</button>
                 </div>
@@ -2899,6 +2988,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         {!booted && <div className="boot-loading"><div className="spinner" /><b>지도를 그리는 중…</b><small className="muted">바다·지형·영토를 그리고 있어요 (큰 지도는 몇 초 걸려요)</small></div>}
         <div className={'h14-panel' + (sheet ? ' open' : '') + (sel ? ' has-sel' : '')} style={{ '--sheet-h': `${sheetH}vh` }}>
           {/* 폰: 손잡이를 위아래로 끌어 높이 조절 (짧게 누르면 작게↔크게), 아주 내리면 닫힘 */}
+          <div className="h14-sheethead">
           <div
             className="h14-grip"
             onPointerDown={(e) => {
@@ -2915,7 +3005,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
               window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
             }}
           />
-          <button className="sm h14-close" title="닫고 선택 해제" onClick={() => { setSheet(false); setSel(null); setSortieOpen(false); }}>✕</button>
+            <button className="sm h14-close" title="닫고 선택 해제" onClick={() => { setSheet(false); setSel(null); setSortieOpen(false); }}>✕</button>
+          </div>
           {panel}
         </div>
       </div>

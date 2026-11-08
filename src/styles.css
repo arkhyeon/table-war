@@ -818,7 +818,7 @@ details.sub-card > summary small { margin-left: auto; overflow: hidden; text-ove
 @media (prefers-reduced-motion: reduce) { .map-ctrl .todo-btn.ping { animation: none; outline: 2px solid #ffb347; } }
 /* ── 폰 화면 다시 짜기 (실기기 피드백: PC 화면을 욱여넣은 느낌, 지도가 너무 좁음) ── */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-.tb-more { display: none; }
+.tb-more, .h14-top .tb-more { display: none; } /* PC에선 ⋯ 메뉴 없음 (button.icon보다 우선) */
 @media (max-width: 760px) {
   /* 위 막대: 한 줄. 연도·날씨 글자는 숨기고, 넘치면 옆으로 밀어 봄. 소리·속도·나가기는 ⋯ 메뉴로 */
   .h14 .h14-top { flex-wrap: nowrap; gap: 6px; padding: 4px 6px; position: relative; z-index: 30; }
@@ -858,4 +858,49 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .h14-top .tb-stats .pill small { font-size: 10.5px; margin-left: 1px; }
   .h14-top .tb-more { width: 28px; }
   .h14-top .tb-nation .chip { display: none; } /* 나라 색은 이름 글자색으로 */
+}
+@media (max-width: 760px) { .h14 .h14-top { z-index: 45; } }
+
+/* iOS: 붙어 있는(sticky) 아래 막대의 글자가 반만 그려지던 문제 — 따로 그리는 층으로 */
+.start-bar { transform: translateZ(0); -webkit-transform: translateZ(0); }
+.tac { white-space: nowrap; }
+.gen-line .traits { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+/* 폰 아래 시트 머리: 손잡이는 가운데, 닫기는 오른쪽 (내용을 가리지 않게 한 줄 따로) */
+.h14-sheethead { display: none; }
+@media (max-width: 760px) {
+  .h14 .h14-panel, .h14 .h14-panel.has-sel { padding-top: 0; }
+  .h14-sheethead { display: flex; position: sticky; top: 0; z-index: 5; height: 30px; align-items: center; justify-content: center; background: var(--panel); border-radius: 20px 20px 0 0; }
+  .h14-sheethead .h14-grip { position: relative; top: auto; margin: 0; left: auto; width: 56px; height: 5px; }
+  .h14-sheethead .h14-grip::after { inset: -12px -60px; }
+  .h14-sheethead .h14-close { position: absolute; top: 3px; right: 8px; width: 26px; height: 24px; font-size: 12px; padding: 0; background: transparent; border-color: transparent; color: var(--muted); }
+  .h14-panel .h14-side { padding-top: 4px; }
+  .h14-panel .tabs-top { top: 30px; margin-top: -4px; }
+  /* 시트를 보는 동안엔 진행 막대를 숨김 (진행할 땐 어차피 지도를 봄) */
+  .h14.sheet-open .end-turn-box { display: none; }
+  .h14.sheet-open .h14-panel { bottom: 0; padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  /* 알림(계략 결과 등): 시트에 가려지지 않게 화면 위쪽에 */
+  .h14 .h14-map .toast { position: fixed; top: 48px; bottom: auto; z-index: 60; max-width: calc(100% - 24px); text-align: center; }
+}
+/* ── 성 작업 버튼 + 작업 창 ── */
+.act-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.act-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 9px; border-radius: 12px; background: var(--panel2, #1f2329); border: 1px solid var(--line); text-align: left; min-width: 0; font-size: 13px; font-weight: 700; }
+.act-tile span { white-space: nowrap; }
+.act-tile small { font-size: 11px; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.act-tile:hover:not(:disabled) { border-color: var(--accent, #ffb347); }
+.job-sum { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: 100%; margin-top: 6px; padding: 7px 10px; border-radius: 10px; background: var(--panel2, #1f2329); border: 1px solid var(--line); text-align: left; font-size: 12.5px; font-weight: 400; }
+.job-sum span { white-space: nowrap; }
+.job-sum span.none { color: var(--muted); }
+.job-sum span.none b { color: var(--danger, #e5483a); font-weight: 600; }
+.job-sum .job-sum-go { margin-left: auto; color: var(--muted); font-size: 16px; }
+.cmodal-bg { z-index: 80; }
+body:has(.cmodal-bg) .modal-bg:not(.cmodal-bg) { z-index: 90; } /* 작업 창 위에서 묻는 확인 창 */
+.cmodal { width: min(460px, 100%); padding: 0; display: flex; flex-direction: column; max-height: 86vh; overflow: hidden; }
+.cmodal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px 10px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.cmodal-x { background: transparent; border-color: transparent; color: var(--muted); }
+.cmodal-body { padding: 10px 14px 14px; overflow: auto; }
+.cmodal-body > .card { background: transparent !important; border: 0; padding: 0; box-shadow: none; }
+@media (max-width: 760px) {
+  .cmodal { width: 100%; max-height: 82vh; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .act-grid { gap: 5px; }
+  .act-tile { padding: 8px 8px; font-size: 12.5px; }
 }

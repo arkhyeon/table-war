@@ -10,6 +10,17 @@ import { loadSave, writeSave, writeHistory, loadSlot, SLOT_COUNT } from './stora
 import { cloudSave } from './cloud.js';
 import { describe } from './components/SaveSlots.jsx';
 
+// 게임 중이라는 표시 (이 탭에서만 유지). 폰 브라우저가 메모리 때문에 페이지를 다시 열면 처음 화면 대신 이어서 들어감
+const PLAYING = 'tw-playing';
+const ss = { get: (k) => { try { return sessionStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch { /* 무시 */ } }, del: (k) => { try { sessionStorage.removeItem(k); } catch { /* 무시 */ } } };
+// 1분 안에 세 번째로 다시 열리면 이어 들어가지 않음 (들어가자마자 또 꺼지는 경우 처음 화면에서 멈추게)
+const shouldAutoResume = () => {
+  if (ss.get(PLAYING) !== '1' || !loadSave()) return false;
+  const recent = Date.now() - +(ss.get('tw-autores-t') || 0) < 60000, n = recent ? +(ss.get('tw-autores') || 0) + 1 : 1;
+  ss.set('tw-autores', String(n)); ss.set('tw-autores-t', String(Date.now()));
+  return n <= 2;
+};
+
 const hasSlots = () => Array.from({ length: SLOT_COUNT }, (_, i) => loadSlot(i + 1)).some(Boolean);
 
 export default function App() {
@@ -43,6 +54,7 @@ export default function App() {
   }, [game, session]);
 
   const start = (world, scn, state) => {
+    if (state?.tutGame || state?.spectator) ss.del(PLAYING); else ss.set(PLAYING, '1');
     setSession({ world, scn });
     setGame(state);
     setGen((v) => v + 1);
@@ -61,9 +73,17 @@ export default function App() {
     return true;
   };
 
+  // 갑자기 다시 열렸으면(폰에서 메모리 부족 등) 마지막 자동 저장으로 바로 이어 들어감
+  const [resuming, setResuming] = useState(shouldAutoResume);
+  useEffect(() => {
+    if (!resuming) return;
+    const t = setTimeout(() => { try { if (!resume()) ss.del(PLAYING); } catch (e) { console.error(e); ss.del(PLAYING); } setResuming(false); }, 60);
+    return () => clearTimeout(t);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (resuming) return <div className="boot-loading"><div className="spinner" /><b>하던 게임으로 돌아가는 중…</b><small className="muted">화면이 다시 열려서 마지막 자동 저장을 불러오고 있어요</small></div>;
   if (!session || !game) return <Setup onStart={start} onResume={resume} hasSave={!!loadSave() || hasSlots()} />;
   if (game.mode === 'hex14')
-    return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { setSession(null); setGame(null); }} />;
+    return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { ss.del(PLAYING); setSession(null); setGame(null); }} />;
   return (
     <Game
       key={gen}
