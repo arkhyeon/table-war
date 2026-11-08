@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { uiConfirm } from '../dialog.js';
-import HexTour, { tourSeen } from './HexTour.jsx';
+import HexTour from './HexTour.jsx';
 import { BUILD, versionText } from '../version.js';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, planGenSpread, doGenSpread, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
@@ -1941,9 +1941,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
     { title: '✅ 할 일 목록', target: '.todo-btn', body: <>위험한 성, 멈춘 부대, 등용할 인재, 끝나가는 약조, 빈 담당처럼 <b>챙길 일</b>을 모아 줘요. 줄을 누르면 그곳으로, 버튼으로 바로 처리. 순마다 저절로 열립니다.</> },
     { title: '📋 세력·외교·인재 탭', target: '.tabs-top', before: () => { setSel(null); setTab('home'); setSheet(true); }, body: <><b>세력</b>: 빠른 작업·내 성 표·정책 · <b>외교</b>: 정전·동맹·친선 · <b>인재</b>: 장수 목록·등용·포로 · <b>기록</b>: 지난 소식. PC는 <kbd>1</kbd>~<kbd>5</kbd>.</> },
     { title: '🤝 외교 요령', target: '.h14-panel .sec-h', before: () => { setSel(null); setTab('diplo'); setSheet(true); }, body: <>맞닿은 나라가 위에 나와요. 사방과 다 싸우면 버티기 어려우니, <b>센 이웃과는 정전</b>을 맺고 <b>한 곳을 집중</b>해서 치는 게 기본이에요.</> },
-    { title: '🎉 준비 끝!', before: () => { setTab('home'); setSheet(false); }, body: <>보낸 부대가 도착하면 성을 공략해요. 순이 끝나면 <b>결과 창</b>에 이기고 진 까닭이 나오고, 지도 왼쪽 아래 <b>소식 카드</b>로 함락·위협을 알려 줘요. 이 안내는 <b>❓ 도움말</b>에서 다시 볼 수 있어요.</> },
+    { title: '🎉 준비 끝!', before: () => { setTab('home'); setSheet(false); }, body: <>보낸 부대가 도착하면 성을 공략해요. 순이 끝나면 <b>결과 창</b>에 이기고 진 까닭이 나오고, 지도 왼쪽 아래 <b>소식 카드</b>로 함락·위협을 알려 줘요. 이 판은 <b>연습용</b>(자동 저장 안 됨)이에요. 🚪 나가서 원하는 나라로 시작하세요. 튜토리얼은 <b>처음 화면</b>에서 다시 할 수 있어요.</> },
   ];
-  useEffect(() => { if (booted && !game.spectator && !tourSeen()) setTourOn(true); }, [booted]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (booted && game.tutorial && !game.spectator) setTourOn(true); }, [booted]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 튜토리얼 동안은 사신·사건 창을 띄우지 않음 (설명에만 집중) — 그리기 전에 비워서 깜박이지 않게
+  useLayoutEffect(() => { if (game.tutorial && tourOn && (game.inbox?.length || game.eventsQ?.length)) setGame((g) => ({ ...g, inbox: [], eventsQ: [] })); }, [game, tourOn]); // eslint-disable-line react-hooks/exhaustive-deps
   const goTo = (c) => {
     const el = wrap.current, v = view.current;
     if (!el || !v) return;
@@ -2551,7 +2553,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <input type="search" id="help-q" className="help-search" placeholder="🔍 도움말 검색 (예: 망루, 정전, 보급)" value={helpQ} onChange={(e) => setHelpQ(e.target.value)} />
               {helpQ.trim() && helpHits === 0 && <div className="help-none">「{helpQ.trim()}」에 맞는 도움말이 없습니다.</div>}
               내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
-              <button className="primary" style={{ width: '100%', margin: '6px 0' }} onClick={() => { setTourOn(true); setSheet(false); setPeek(false); }}>🎓 게임 안내 다시 보기</button>
+              <div className="muted" style={{ margin: '6px 0', fontSize: 12.5 }}>🎓 튜토리얼은 처음 화면(🚪 나가기)의 「튜토리얼 시작」에서 언제든 다시 할 수 있어요.</div>
               <div className="kbd-help">⌨️ PC 단축키: <kbd>Space</kbd> 진행(고른 날 수) · <kbd>Shift</kbd>+<kbd>Space</kbd> 순 끝까지 · <kbd>1</kbd>~<kbd>5</kbd> 탭 · <kbd>T</kbd> 할 일 · <kbd>P</kbd> 패널 접기 · <kbd>Esc</kbd> 선택 해제</div>
               <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
                 <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 순 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
@@ -2858,7 +2860,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               ))}
             </div>
           )}
-          {tourOn && <HexTour steps={tourSteps} paused={!playing && !game.over && !!(game.inbox?.length || game.eventsQ?.length || (report && reportOpen))} onClose={() => { setTourOn(false); setSel(null); setTab('home'); }} />}
+          {tourOn && <HexTour steps={tourSteps} paused={!playing && !game.over && !!(game.inbox?.length || game.eventsQ?.length || (report && reportOpen))} onClose={() => { setTourOn(false); setSel(null); setTab('home'); if (game.tutorial) { setGame((g) => ({ ...g, tutorial: false })); toast('튜토리얼 끝! 이 판은 연습용이라 자동 저장되지 않아요. 🚪 나가서 원하는 나라로 새로 시작하세요.'); } }} />}
           {game.over && (
             <div className="h14-over">
               {game.over.winner === pid ? '🏆 천하통일!' : game.over.lost ? '💀 멸망' : `${game.nations[game.over.winner]?.name} 천하통일`}

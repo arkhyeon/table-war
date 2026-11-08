@@ -13,6 +13,10 @@ import { CIVS } from '../game/civs.js';
 import { nationRegions } from '../game/engine.js';
 import { loadHistory, SLOT_COUNT } from '../storage.js';
 import { ACHIEVEMENTS, loadAchievements } from '../game/achievements.js';
+import { tourSeen } from './HexTour.jsx';
+
+// 튜토리얼은 늘 같은 판: 삼국지 200년 · 조조 · 정해진 시드·역사 능력치 (나라마다 경우를 따지지 않게)
+const TUT_SCN = 'threekingdoms200', TUT_SEED = 'tutorial', TUT_NATION = '조조';
 
 const randomSeed = () => Math.random().toString(36).slice(2, 8);
 
@@ -66,6 +70,23 @@ export default function Setup({ onStart, onResume, hasSave }) {
       } catch (e) { console.error(e); setStarting(false); }
     }, 60);
   };
+  // 🎓 튜토리얼: 정해진 지도가 준비되면 바로 시작
+  const [tut, setTut] = useState(false);
+  const startTutorial = () => { setStarting(true); setScope('region'); setScnId(TUT_SCN); setSeed(TUT_SEED); setDetail('normal'); setTut(true); };
+  useEffect(() => {
+    if (!tut || !ready || scn.id !== TUT_SCN || seed !== TUT_SEED) return;
+    setTut(false);
+    setTimeout(() => {
+      try {
+        const tOpts = { histStats: true, difficulty: 'normal', revealMap: true, revealTroops: true, rememberExplored: true, showBattles: true, showArmy: true, detail: 'normal' };
+        const probe = createGame(world, scn, TUT_SEED, 0, tOpts);
+        const me = Math.max(0, probe.nations.findIndex((n) => n.name === TUT_NATION));
+        const h = createHex14(world, createGame(world, scn, TUT_SEED, me, tOpts));
+        h.tutorial = true; h.tutGame = true; // tutorial: 안내 중 · tutGame: 자동 저장 안 하는 연습 판
+        onStart(world, scn, h);
+      } catch (e) { console.error(e); setStarting(false); }
+    }, 30);
+  }, [tut, ready, scn, seed]); // eslint-disable-line react-hooks/exhaustive-deps
   const nameOf = (n) => names[n.id] || n.name;
   const nationRef = useRef(null);
   const pick = (id) => {
@@ -97,6 +118,13 @@ export default function Setup({ onStart, onResume, hasSave }) {
               📂 이어하기·불러오기
             </button>
           )}
+        </div>
+        <div className={'tut-card' + (tourSeen() ? '' : ' first')}>
+          <div>
+            <b>🎓 {tourSeen() ? '튜토리얼' : '처음이세요? 튜토리얼부터!'}</b>
+            <small className="muted">삼국지 200년 조조로 3분 동안 직접 눌러 보며 배워요 — 성 고르기·출진·공략·시간 진행</small>
+          </div>
+          <button className={tourSeen() ? '' : 'primary'} onClick={startTutorial}>튜토리얼 시작 ▶</button>
         </div>
         {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
         {showSaves && (

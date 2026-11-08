@@ -27,7 +27,7 @@ export default function App() {
     return () => { window.removeEventListener('beforeunload', flush); window.removeEventListener('pagehide', flush); };
   }, []);
   useEffect(() => {
-    if (!game || !session) return;
+    if (!game || !session || game.tutGame) return; // 튜토리얼 판은 자동 저장하지 않음 (진짜 저장을 덮지 않게)
     const data = { scenarioId: game.scenarioId, seed: game.seed, state: game };
     latest.current = data;
     clearTimeout(saveT.current);

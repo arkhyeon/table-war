@@ -805,3 +805,10 @@ details.sub-card > summary small { margin-left: auto; overflow: hidden; text-ove
 .tour-do { margin-top: 10px; padding: 8px 10px; border-radius: 10px; background: #ffb34722; border: 1px dashed #ffb347; font-size: 13px; font-weight: 700; color: #ffd27a; }
 .tour-do.ok { background: #8fe08a22; border-color: #8fe08a; color: #b6f0b0; }
 .map-vignette { position: absolute; inset: 0; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(8,12,20,0.32) 100%); }
+/* 처음 화면 튜토리얼 카드 */
+.tut-card { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #ffffff08; }
+.tut-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.tut-card b { font-size: 15px; }
+.tut-card.first { border-color: #f5b94a; background: linear-gradient(90deg, #f5b94a22, #f5b94a08); box-shadow: 0 0 0 3px #f5b94a22; }
+.tut-card button { flex-shrink: 0; }
+@media (max-width: 560px) { .tut-card { flex-direction: column; align-items: stretch; } }
