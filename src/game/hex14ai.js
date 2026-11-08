@@ -332,6 +332,19 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const r = sortie(s, grid, c.id, [gs[0].id], Math.min(commandCap(s, [gs[0].id]), c.troops - 2000));
     if (r.ok) order(s, grid, mark(r.unit), 'unit', foe.id);
   }
+  // 2.05) 도적 토벌: 우리 성 8칸 안을 휘젓는 도적 무리는 넉넉한 성에서 장수 여럿(최대 3)으로 나가 없앰 (도적은 사기가 없어 물러나지 않으니 확실히 이길 만큼만)
+  for (const ob of s.units.filter((u) => u.outlaw && !u.dead)) {
+    if (s.units.some((u) => u.nation === nid && u.order?.kind === 'unit' && u.order.id === ob.id)) continue; // 이미 치러 감
+    const near = mine.filter((c) => grid.dist(c.tile, ob.tile) <= 8 * grid.k).sort((a, b) => grid.dist(a.tile, ob.tile) - grid.dist(b.tile, ob.tile));
+    for (const c of near) {
+      const gs = fighters(s, c).slice(0, 3); if (!gs.length) continue;
+      const keep = Math.max(2000, Math.round(c.troops * 0.3));
+      const amt = Math.min(commandCap(s, gs.map((g) => g.id)), c.troops - keep);
+      if (amt < ob.troops * 1.3) continue;
+      const r = sortie(s, grid, c.id, gs.map((g) => g.id), amt);
+      if (r.ok) { order(s, grid, mark(r.unit), 'unit', ob.id); break; }
+    }
+  }
   // 2.1) 증원: 적 부대가 우리 성을 노리고 오는데 수비가 모자라면, 포위되기 전에 가까운 안전한 성에서 병력을 미리 보냄
   for (const c of mine) {
     const coming = s.units.filter((u) => enemy(s, nid, u.nation) && u.order?.kind === 'castle' && u.order.id === c.id && grid.dist(u.tile, c.tile) <= 8 * grid.k).reduce((a, u) => a + u.troops, 0);

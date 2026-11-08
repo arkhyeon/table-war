@@ -12,6 +12,7 @@ import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits } from './hex14g
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack, outlawGrow } from './hex14outlaw.js';
+import { meritCredit, meritCreditCastle, meritTurn } from './hex14merit.js';
 import { t14, castleGens } from './hex14traits.js';
 
 // 칸 배열(주인·관할)은 Int16Array로 둠: 일반 배열은 structuredClone을 거치면 다시 복사할 때 몇 배 느려짐 (하루마다 상태를 복사하므로)
@@ -1125,6 +1126,7 @@ export function stepDay(s, grid) {
       if (rec) { rec.dmg = Math.round(dmg * mul); rec.back = Math.round(back); rec.pincer = pincer; rec.extra = mul / pincer; }
       u.troops -= back;
       u.morale -= (back / Math.max(1, u.troops)) * 30;
+      meritCredit(s, u, dmg * mul); meritCredit(s, t, back); // 공적: 쓰러뜨린 적 병사 수
       s.fx.push({ type: 'hit', tile: u.tile, amt: Math.round(back) });
     }
     if (pincer > 1) s.fx.push({ type: 'tactic', tile: t.tile, text: '협공!', nation: list[0].u.nation });
@@ -1168,8 +1170,10 @@ export function stepDay(s, grid) {
     c.dur = Math.max(0, c.dur - wall);
     const kill = u.troops * 0.012 * (a.atk / 100) * (walled ? 0.35 : 1.8) * rng.range(0.9, 1.1) / guardT;
     c.troops -= kill;
+    meritCredit(s, u, kill);
     const sback = Math.max(0, c.troops) * 0.012 * (walled ? 1.4 : 1) * (1 + t14(cg, '궁술')) * (1 - t14(ug, '노련')) * (u.troops / Math.max(1, siegeSum.get(c) || u.troops));
     u.troops -= sback;
+    meritCreditCastle(cg, sback);
     if (!s.spectator && (u.nation === s.playerId || c.owner === s.playerId)) { (s.btl ||= []).push({ turn: s.turn, day: s.day, siege: true, a: u.id, an: u.nation, al: leader(s, u)?.name, c: c.id, dn: c.owner, cn: c.name, walled, wall: Math.round(wall), dmg: Math.round(kill), back: Math.round(sback), ratio: a.atk / 100, guard: guardT, engine: !!u.siege }); if (s.btl.length > 120) s.btl.splice(0, s.btl.length - 120); }
     u.morale -= walled ? 0.5 : 0;
     s.fx.push({ type: 'clash', a: u.tile, b: c.tile }, { type: 'hit', tile: c.tile, amt: Math.round(kill), wall: walled });
@@ -1194,7 +1198,7 @@ export function stepDay(s, grid) {
     // 내 부대: 사기가 바닥나도 병력이 절반 넘게 남았으면 버티며 싸움 (사기가 낮으면 피해는 덜 줌) — 갉아먹는 싸움이 되게
     // 컴퓨터 부대는 예전대로 (물러날지는 컴퓨터 판단에 맡김)
     const holdOn = u.nation === s.playerId && !s.spectator && u.troops >= (u.max || u.troops) * 0.5;
-    if (u.troops > 300 && (u.morale > 5 || holdOn)) continue;
+    if (u.troops > 300 && (u.morale > 5 || holdOn || u.outlaw)) continue; // 도적은 사기로 무너지지 않음
     const home = nearestCastle(s, grid, u.tile, u.nation);
     // 병력이 남았으면 패주: 그 자리에서 가까운 내 성으로 걸어서 물러남 (싸우지 않고, 쫓기면 잡힘)
     if (u.troops > 1000 && home && !u.routed) {
@@ -1223,7 +1227,7 @@ export function stepDay(s, grid) {
   s.units = s.units.filter((u) => !u.dead);
   advanceQueues(s, grid);
   convoysDay(s, grid);
-  for (const u of s.units) { u.troops = Math.round(u.troops); u.morale = Math.max(0, Math.min(100, u.morale)); }
+  for (const u of s.units) { u.troops = Math.round(u.troops); u.morale = u.outlaw ? 100 : Math.max(0, Math.min(100, u.morale)); } // 도적은 사기가 없음 (꺾이지 않고 끝까지 싸움)
   heldAtNearest(s, grid);
   updateSeen(s, grid);
   for (const c of s.castles) c.troops = Math.max(0, Math.round(c.troops));
@@ -1406,6 +1410,7 @@ export const landShare = (s, c) => { const tiles = districtTiles(s)[c.id]; retur
 // ── 턴 마무리: 수입·징병(자원병)·포로·승리 판정 ──
 export function endTurn14(s, grid) {
   govTurn(s, grid);
+  meritTurn(s);
   outlawTurn(s, grid, makeRng(`outlaw:${s.seed}:${s.turn}`));
   for (const c of s.castles) { const over = c.troops - capOf(c, s); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c, s))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
   checkRulers(s);

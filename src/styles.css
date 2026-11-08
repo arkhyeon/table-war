@@ -828,3 +828,16 @@ b.hl, .hl { color: var(--accent, #ffb347); }
 /* 장수 능력치 줄: 좁으면 특성·전법이 다음 줄로 (화면 밖으로 나가지 않게) */
 .gen-main .gen-line { flex-wrap: wrap; white-space: normal; min-width: 0; }
 .gen-main .gen-line > * { white-space: nowrap; }
+/* 공적으로 새 특성 */
+.offer-badge { margin-left: 4px; padding: 1px 6px; font-size: 10.5px; border-color: #f5b94a88; color: #ffd27a; background: #f5b94a1a; animation: todoPing 1.6s ease-in-out infinite; }
+.offer-new { display: flex; gap: 10px; align-items: center; padding: 10px; border-radius: 12px; background: #f5b94a14; border: 1px solid #f5b94a55; }
+.offer-new img { margin: 0 !important; }
+.gen-top b[data-tip] { text-decoration: underline dotted #ffffff40; text-underline-offset: 3px; }
+/* 도움말: 특성 목록 */
+.trait-list { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: #ffffff06; }
+.trait-list > summary { cursor: pointer; color: var(--text); font-weight: 700; }
+.trait-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.trait-row > b { color: var(--text); }
+.trait-row > span { display: flex; flex-direction: column; gap: 1px; }
+.trait-row .tl i { font-style: normal; font-weight: 700; display: inline-block; width: 16px; }
+.trait-row .tl.t2 i { color: #c9d3de; } .trait-row .tl.t3 i { color: #ffd27a; } .trait-row .tl.t1 i { color: #d79a6a; }

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { answerOffer, nextMerit, traitName } from '../game/hex14merit.js';
 import { uiConfirm } from '../dialog.js';
 import HexTour from './HexTour.jsx';
 import { BUILD, versionText } from '../version.js';
@@ -9,7 +10,7 @@ import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
-import { tlabel, tdesc, TIER_NAME } from '../game/hex14traits.js';
+import { tlabel, tdesc, TIER_NAME, T14 } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
@@ -660,6 +661,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [sortieOpen, setSortieOpen] = useState(false);
   const [genMore, setGenMore] = useState(null); // 장수 더보기를 펼친 성
   const [booted, setBooted] = useState(false); // 처음 지도 그림을 마쳤는지
+  const [offerGid, setOfferGid] = useState(null); // 특성 익히기 제안 창 (특성이 가득 찬 내 장수)
   const [cmodal, setCmodal] = useState(null); // 성 작업 창: draft·recv·jobs·build·fort (출진은 sortieOpen)
   const [moreOpen, setMoreOpen] = useState(false); // 폰: 위 막대의 소리·속도·나가기 버튼을 ⋯ 메뉴로 접어 둠
   useEffect(() => { if (!moreOpen) return undefined; const off = (e) => { if (!e.target.closest?.('.tb-btns, .tb-more')) setMoreOpen(false); }; window.addEventListener('pointerdown', off, true); return () => window.removeEventListener('pointerdown', off, true); }, [moreOpen]);
@@ -1322,7 +1324,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       ctx.fillStyle = '#6fd37f';
       ctx.fillRect(cx - bw / 2, cy + sz * 0.75, bw * Math.min(1, u.troops / u.max), sz * 0.25);
       ctx.fillStyle = '#5fb0ff';
-      ctx.fillRect(cx - bw / 2, cy + sz * 1.0, bw * Math.min(1, u.morale / 100), sz * 0.25);
+      if (!u.outlaw) ctx.fillRect(cx - bw / 2, cy + sz * 1.0, bw * Math.min(1, u.morale / 100), sz * 0.25); // 도적은 사기 막대 없음
       const mineU = u.nation === pid;
       const lab = mineU || on || k * sz > 7 ? `${g?.name || ''} ${numOf(u.nation, u.tile, u.troops)}` : numOf(u.nation, u.tile, u.troops);
       ctx.font = `bold ${fs * 0.78}px sans-serif`;
@@ -1436,6 +1438,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       focus: (tile) => { const el = wrap.current, v = view.current; if (!el || !v) return; const [x, y] = grid.center(tile); v.x = x - el.clientWidth / v.k / 2; v.y = y - el.clientHeight / v.k / 2; draw(); },
       state: () => { const g = gameRef.current; return { turn: g.turn, day: g.day, gold: g.nations[pid].gold, food: g.nations[pid].food, alive: g.nations[pid].alive, over: g.over, pid, cities: g.castles.filter((c) => c.owner === pid).length, total: g.castles.filter((c) => c.kind !== 'pass').length, pacts: (g.pacts || []).filter((p) => p.until > g.turn && (p.a === pid || p.b === pid)).map((p) => (p.a === pid ? p.b : p.a)) }; },
       game: () => gameRef.current,
+      meritTest: async (gid) => { const M = await import('../game/hex14merit.js'); return act((s) => { const g = s.generals[gid]; for (let k = 0; k < 6 && !(s.traitOffers || []).some((o) => o.gid === gid); k++) { g.merit = M.nextMerit(g) ?? 1e9; M.meritTurn(s); } return { ok: true, offers: (s.traitOffers || []).length, traits: g.traits.map(M.traitName).join(','), lv: g.meritLv }; }); }, // 시험용: 공적을 채워 특성 제안 띄우기
       showDuel: (d) => setDuel(d), // 시험용: 일기토 장면 띄우기
       paintMs: () => land.current.paintMs,
       canvasParts: () => { const L = land.current, mb = (c) => Math.round(((c?.width || 0) * (c?.height || 0) * 4) / 1e5) / 10; return { base: mb(L.base?.cv), river: mb(L.base?.rcv), owners: mb(L.over), comp: mb(L.comp), screen: mb(canvas.current), tiles: Math.round([...(L.tiles?.values() || [])].reduce((a, t) => a + mb(t.comp), 0)), tileN: L.tiles?.size || 0, stat: Math.round(Object.values(L.statC || {}).reduce((a, c) => a + mb(c?.cv), 0)), snow: mb(L.snow), fog: mb(L.fog), baseSize: `${L.base?.cv?.width}x${L.base?.cv?.height}` }; },
@@ -1969,6 +1972,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 할 일: 장수가 한 성에 몰려 있음
     if (spreadPlan.length >= 2) { const from = new Map(); for (const m of spreadPlan) from.set(m.from, (from.get(m.from) || 0) + 1); const top = [...from].sort((a, b) => b[1] - a[1])[0]; out.push({ id: 'spread', sev: 'todo', icon: '👥', title: `장수가 몰려 있음 — ${spreadPlan.length}명 나눌 수 있음`, sub: `${g.castles[top[0]].name} 등에서 장수가 모자란 성으로`, act: { label: '장수 나누기', fn: spreadGens } }); }
+    // 할 일: 특성이 가득 찬 장수가 새 특성을 익힐 수 있음 (무엇을 잊을지 고르기)
+    for (const o of g.traitOffers || []) { const gg = g.generals[o.gid]; if (gg && gg.status === 'active' && gg.nation === pid) out.push({ id: 'offer' + o.gid, sev: 'todo', icon: '✨', title: `${gg.name} 새 특성 「${traitName(o.trait)}」`, sub: '특성이 가득 차서 하나를 잊어야 배울 수 있어요', act: { label: '고르기', primary: true, fn: () => setOfferGid(o.gid) } }); }
     // 할 일: 충성이 낮은 장수
     const low = Object.values(g.generals).filter((x) => x.nation === pid && x.status === 'active' && !x.ruler && loyalOf(x) < 40);
     if (low.length) out.push({ id: 'loy', sev: low.some((x) => loyalOf(x) < 30) ? 'danger' : 'todo', icon: '💔', title: `충성 낮은 장수 ${low.length}명 (떠날 수 있음)`, sub: low.slice(0, 4).map((x) => `${x.name} 충${loyalOf(x)}`).join(' · '), act: { label: `전체 포상 ${fmtGold(rewardCost(g, pid))}`, disabled: me.gold < rewardCost(g, pid), fn: () => act((s) => rewardAll(s, pid)) } });
@@ -2066,9 +2071,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
     <span key={tr[0]} className={`trait t${tr[1]}`} data-tip={`${tr[0]} ${TIER_NAME[tr[1]]} — ${tdesc(tr[0], tr[1])}`} role="button" tabIndex={0}>{tlabel(tr)}</span>))}</span> : null);
   const Stats = ({ g, keys = ['war', 'lead', 'intel', 'pol'], traits = true }) => <span className="stats">{keys.map((k) => <St key={k} k={{ war: '무', lead: '통', intel: '지', pol: '정' }[k]} v={g[k]} />)}{traits && <Traits g={g} />}</span>;
   // 장수 카드: 1줄 이름(+담당), 2줄 충성·능력치, 3줄 특성·전법
-  const GenCard = ({ g, loyal = true }) => { const tn = tacticName(g); return (
+  const GenCard = ({ g, loyal = true, pick = false }) => { const tn = tacticName(g); return (
     <div className="gen-main">
-      <div className="gen-top"><b>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} /></div>
+      <div className="gen-top"><b data-tip={pick ? undefined : `${g.name} · 공적 ${fmtTroops(g.merit || 0)}${nextMerit(g) ? ` — ${fmtTroops(nextMerit(g))}이면 특성을 하나 익히거나 올림 (적 병사를 쓰러뜨리거나 내정을 맡으면 쌓임)` : ' — 더 익힐 수 없음'}`}>{g.name}</b>{loyal && <Loyal g={g} />}<Job g={g} />{(game.traitOffers || []).some((o) => o.gid === g.id) && <button className="xs offer-badge" title="새 특성을 익힐 수 있어요" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOfferGid(g.id); }}>✨ 새 특성</button>}</div>
       <div className="gen-line"><Stats g={g} traits={false} /><Traits g={g} />{tn && <span className="tac" data-tip={tacticTip(g)} role="button" tabIndex={0}>「{tn}」</span>}</div>
     </div>); };
   const SortBar = ({ v, set }) => <div className="gsort" role="group" aria-label="장수 줄 세우기">{GSORT.map(([k, l]) => <button key={k} className={'xs' + (v === k ? ' on' : '')} aria-pressed={v === k} onClick={() => set(k)} title={k === 'loyal' ? '충성 낮은 순' : `${l} 높은 순`}>{l}</button>)}</div>;
@@ -2136,7 +2141,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         const nx = e.target.checked ? [...pickG, g.id].slice(-3) : pickG.filter((x) => x !== g.id);
                         setPickG(nx);
                         setAmt(Math.max(0, Math.min(commandCap(game, nx), selCastle.troops - 500)));
-                      }} /><Face g={g} size={26} col={me.color} /><GenCard g={g} />
+                      }} /><Face g={g} size={26} col={me.color} /><GenCard g={g} pick />
                     </label>
                   ))}
                   <div style={{ fontSize: 13, marginTop: 4 }}>병력 {fmtTroops(Math.min(amt, maxAmt))} / 지휘 한도 {fmtTroops(cap)}</div>
@@ -2373,7 +2378,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             {(() => { const hid = selUnit.nation !== pid && troopsHidden(game) && !sightOf(game, grid)[selUnit.tile]; const tp = Math.round((selUnit.troops / Math.max(1, selUnit.max)) * 100); return (
               <div className="stat-tiles">
                 <div><small>병력</small><b>{hid ? '?' : fmtTroops(selUnit.troops)}</b><span className="mini-bar"><i style={{ width: `${hid ? 0 : tp}%`, background: '#6fd37f' }} /></span></div>
-                <div className={selUnit.morale < 30 ? 'warn' : ''} title="5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일"><small>사기</small><b>{Math.round(selUnit.morale)}</b><span className="mini-bar"><i style={{ width: `${Math.round(selUnit.morale)}%`, background: '#5a8dee' }} /></span></div>
+                {selUnit.outlaw ? <div title="도적은 사기가 없어 꺾이지 않고 끝까지 싸웁니다"><small>사기</small><b>—</b><small>도적</small></div> : <div className={selUnit.morale < 30 ? 'warn' : ''} title="5 이하면 패주 · 내 땅에서 쉬면 +3/일, 진지 안 +6/일"><small>사기</small><b>{Math.round(selUnit.morale)}</b><span className="mini-bar"><i style={{ width: `${Math.round(selUnit.morale)}%`, background: '#5a8dee' }} /></span></div>}
                 <div><small>공·방</small><b>{Math.round(st.atk)}·{Math.round(st.def)}</b><small>{selUnit.siege ? '⚙️ 공성병기' : '\u00a0'}</small></div>
                 <div className={selUnit.cut ? 'warn' : ''}><small>보급</small><b>{selUnit.cut ? '끊김' : '이어짐'}</b><small>{selUnit.cut ? '병력·사기 감소' : TERRAIN_NAME[grid.terrain[selUnit.tile]] || '\u00a0'}</small></div>
               </div>); })()}
@@ -2625,6 +2630,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
               내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
               <div className="muted" style={{ margin: '6px 0', fontSize: 12.5 }}>🎓 튜토리얼은 처음 화면(🚪 나가기)의 「튜토리얼 시작」에서 언제든 다시 할 수 있어요.</div>
               <div className="kbd-help">⌨️ PC 단축키: <kbd>Space</kbd> 진행(고른 날 수) · <kbd>Shift</kbd>+<kbd>Space</kbd> 순 끝까지 · <kbd>1</kbd>~<kbd>5</kbd> 탭 · <kbd>T</kbd> 할 일 · <kbd>P</kbd> 패널 접기 · <kbd>Esc</kbd> 선택 해제</div>
+              <details className="trait-list">
+                <summary>📜 특성 {Object.keys(T14).length}가지와 효과 (Ⅰ / Ⅱ / Ⅲ)</summary>
+                <div className="muted" style={{ fontSize: 12, margin: '4px 0 6px' }}>장수마다 최대 3개. 「역사 능력치 사용」을 켜면 인물의 역사 속 특기, 끄면 무작위. 싸워서 적 병사를 쓰러뜨리거나 내정을 맡아 <b>공적</b>이 1.5만·5만·15만·40만·100만에 이를 때마다 무작위로 하나를 익히거나 올립니다(3개가 차 있으면 하나를 잊고 배울지 고름). 부대에서는 함께 간 장수 중 가장 높은 등급이 적용돼요.</div>
+                {[['mil', '⚔️ 무관 — 싸움'], ['civ', '🏛️ 문관 — 내정·외교']].map(([cat, label]) => (
+                  <div key={cat}>
+                    <div className="sec-h" style={{ marginTop: 6 }}>{label}</div>
+                    {Object.keys(T14).filter((k) => T14[k].cat === cat).map((k) => (
+                      <div key={k} className="trait-row"><b>{k}</b><span>{[1, 2, 3].map((t) => <span key={t} className={`tl t${t}`}><i>{['', 'Ⅰ', 'Ⅱ', 'Ⅲ'][t]}</i> {tdesc(k, t)}</span>)}</span></div>
+                    ))}
+                  </div>
+                ))}
+              </details>
               <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
                 <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 순 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
                 <li>금은 상업에서 매 턴, 병량은 농업에서 가을(8월)에 한 해 몫이 들어옵니다. 병사는 병량을 먹고, 병량이 떨어지면 흩어집니다.</li>
@@ -2665,7 +2682,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>⚖️ 밸런스 기준: 병사 1명 = 금 10 = 공격력 1(병사 1명이 내는 힘) = 병량 1.5. 정책·시설·특성은 모두 이 환율로 「한 순에 금 몇 어치」인지 따져 맞춥니다.</li>
                 <li>🏪🌾 시장은 그 도시 금 +25%씩, 농장은 그 도시 수확 +100%씩(유지비 없음). 관할 땅은 칸 수가 아니라 <b>채운 비율</b>로 수입이 정해집니다.</li>
                 <li>🎖️ 장수 특성: 장수 이름 옆 꼬리표(예: 맹장Ⅱ)가 특성이고, 마우스를 올리면 효과가 나옵니다. 등급은 브론즈(Ⅰ)·실버(Ⅱ)·골드(Ⅲ)이고, 병사 1명 = 금 10으로 쳐서 한 순에 브론즈 ≈ 금 200(장수 녹봉 하나)·실버 ≈ 400·골드 ≈ 700만큼 벌어 주도록 맞췄어요. 그래서 자주 쓰이는 특성(명장: 공격 +8~29%)은 수치가 작고, 가끔 쓰이는 특성(산악: 산·구릉 공격 +25~80%, 사막·화공 등)은 수치가 큽니다. 싸움 특성은 부대에 있을 때, 성 특성(수성·궁술·철벽·정치·교역·모병·인덕·축성·건축)은 그 성에 머물 때, 농정·징병은 그 일을 맡았을 때, 상업·외교는 나라에서 가장 높은 장수 하나가 적용돼요.</li>
-                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(5천~2.5만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 토벌하지 않으면 사라지지 않고, 병력이 1천 아래로 줄어야 흩어집니다.</li>
+                <li>🏴 도적·산적·비적·해적: 성 근처 아무 데서나 무리(5천~2.5만)가 일어나 6칸 안의 성이나 부대를 바로 들이받습니다. 들판은 도적, 산·숲은 산적, 사막·동토는 비적, 얕은 바다는 해적이에요. 무리 크기에 따라 두목(6천 아래)·단장(6천~)·대장(1만~)·총대장(1.5만~)이 이끌고, 길에서 부대를 보면 성보다 부대(장수)를 먼저 들이받습니다. 금·병량은 안 뺏지만, 성 수비병을 0으로 만들면 그 성은 주인 없는 중립 성이 되고(수비병도 중립 성만큼 다시 모임) 도적은 다음 먹잇감을 찾아 떠납니다. 두목은 사로잡거나 등용할 수 없고, 도적에게 진 장수도 사로잡히지 않습니다. 토벌하지 않으면 사라지지 않고, 병력이 1천 아래로 줄어야 흩어집니다. <b>도적은 사기가 없어</b> 끝까지 싸우고, 부대를 쳐부수거나 성을 깰수록 병사가 모여 세를 불립니다(최대 4만). 컴퓨터 나라도 자기 땅 가까이 온 무리는 토벌하러 나갑니다.</li>
                 <li>🏯 성 수용 한도: 성마다 들일 수 있는 병력이 정해져 있습니다(인구×600, 최소 4만, 성벽 증축 단계마다 +1만). 넘는 병력은 순마다 15%씩 흩어지니 부대로 내보내세요.</li>
                 <li>🚚 병력 받기: 받을 성을 눌러 「병력 받기」에서 보낼 성을 고릅니다. 수송대는 내 땅 길로 하루 1.5칸 가고, 포위된 성에는 못 들어갑니다(장수가 부대로 데려가야 함).</li>
                 <li>🏳️ 패주: 사기가 꺾인 부대는 가까운 내 성으로 걸어서 물러납니다. 물러나는 동안은 싸우지 않고 받는 피해가 30% 늘어 쫓아가면 잡을 수 있습니다.</li>
@@ -2930,6 +2947,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
               ))}
             </div>
           )}
+          {(() => {
+            const o = offerGid && (game.traitOffers || []).find((x) => x.gid === offerGid); const gg = o && game.generals[o.gid];
+            if (!o || !gg) return null;
+            const desc = (t) => `${t[0]} ${TIER_NAME[t[1]]} — ${tdesc(t[0], t[1])}`;
+            const done = (idx) => { act((s) => answerOffer(s, o.gid, idx)); setOfferGid(null); };
+            return (
+              <CModal open title={<>✨ {gg.name}의 새 특성</>} onClose={() => setOfferGid(null)}>
+                <div className="offer-new"><Face g={gg} size={40} col={me.color} /><div><div className="muted" style={{ fontSize: 12 }}>공적을 쌓아 새로 익힐 수 있는 특성</div><b className={`trait t${o.trait[1]}`} style={{ fontSize: 13 }}>{traitName(o.trait)}</b><div style={{ fontSize: 12.5, marginTop: 2 }}>{tdesc(o.trait[0], o.trait[1])}</div></div></div>
+                <div className="muted" style={{ fontSize: 12.5, margin: '10px 0 4px' }}>특성은 3개까지예요. 하나를 잊고 배울까요?</div>
+                {(gg.traits || []).map((t, i) => (
+                  <div key={i} className="line-row"><span className="line-tx"><b><span className={`trait t${t[1]}`}>{traitName(t)}</span></b><small className="muted">{desc(t)}</small></span><button className="sm" onClick={() => done(i)}>잊고 배우기</button></div>
+                ))}
+                <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}><button onClick={() => done(null)}>배우지 않기</button></div>
+              </CModal>
+            );
+          })()}
           {tip && createPortal((() => {
             const W = Math.min(270, window.innerWidth - 16), left = Math.max(8, Math.min(window.innerWidth - W - 8, tip.x - W / 2));
             const below = tip.y + 8 + 90 < window.innerHeight;
