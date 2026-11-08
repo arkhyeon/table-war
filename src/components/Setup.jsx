@@ -10,7 +10,6 @@ import { fmtYear } from '../game/weather.js';
 import { createGame } from '../game/setup.js';
 import { createHex14 } from '../game/hex14.js';
 import { CIVS } from '../game/civs.js';
-import { nationRegions } from '../game/engine.js';
 import { loadHistory, SLOT_COUNT } from '../storage.js';
 import { ACHIEVEMENTS, loadAchievements } from '../game/achievements.js';
 import { tourSeen } from './HexTour.jsx';
@@ -58,6 +57,20 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const ready = world && !loading && world.scenarioId === scn.id && world.seed === seed && world.detail === detail;
   const preview = useMemo(() => (ready ? createGame(world, scn, seed, 0, opts) : null), [ready, world, scn, seed, opts]); // eslint-disable-line react-hooks/exhaustive-deps
   const pid = preview && player < preview.nations.length ? player : 0;
+  // 나라마다 실제 게임(육각 지도)에서 받는 성 수: 옛 「지역」 수와 달라서, 미리보기가 준비되면 쉬는 틈에 실제 성 배치를 한 번 셈
+  const [hexCount, setHexCount] = useState(null);
+  useEffect(() => {
+    if (!preview) return undefined;
+    const t = setTimeout(() => {
+      try {
+        const h = createHex14(world, preview), m = {};
+        for (const c of h.castles) if (c.owner !== null && c.kind !== 'pass') m[c.owner] = (m[c.owner] || 0) + 1;
+        setHexCount({ of: preview, m });
+      } catch (e) { console.error(e); }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [preview]); // eslint-disable-line react-hooks/exhaustive-deps
+  const castlesOf = (id) => (hexCount?.of === preview ? hexCount.m[id] || 0 : null);
 
   // 게임 시작은 큰 지도에서 몇 초 걸려 화면이 멈춘 것처럼 보이므로, 로딩 화면을 먼저 그린 뒤 만듦
   const [starting, setStarting] = useState(false);
@@ -259,8 +272,8 @@ export default function Setup({ onStart, onResume, hasSave }) {
                     <EditableName value={nameOf(n)} onSave={(t) => setNames({ ...names, [n.id]: t })} />
                     <small className="muted"> · {ruler?.name}</small>
                   </span>
-                  <small className="muted">
-                    {CIVS[n.civ]?.name} · {nationRegions(preview, n.id).length}지역
+                  <small className="muted" title="실제 게임(육각 지도)에서 이 나라가 갖고 시작하는 성 수 (관문 제외)">
+                    {CIVS[n.civ]?.name} · {castlesOf(n.id) === null ? '성 …' : `🏯 ${castlesOf(n.id)}성`}
                   </small>
                 </div>
               );
