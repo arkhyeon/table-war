@@ -1879,7 +1879,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {selCastle.port && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>⚓ 항구: 여기서 나간 부대는 배로 바닷길을 갈 수 있습니다.</div>}
           {selCastle.kind !== 'pass' && selCastle.owner !== null && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
-              <b>🏛️ 내정</b>
+              <b>🏛️ 내정</b>{selCastle.owner === pid && (() => { const n = jobCands(game, selCastle, 'trade').length; return <small className="muted" style={{ marginLeft: 6 }} title="다른 내 성에 있으면서 어느 성의 담당도 맡지 않은 장수(무력 85 이하, 군주·출진 중·그 성 마지막 장수 제외). 빈 담당 아래 「추천」이나 「다른 성 후보」로 불러올 수 있습니다">💡 다른 성의 놀고 있는 장수 {n ? `${n}명` : '없음 (모두 담당 중)'}</small>; })()}
               <div className="kv" style={{ marginTop: 4 }}>
                 <span>농업</span><span>{selCastle.farm} / {selCastle.devMax} · 가을 수확 약 {fmtTroops(harvestOf(game, selCastle))}</span>
                 <span>상업</span><span>{selCastle.trade} / {selCastle.devMax} · 금 +{fmtGold(goldOf(game, selCastle))}/순</span>
@@ -1914,6 +1914,18 @@ export default function Hex14({ world, game, setGame, onExit }) {
                         {selCastle.jobs?.[role] && !jobGen(game, selCastle, role) && game.generals[selCastle.jobs[role]]?.unit && <option value={selCastle.jobs[role]} disabled>{game.generals[selCastle.jobs[role]].name} (오는 중)</option>}
                       </select>
                     </div>
+                    {selCastle.owner === pid && jobGen(game, selCastle, role) && (() => {
+                      // 담당이 차 있어도: 다른 성 후보를 언제든 펼쳐 볼 수 있게 (더 맞는 사람으로 바꾸기)
+                      const all = jobCands(game, selCastle, role), open = jobRecAll === `${selCastle.id}:${role}`;
+                      if (!all.length) return null;
+                      const k = role === 'draft' ? '통' : '정', kv = (g) => (role === 'draft' ? g.lead : g.pol), cur = kv(jobGen(game, selCastle, role));
+                      return (
+                        <div className="job-rec">
+                          <button className="xs link" onClick={() => setJobRecAll(open ? null : `${selCastle.id}:${role}`)}>{open ? '접기' : `다른 성 후보 ${all.length}명${kv(all[0].g) > cur ? ` (${k}${kv(all[0].g)}까지)` : ''}`}</button>
+                          {open && all.map(({ g, d }) => <button key={g.id} className={'xs' + (kv(g) > cur ? ' primary' : '')} disabled={playing} title={`무${g.war} 통${g.lead} 지${g.intel} 정${g.pol} · ${game.castles[g.castle].name}에서 ${d}칸 — 불러오면 지금 담당은 다른 일이 됩니다`} onClick={() => callForJob(selCastle.id, role, g.id)}>{g.name} {k}{kv(g)} · {game.castles[g.castle].name} {d}칸</button>)}
+                        </div>
+                      );
+                    })()}
                     {selCastle.owner === pid && !jobGen(game, selCastle, role) && !(selCastle.jobs?.[role] && game.generals[selCastle.jobs[role]]?.unit) && (() => {
                       // 이 성에 맡길 사람이 없으면: 다른 성에서 놀고 있는 알맞은 장수 추천 (무력 85 이하, 담당 없음)
                       const here = castleGens.filter((g) => !jobOf(g) && !g.ruler);

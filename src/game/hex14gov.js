@@ -463,11 +463,13 @@ function spreadLand(s, grid) {
       n -= 1;
     }
     // 내 관할 안의 남의 땅: 아무 부대도 그 칸·옆에 없으면 순마다 2칸씩 되찾음 (남이 칠하고 간 땅이 몇 년씩 그대로 남지 않게)
+    // 단, 그 땅 주인의 부대가 이 성 10칸 안에 있으면(공성·원정 중) 되찾지 않음 — 싸우는 중에 보급로가 끊기지 않게
     let back = 2;
+    const busy = new Set(s.units.filter((u) => u.nation !== c.owner && (grid.dist(u.tile, c.tile) <= 10 * (grid.k || 1) || (u.order?.kind === 'castle' && u.order.id === c.id))).map((u) => u.nation));
     for (const t of dt[c.id]) {
       if (back <= 0) break;
       const o = s.owner[t];
-      if (o < 0 || o === c.owner || near.has(t) || s.castles.some((x) => x.tile === t)) continue;
+      if (o < 0 || o === c.owner || busy.has(o) || near.has(t) || s.castles.some((x) => x.tile === t)) continue;
       if (!grid.nb[t].some((x) => s.owner[x] === c.owner)) continue;
       s.owner[t] = c.owner;
       back -= 1;
