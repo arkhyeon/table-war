@@ -7,8 +7,6 @@ export function fmtTroops(n) {
   return String(n);
 }
 
-export const fmtNum = (n) => Math.round(n).toLocaleString('ko-KR');
-
 // 금 표기: 1만 이상은 만 단위
 export function fmtGold(n) {
   n = Math.round(n);

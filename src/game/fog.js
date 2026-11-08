@@ -26,9 +26,6 @@ export function viewOf(s, vis, rid) {
   return 'hidden';
 }
 
-export const troopsShown = (s, view) => view === 'visible' || (s.opts || {}).revealTroops === true;
-
 // 기록(연대기)용 영토 스냅샷
 const CH = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const encodeOwners = (s) => s.regions.map((r) => (r.owner === null ? '.' : CH[r.owner])).join('');
-export const decodeOwners = (str) => [...str].map((c) => (c === '.' ? null : CH.indexOf(c)));

@@ -25,9 +25,6 @@ export const EDGE = {
   cliff: { name: '절벽 상륙', mult: 0.45, desc: '깎아지른 해안: 공격 -55%, 행동력 +1 (상륙 장수가 경감)' },
   march: { name: '행군(내 땅 3칸)', mult: 1, desc: '내 땅으로만 이어진 길로 한 번에 3칸, 행동력 없음' },
 };
-// 험산 경계: 이 경계선으로 넘으면 공격 -35%, 행동력 +1 (다른 경계로 돌아가면 없음)
-export const MTN_EDGE = { name: '험산 경계', mult: 0.65 };
-
 
 export const BUILDINGS = {
   market: { name: '시장', icon: '💰', cost: 150000, ap: 2, desc: '그 지역 세수 +50%, 인구 상한 +8천' },
@@ -44,25 +41,6 @@ export const COST = {
   relocate: 1,
   poach: 1,
   poachGold: 200000,
-};
-
-export const TREATY = {
-  none: '없음',
-  alliance: '동맹',
-  nap: '불가침',
-  vassal: '종속',
-};
-
-
-// 전투 종류 (다시보기·기록 표시용)
-export const BATTLE_KIND = {
-  field: '⚔️ 야전',
-  siege: '🏰 공성전',
-  river: '🌊 도하전',
-  strait: '⛵ 해협 도하',
-  naval: '⚓ 해전',
-  landing: '🚣 상륙전',
-  cliff: '🧗 절벽 상륙전',
 };
 
 // 난이도: 컴퓨터 세수·초기 병력 보정

@@ -18,14 +18,6 @@ export function writeSave(data) {
   }
 }
 
-export function clearSave() {
-  try {
-    localStorage.removeItem(SAVE);
-  } catch {
-    /* 무시 */
-  }
-}
-
 // 수동 저장 슬롯 (자동 저장과 별개)
 export const SLOT_COUNT = 3;
 const slotKey = (k) => `tablewar-slot-${k}`;

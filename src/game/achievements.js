@@ -1,4 +1,4 @@
-import { nationRegions, isVassalOf, landCount } from './engine.js';
+
 
 // 업적: 승리했을 때 조건을 검사해 브라우저에 기록
 export const ACHIEVEMENTS = [
@@ -32,35 +32,3 @@ function save(a) {
   }
 }
 
-// 매 턴 기록 갱신 (최소 영토)
-export function trackStats(s) {
-  const st = (s.stats = s.stats || {});
-  const n = nationRegions(s, s.playerId).length;
-  // 시작 직후의 작은 영토는 '몰렸다'로 치지 않음
-  if (s.turn >= 10) st.minRegions = Math.min(st.minRegions ?? n, n);
-  st.maxShare = Math.max(st.maxShare || 0, n / landCount(s));
-}
-
-// 진행 중에 얻는 업적(일기토·전투)과 승리 업적. 새로 얻은 목록을 반환
-export function checkAchievements(s, win) {
-  if (s.spectator) return [];
-  const st = s.stats || {};
-  const got = [];
-  if ((st.duels || 0) >= 10) got.push('duelist');
-  if ((st.won || 0) >= 100) got.push('veteran');
-  if (win) {
-    got.push('first');
-    if (s.turn <= 60) got.push('fast');
-    if (st.startIsland) got.push('island');
-    if (st.startRank !== undefined && st.startRank >= st.startCount - 3) got.push('underdog');
-    if ((st.minRegions ?? 99) <= 3) got.push('phoenix');
-    if (s.opts?.difficulty === 'hard') got.push('hard');
-    if (s.nations.filter((o) => o.alive && isVassalOf(s, o.id, s.playerId)).length >= 3) got.push('emperor');
-    if (s.opts?.revealMap === false) got.push('nofog');
-  }
-  const all = loadAchievements();
-  const fresh = got.filter((id) => !all[id]);
-  for (const id of fresh) all[id] = { turn: s.turn, nation: s.nations[s.playerId].name, at: Date.now() };
-  if (fresh.length) save(all);
-  return fresh;
-}

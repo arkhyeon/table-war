@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, acceptChance, renewPact, hegemonOf, bordering } from './hex14gov.js';
+import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, renewPact, hegemonOf, bordering } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -155,7 +155,6 @@ export function chooseStrategy(s, grid, nid) {
   n.stratN = (n.stratN || 0) + 1;
   return k;
 }
-
 
 // 싸움터에 보낼 장수: 무력·통솔 위주로 고르고, 성에는 정치 가장 높은 장수 한 명을 남겨 내정을 맡김
 // 성별 장수 목록: 컴퓨터 한 나라가 생각할 때마다 한 번만 만듦 (성마다 장수 전체를 훑지 않게). 꺼낼 때 지금 상태로 다시 걸러 냄

@@ -838,7 +838,6 @@ function finalizeRegions(scn, g) {
   g.regions = regs;
 }
 
-
 // 바다 구역: 해안에서 일정 거리 이내의 바다를 구역으로 나눠 함대가 한 칸씩 이동
 function buildSeaZones(scn, g) {
   const { N, cols, rows, terrain, region, rng, center, size } = g;

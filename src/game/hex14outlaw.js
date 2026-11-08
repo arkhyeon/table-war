@@ -2,7 +2,7 @@
 // 모두 하나의 「도적」 세력(나라 목록·외교·통일 계산에서는 빠짐)으로 묶음. 약탈은 안 하고 병사만 박살냄 — 부대를 전멸시키거나 성 수비병을 0으로 만들면 다음 표적으로
 import { T } from './rules.js';
 import { order, log, gensOf, districtTiles, nearestCastle } from './hex14.js';
-import { fmtTroops, fmtGold } from './format.js';
+import { fmtTroops } from './format.js';
 
 export const OUTLAW_KINDS = {
   도적: { mark: '도', desc: '들판의 도적 떼' },

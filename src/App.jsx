@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import Setup from './components/Setup.jsx';
-import Game from './components/Game.jsx';
 import Hex14 from './components/Hex14.jsx';
 import { generateWorld } from './game/mapgen.js';
 import { normalizeHex14 } from './game/hex14.js';
@@ -64,11 +63,10 @@ export default function App() {
     const save = data || loadSave();
     if (!save) return false;
     const scn = getScenario(save.scenarioId);
-    if (!scn || (save.state?.version !== 5 && save.state?.version !== 14)) return false;
+    if (!scn || save.state?.mode !== 'hex14') return false; // 예전 지역 모드 저장은 더 이상 열지 않음
     const world = generateWorld(scn, save.seed, save.state.opts?.detail || 'normal');
     // 지도 크기가 바뀐(업데이트 전) 삼국지14식 저장은 칸 수가 달라 불러올 수 없음
-    if (save.state.mode === 'hex14' && save.state.owner?.length !== buildGrid(world).N) return false;
-    if (save.state.version === 5 && world.regions.length !== save.state.regions.length) return false;
+    if (save.state.owner?.length !== buildGrid(world).N) return false;
     start(world, scn, normalizeHex14(save.state));
     return true;
   };
@@ -82,20 +80,5 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (resuming) return <div className="boot-loading"><div className="spinner" /><b>하던 게임으로 돌아가는 중…</b><small className="muted">화면이 다시 열려서 마지막 자동 저장을 불러오고 있어요</small></div>;
   if (!session || !game) return <Setup onStart={start} onResume={resume} hasSave={!!loadSave() || hasSlots()} />;
-  if (game.mode === 'hex14')
-    return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { ss.del(PLAYING); setSession(null); setGame(null); }} />;
-  return (
-    <Game
-      key={gen}
-      world={session.world}
-      scn={session.scn}
-      game={game}
-      setGame={setGame}
-      onLoad={resume}
-      onExit={() => {
-        setSession(null);
-        setGame(null);
-      }}
-    />
-  );
+  return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { ss.del(PLAYING); setSession(null); setGame(null); }} />;
 }

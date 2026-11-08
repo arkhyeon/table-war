@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom';
 import { uiConfirm } from '../dialog.js';
 import HexTour from './HexTour.jsx';
 import { BUILD, versionText } from '../version.js';
-import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieCost, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, planGenSpread, doGenSpread, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
+import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, planGenSpread, doGenSpread, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
 import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
 import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
-import { tlabel, tdesc, TIER_GOLD, TIER_NAME } from '../game/hex14traits.js';
+import { tlabel, tdesc, TIER_NAME } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
 import { getScenario } from '../game/scenarios.js';
 import { fmtTroops, fmtGold } from '../game/format.js';
@@ -18,7 +18,7 @@ import { fixJosa } from '../game/josa.js';
 import { portraitCanvas, portraitURL } from '../game/portrait.js';
 import { citySprite } from '../game/citysprite.js';
 import { weatherText, weatherAt, weatherShare, warmWeather, uniqueOf } from '../game/hex14extra.js';
-import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, FOUND_GAP, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
+import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
 
@@ -49,7 +49,7 @@ function seamFix(grid, cv, sc) {
     const cy = grid.size * 1.5 * r + grid.size, y0 = (cy - grid.size * 0.75) * sc, h = grid.size * 1.5 * sc;
     ctx.drawImage(strip, 0, y0, w, h, 0, y0, w, h);
   }
-  ctx.restore();
+  ctx.restore(); strip.width = 0; strip.height = 0; // 쓴 그림 바로 돌려줌 (폰 메모리)
 }
 
 // ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
@@ -93,7 +93,7 @@ function coastNear(world, r, m, period) {
   return p;
 }
 const spriteCaches = new WeakMap();
-function spriteCacheFor(grid, sc) { let m = spriteCaches.get(grid); if (!m) spriteCaches.set(grid, (m = new Map())); const k = sc.toFixed(3); if (!m.has(k)) { if (m.size > 6) m.clear(); m.set(k, new Map()); } return m.get(k); }
+function spriteCacheFor(grid, sc) { let m = spriteCaches.get(grid); if (!m) spriteCaches.set(grid, (m = new Map())); const k = sc.toFixed(3); if (!m.has(k)) { if (m.size > (isPhone() ? 3 : 6)) { for (const sm of m.values()) for (const sp of sm.values()) { sp.cv.width = 0; sp.cv.height = 0; } m.clear(); } m.set(k, new Map()); } return m.get(k); }
 function paintTerrain(grid, world, chunk = null) {
   const sc = chunk ? chunk.sc : mapScale(grid);
   const layer = () => { if (!chunk) return newLayer(grid, sc); const c2 = document.createElement('canvas'); c2.width = Math.ceil(chunk.w * sc); c2.height = Math.ceil(chunk.h * sc); const x = c2.getContext('2d'); x.scale(sc, sc); x.translate(-chunk.x, -chunk.y); return [c2, x]; };
@@ -147,7 +147,7 @@ function paintTerrain(grid, world, chunk = null) {
     octx.putImageData(img, 0, 0);
     return out;
   };
-  const drawRaster = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); };
+  const drawRaster = (img) => { ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(img, 0, 0); ctx.restore(); img.width = 0; img.height = 0; };
   const rgbOf = (str) => { const m = str.match(/\d+/g); return m ? [+m[0], +m[1], +m[2]] : [0, 0, 0]; };
   // 바다: 뭍에서 멀수록 짙게 (10칸까지 부드럽게 단계), 먼바다 바탕
   ctx.fillStyle = '#1a4064';
@@ -703,21 +703,19 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [nDays, setNDaysRaw] = useState(() => { try { return Math.max(1, Math.min(10, +localStorage.getItem('h14-ndays') || 1)); } catch { return 1; } });
   const setNDays = (f) => setNDaysRaw((v) => { const n = typeof f === 'function' ? f(v) : f; try { localStorage.setItem('h14-ndays', String(n)); } catch {} return n; });
   const [tip, setTip] = useState(null); // 눌러서 띄운 작은 설명창 {text, x, y, top, el}
-  // 설명창: data-tip이 있는 것(특성·전법·?)을 누르면 그 아래에 뜨고, 다른 데를 누르면 닫힘. PC는 마우스를 올려도 뜸
+  // 설명창: data-tip이 있는 것(특성·전법·?)을 누르면 그 아래에 뜨고, 다시 누르거나 다른 데를 누르면 닫힘 (PC도 누를 때만)
   useEffect(() => {
     const at = (el) => { const r = el.getBoundingClientRect(); return { text: el.dataset.tip, x: r.left + r.width / 2, y: r.bottom, top: r.top, el }; };
     const click = (e) => {
       const el = e.target.closest?.('[data-tip]');
-      if (el && el.dataset.tip) { e.preventDefault(); e.stopPropagation(); setTip((t) => (t?.el === el && !t.hover ? null : at(el))); return; }
+      if (el && el.dataset.tip) { e.preventDefault(); e.stopPropagation(); setTip((t) => (t?.el === el ? null : at(el))); return; }
       if (!e.target.closest?.('.tip-pop')) setTip(null);
     };
-    const over = (e) => { if (e.pointerType !== 'mouse') return; const el = e.target.closest?.('[data-tip]'); if (el && el.dataset.tip) setTip({ ...at(el), hover: true }); };
-    const out = (e) => { if (e.pointerType !== 'mouse') return; const el = e.target.closest?.('[data-tip]'); if (el && !el.contains(e.relatedTarget)) setTip((t) => (t?.hover && t.el === el ? null : t)); };
     const key = (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.dataset?.tip) { e.preventDefault(); setTip(at(e.target)); } else if (e.key === 'Escape') setTip(null); };
     const hide = () => setTip(null);
-    document.addEventListener('click', click, true); document.addEventListener('pointerover', over); document.addEventListener('pointerout', out); document.addEventListener('keydown', key);
+    document.addEventListener('click', click, true); document.addEventListener('keydown', key);
     window.addEventListener('scroll', hide, true); window.addEventListener('resize', hide);
-    return () => { document.removeEventListener('click', click, true); document.removeEventListener('pointerover', over); document.removeEventListener('pointerout', out); document.removeEventListener('keydown', key); window.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide); };
+    return () => { document.removeEventListener('click', click, true); document.removeEventListener('keydown', key); window.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide); };
   }, []);
   const [aud, setAud] = useState(audioOpt());
   // 처음 누를 때 소리를 켬 (브라우저 규칙)
@@ -889,6 +887,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
           const oc = document.createElement('canvas'); oc.width = T.cv.width; oc.height = T.cv.height; const ox = oc.getContext('2d'); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y);
           drawOwnerTiles(grid, s2, ox, tilesIn(grid, r, grid.size * 3));
           const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(oc, 0, 0); cx3.drawImage(T.rcv, 0, 0); // 한 장으로 합침 (지형 위에 영토, 그 위에 강)
+          oc.width = 0; oc.height = 0; T.rcv.width = 0; T.rcv.height = 0; // 합치고 난 그림은 바로 돌려줌
+          const oldT = L.tiles.get(job.key); if (oldT?.comp && oldT.comp !== T.cv) { oldT.comp.width = 0; oldT.comp.height = 0; } // 다시 그린 조각: 옛 그림 해제
           L.tiles.set(job.key, { ...r, comp: T.cv, used: L.frame || 0, stale: false });
           // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
           const MAXT = isPhone() ? 36 : 72; if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
@@ -1195,12 +1195,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const steady = L.statLast[vx] === vkey; // 앞 장면과 화면이 같을 때만 겹을 씀 (끌거나 확대하는 중엔 바로 그림)
       L.statLast[vx] = vkey;
       L.statC = L.statC || {};
+      // 화면을 옮길 때마다 위치별로 겹 그림이 하나씩 쌓이던 것(메모리 새는 곳): 이번 장면에 안 쓴 겹은 치우고, 크기가 같으면 그 그림을 다시 씀
+      const nowT = performance.now(); L.statT = L.statT || {}; L.statT[vx] = nowT;
+      let spare = null;
+      for (const key of Object.keys(L.statC)) {
+        if (key === String(vx) || L.statT[key] > nowT - 40) continue;
+        const old = L.statC[key]?.cv;
+        if (old && !spare && old.width === Math.round(cw * dpr) && old.height === Math.round(ch * dpr)) spare = old; else if (old) { old.width = 0; old.height = 0; }
+        delete L.statC[key]; delete L.statT[key]; delete L.statLast[key];
+      }
       const C = L.statC[vx];
       if (steady && C && C.key === skey && C.s === s) {
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(C.cv, 0, 0); ctx.restore();
         placed = C.placed;
       } else if (steady) {
-        const cv2 = C?.cv && C.cv.width === Math.round(cw * dpr) && C.cv.height === Math.round(ch * dpr) ? C.cv : Object.assign(document.createElement('canvas'), { width: Math.round(cw * dpr), height: Math.round(ch * dpr) });
+        const cv2 = C?.cv && C.cv.width === Math.round(cw * dpr) && C.cv.height === Math.round(ch * dpr) ? C.cv : spare || Object.assign(document.createElement('canvas'), { width: Math.round(cw * dpr), height: Math.round(ch * dpr) });
+        if (C?.cv && C.cv !== cv2) { C.cv.width = 0; C.cv.height = 0; }
         const o = cv2.getContext('2d');
         o.setTransform(1, 0, 0, 1, 0, 0); o.clearRect(0, 0, cv2.width, cv2.height);
         o.setTransform(dpr * k, 0, 0, dpr * k, -vx * k * dpr, -vy * k * dpr);
@@ -2141,9 +2151,12 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     );
                   })()}
                   <Slider min={0} max={maxAmt} step={1000} value={Math.min(amt, maxAmt)} onChange={(v) => setAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
-                  <div className="row draft-row"><button className="sm" disabled={maxAmt < 2000} onClick={() => setAmt(Math.floor(maxAmt / 2000) * 1000)}>절반</button><button className="sm" disabled={maxAmt < 1000} onClick={() => setAmt(maxAmt)}>최대 {fmtTroops(maxAmt)}</button></div>
+
                   
-                  <div className="row" style={{ justifyContent: 'flex-end', marginTop: 6 }}>
+                  <div className="row draft-row" style={{ marginTop: 6 }}>
+                    <button className="sm" disabled={maxAmt < 2000} onClick={() => setAmt(Math.floor(maxAmt / 2000) * 1000)}>절반</button>
+                    <button className="sm" disabled={maxAmt < 1000} onClick={() => setAmt(maxAmt)}>최대 {fmtTroops(maxAmt)}</button>
+                    <span style={{ flex: 1 }} />
                     <button onClick={() => setSortieOpen(false)}>취소</button>
                     <button className="primary sortie-go" disabled={!pickG.length || Math.min(amt, maxAmt) < 1000} onClick={() => {
                       const r = act((s) => { const r = sortie(s, grid, selCastle.id, pickG, Math.min(amt, maxAmt)); return r; });
@@ -2409,8 +2422,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   <div className="stat-tiles two">
                     <div data-tip={`순마다 들어오는 금 (세금·상업 − 유지비) · 지금 ${fmtGold(me.gold)}`}><small>순마다 금</small><b>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</b></div>
                     <div className={foodTurns < turnsToHarvest ? 'warn' : ''} data-tip={`병량 ${fmtTroops(food)} · 순마다 −${fmtTroops(use)} · 수확까지 ${turnsToHarvest}순`}><small>병량 버팀</small><b>{foodTurns >= 99 ? '넉넉' : `${foodTurns}순`}</b></div>
-                    <div data-tip={`성 수비와 나가 있는 부대를 합친 병력 · 장수 ${gs.length}명`}><small>병력 · 장수 {gs.length}</small><b>{fmtTroops(powerOf(game, pid))}</b></div>
-                    <div className={low.length ? 'warn' : ''} data-tip={low.length ? `충성 40 미만(떠날 수 있음): ${low.map((g) => g.name).join(', ')}` : '장수 충성 평균 — 40 아래면 떠날 수 있어요'}><small>충성 평균</small><b>{avg}{low.length ? <i> 불만 {low.length}</i> : null}</b></div>
+                    <div data-tip={`성 수비와 나가 있는 부대를 합친 병력 · 장수 ${gs.length}명`}><small>병력</small><b>{fmtTroops(powerOf(game, pid))}</b></div>
+                    <div className={low.length ? 'warn' : ''} data-tip={low.length ? `충성 40 미만(떠날 수 있음): ${low.map((g) => g.name).join(', ')}` : `장수 ${gs.length}명 · 충성 평균 ${avg} — 40 아래면 떠날 수 있어요`}><small>장수 {gs.length}명</small><b>충성 {avg}{low.length ? <i> 불만 {low.length}</i> : null}</b></div>
                   </div>
                 );
               })()}

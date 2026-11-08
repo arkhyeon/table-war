@@ -58,7 +58,6 @@ export const MIL = Object.keys(TRAITS).filter((k) => TRAITS[k].cat === 'mil');
 export const CIV = Object.keys(TRAITS).filter((k) => TRAITS[k].cat === 'civ');
 
 export const traitVal = (id, tier) => TRAITS[id].val[Math.max(1, Math.min(3, tier)) - 1];
-export const traitDesc = (id, tier) => TRAITS[id].desc(traitVal(id, tier), tier);
 export const traitLabel = ([id, tier]) => `${id}${TIER[tier]}`;
 
 // 장수 무리에서 해당 특성의 최고 효과값 (없으면 0)
@@ -88,23 +87,3 @@ export function initTraits(g, rng) {
   return { role, traits };
 }
 
-// 레벨업 시 3·5·7·9레벨: 기존 특성 승급 또는 새 특성
-export function growTrait(g, rng) {
-  const cat = g.role === 'civ' ? CIV : MIL;
-  const up = g.traits.filter(([, t]) => t < 3);
-  if (up.length && (g.traits.length >= 3 || rng() < 0.5)) {
-    const tr = rng.pick(up);
-    tr[1] += 1;
-    return `「${traitLabel(tr)}」 승급`;
-  }
-  const fresh = cat.filter((t) => !g.traits.some(([x]) => x === t));
-  if (!fresh.length) return null;
-  const t = rng.pick(fresh);
-  g.traits.push([t, 1]);
-  return `새 특성 「${t}Ⅰ」`;
-}
-
-export const TITLES = {
-  mil: [[3, '역전의 장수'], [5, '백전노장'], [7, '만인적'], [9, '군신']],
-  civ: [[3, '능리'], [5, '명재상'], [7, '경세가'], [9, '왕좌지재']],
-};

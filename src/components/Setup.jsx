@@ -74,12 +74,12 @@ export default function Setup({ onStart, onResume, hasSave }) {
 
   // 게임 시작은 큰 지도에서 몇 초 걸려 화면이 멈춘 것처럼 보이므로, 로딩 화면을 먼저 그린 뒤 만듦
   const [starting, setStarting] = useState(false);
-  const start = (spectator = false, hex = false) => {
+  const start = (spectator = false) => {
     setStarting(true);
     setTimeout(() => {
       try {
         const state = createGame(world, scn, seed, pid, { ...opts, ...rules, names, spectator, detail }, loadHistory());
-        onStart(world, scn, hex ? createHex14(world, state) : state);
+        onStart(world, scn, createHex14(world, state));
       } catch (e) { console.error(e); setStarting(false); }
     }, 60);
   };
@@ -284,10 +284,10 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <span className="muted start-sel" key={`${scn.id}:${pid}:${hexCount ? 1 : 0}`}>
             <b style={{ color: 'var(--text)' }}>{scn.name}</b> · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
-          <button disabled={!ready} onClick={() => start(true, true)} title="모든 나라를 컴퓨터가 진행">
+          <button disabled={!ready} onClick={() => start(true)} title="모든 나라를 컴퓨터가 진행">
             👁️ 관전으로 시작
           </button>
-          <button className="primary" disabled={!ready} onClick={() => start(false, true)}>
+          <button className="primary" disabled={!ready} onClick={() => start(false)}>
             게임 시작 ▶
           </button>
         </div>

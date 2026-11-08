@@ -1,6 +1,5 @@
 import { T } from './rules.js';
 
-export const SEASONS = ['봄', '여름', '가을', '겨울'];
 // 2턴 = 한 계절, 8턴 = 1년
 export const TURNS_PER_SEASON = 2;
 export const seasonOf = (turn) => Math.floor((turn - 1) / TURNS_PER_SEASON) % 4;

@@ -8,7 +8,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { PLACES, placeExists, placeName } from './places.js';
-import { initGov, govTurn, pactOf, addRel, goldOf, SORTIE_COST, ensureTraits } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack } from './hex14outlaw.js';

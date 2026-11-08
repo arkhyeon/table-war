@@ -46,14 +46,6 @@ function pluck(freq, t, dur = 1.2, vol = 0.5, out = bgmGain) {
   o.connect(f); o2.connect(g2); g2.connect(f); f.connect(g); g.connect(out);
   o.start(t); o2.start(t); o.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
 }
-function drone(freq, t, dur, vol = 0.12) {
-  const o = ctx.createOscillator(), g = ctx.createGain();
-  o.type = 'sawtooth'; o.frequency.value = freq;
-  const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 400;
-  g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + dur * 0.3); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-  o.connect(f); f.connect(g); g.connect(bgmGain);
-  o.start(t); o.stop(t + dur + 0.05);
-}
 function noise(t, dur, vol, freq, out, type = 'bandpass') {
   const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
   const buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);

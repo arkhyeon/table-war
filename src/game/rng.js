@@ -54,14 +54,6 @@ export function makeRng(seed) {
   });
 }
 
-// 게임 상태(s.rs)에 시드를 저장하는 RNG — 저장/불러오기 시 재현 가능
-export function stateRng(s) {
-  return withHelpers(() => {
-    s.rs = (s.rs + 0x6d2b79f5) | 0;
-    return step(s.rs);
-  });
-}
-
 export function makeNoise(rng) {
   const perm = new Uint16Array(512);
   const vals = new Float32Array(256);
