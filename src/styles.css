@@ -736,3 +736,26 @@ details.sub-card[open] > summary { margin-bottom: 6px; }
 details.sub-card > summary { justify-content: flex-start !important; }
 details.sub-card > summary b { white-space: nowrap; }
 details.sub-card > summary small { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* ── 줄바꿈·여백 정리 ── */
+.stat-tiles small { white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.line-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); }
+.line-row:first-of-type { border-top: 0; }
+.line-tx { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.line-tx b { font-weight: 700; }
+.line-tx small { font-size: 11px; }
+.line-row > button { white-space: nowrap; }
+.dev-lines { display: grid; gap: 4px; margin: 6px 0 4px; }
+.dev-lines > div { display: grid; grid-template-columns: auto 60px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12.5px; }
+.dev-lines small { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dev-bar { height: 5px; border-radius: 3px; background: #0006; overflow: hidden; }
+.dev-bar i { display: block; height: 100%; background: linear-gradient(90deg, #f0c24b, #ffb347); }
+.job-eff > div { white-space: normal; }
+.todo-tx b { white-space: normal; overflow: visible; text-overflow: clip; }
+.kv { grid-template-columns: max-content minmax(0, 1fr); }
+.line-tx.inline { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+/* 폰: 위 정보 막대가 화면 밖으로 밀려 안 보이던 것 — 넘치면 다음 줄로, 날짜의 '1일'은 진행 버튼에 있으니 숨김 */
+@media (max-width: 760px) {
+  .tb-stats { flex-wrap: wrap; row-gap: 4px; overflow: visible; }
+  .tb-stats .lbl-long { display: none; }
+  .tb-stats .pill { font-size: 12px; }
+}

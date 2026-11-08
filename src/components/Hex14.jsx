@@ -1894,9 +1894,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
             return (
               <div className="stat-tiles">
                 <div><small>수비병</small><b>{hidden ? '?' : fmtTroops(selCastle.troops)}</b><small>수용 {fmtTroops(capOf(selCastle, game))}</small></div>
-                <div className={durP < 40 ? 'warn' : ''}><small>성벽</small><b>{durP}%</b><small>{Math.round(selCastle.dur)}/{selCastle.maxDur}</small></div>
+                <div className={durP < 40 ? 'warn' : ''} title={`성벽 내구 ${Math.round(selCastle.dur)} / ${selCastle.maxDur}`}><small>성벽</small><b>{durP}%</b><small>{fmtTroops(Math.round(selCastle.dur))}</small></div>
                 {selCastle.kind !== 'pass' ? <>
-                  <div className={popGold(selCastle) < 0.8 ? 'warn' : ''} title="징병으로 인구가 줄면 금 수입도 줄어듭니다 (바닥나면 절반). 인구는 순마다 조금씩 다시 늘어납니다"><small>인구</small><b>{Math.round(selCastle.pop)}천</b><small>{popGold(selCastle) < 0.995 ? `금 수입 ${Math.round(popGold(selCastle) * 100)}%` : '금 수입 100%'}</small></div>
+                  <div className={popGold(selCastle) < 0.8 ? 'warn' : ''} title="징병으로 인구가 줄면 금 수입도 줄어듭니다 (바닥나면 절반). 인구는 순마다 조금씩 다시 늘어납니다"><small>인구</small><b>{Math.round(selCastle.pop)}천</b><small>금 {Math.round(popGold(selCastle) * 100)}%</small></div>
                   {selCastle.owner !== null ? <div title="관할 땅: 지도에 흰색=내 관할, 빨강=아직 남의 것 (채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)"><small>수입</small><b>{fmtGold(castleIncome(game, grid, selCastle))}</b><small>관할 {Math.round(landShare(game, selCastle) * 100)}%</small></div> : <div><small>수입</small><b>-</b><small>중립</small></div>}
                 </> : <><div><small>인구</small><b>-</b><small>관문</small></div><div><small>수입</small><b>-</b><small>길목</small></div></>}
               </div>
@@ -1955,7 +1955,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   </div>
                   
                   <details className="sub-card">
-                    <summary><b>🚚 병력 받기</b> <small className="muted">다른 내 성에서 장수 없이 · 하루 1.5칸</small></summary>
+                    <summary><b>🚚 병력 받기</b><small className="muted" title="다른 내 성에서 장수 없이 병력만 · 수송대는 내 땅 길로 하루 1.5칸">다른 성에서 병력만</small></summary>
                     {besieged(game, grid, selCastle) ? <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>포위당해 수송대가 들어올 수 없습니다. 장수가 부대로 데리고 와야 합니다.</div> : <>
                       <div style={{ fontSize: 12, marginTop: 4 }}>받을 병력 {fmtTroops(sendAmt)} <small className="muted">(남은 자리 {fmtTroops(Math.max(0, capOf(selCastle, game) - selCastle.troops))})</small></div>
                       <Slider min={1000} max={30000} step={1000} value={sendAmt} onChange={(v) => setSendAmt(Math.floor(v / 1000) * 1000)} style={{ width: '100%' }} />
@@ -1995,10 +1995,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {(game.corps || []).filter((co) => co.cities.includes(selCastle.id)).map((co) => <div key={co.id} className="muted" style={{ fontSize: 12, marginTop: 4 }}>🎖️ {game.generals[co.leader]?.name} 군단이 맡은 도시입니다 (직접 출진도 가능)</div>)}
           {selCastle.kind !== 'pass' && selCastle.owner !== null && (
             <div className="sub-card">
-              <b>🏛️ 내정</b>{selCastle.owner === pid && (() => { const n = jobCands(game, selCastle, 'trade').length; return <small className="muted" style={{ marginLeft: 6 }} title="다른 내 성에 있으면서 어느 성의 담당도 맡지 않은 장수(무력 85 이하, 군주·출진 중·그 성 마지막 장수 제외). 빈 담당 아래 「추천」이나 「다른 성 후보」로 불러올 수 있습니다">💡 다른 성의 놀고 있는 장수 {n ? `${n}명` : '없음 (모두 담당 중)'}</small>; })()}
-              <div className="kv" style={{ marginTop: 4 }}>
-                <span>농업</span><span>{selCastle.farm} / {selCastle.devMax} · 가을 수확 약 {fmtTroops(harvestOf(game, selCastle))}</span>
-                <span>상업</span><span>{selCastle.trade} / {selCastle.devMax} · 금 +{fmtGold(goldOf(game, selCastle))}/순</span>
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}><b>🏛️ 내정</b>{selCastle.owner === pid && (() => { const n = jobCands(game, selCastle, 'trade').length; return <small className="muted" title="다른 내 성에 있으면서 어느 성의 담당도 맡지 않은 장수(무력 85 이하, 군주·출진 중·그 성 마지막 장수 제외). 빈 담당 아래 「추천」이나 「다른 성 후보」로 불러올 수 있습니다">💡 다른 성 놀고 있는 장수 {n}명</small>; })()}</div>
+              <div className="dev-lines">
+                <div><span>🌾 농업</span><span className="dev-bar"><i style={{ width: `${Math.round((selCastle.farm / Math.max(1, selCastle.devMax)) * 100)}%` }} /></span><small>{selCastle.farm}/{selCastle.devMax} · 수확 {fmtTroops(harvestOf(game, selCastle))}/년</small></div>
+                <div><span>💰 상업</span><span className="dev-bar"><i style={{ width: `${Math.round((selCastle.trade / Math.max(1, selCastle.devMax)) * 100)}%` }} /></span><small>{selCastle.trade}/{selCastle.devMax} · 금 +{fmtGold(goldOf(game, selCastle))}/순</small></div>
               </div>
               {selCastle.owner === pid ? (
                 <>
@@ -2064,10 +2064,10 @@ export default function Hex14({ world, game, setGame, onExit }) {
                   </label>
                   {(() => { const f = jobGen(game, selCastle, 'farm'), t = jobGen(game, selCastle, 'trade'), d = jobGen(game, selCastle, 'draft'); return (
                     <div className="job-eff">
-                      <div>🌾 농업 {f ? <>— {f.name}: 수확 +{Math.round(f.pol * 0.5)}% · 인구 +{(f.pol / 40).toFixed(1)}천/순 · 농업 +{Math.round(3 + f.pol / 6)}/순</> : <span className="muted">— 비었음 (농업이 오르지 않고 인구 회복이 느림)</span>}</div>
-                      <div>💰 상업 {t ? <>— {t.name}: 금 +{Math.round(t.pol * 0.5)}% · 상업 +{Math.round(3 + t.pol / 6)}/순</> : <span className="muted">— 비었음 (상업이 오르지 않음)</span>}</div>
-                      <div>💂 징병 {d ? <>— {d.name}: 자원병 +{d.lead * 3}명/순</> : <span className="muted">— 비었음</span>}</div>
-                      <small className="muted">정치·통솔이 높을수록 효과가 큽니다. 상업·농업은 상한(인구×10)까지 오르고, 맡고 있는 동안 금·수확 보너스가 붙습니다.</small>
+                      <div>🌾 {f ? <><b>{f.name}</b> 수확 +{Math.round(f.pol * 0.5)}% · 인구 +{(f.pol / 40).toFixed(1)}천 · 농업 +{Math.round(3 + f.pol / 6)}</> : <span className="muted">농업 담당 없음 — 농업·인구가 안 늚</span>}</div>
+                      <div>💰 {t ? <><b>{t.name}</b> 금 +{Math.round(t.pol * 0.5)}% · 상업 +{Math.round(3 + t.pol / 6)}</> : <span className="muted">상업 담당 없음 — 상업이 안 늚</span>}</div>
+                      <div>💂 {d ? <><b>{d.name}</b> 자원병 +{fmtTroops(d.lead * 3)}/순</> : <span className="muted">징병 담당 없음</span>}</div>
+                      <small className="muted">순마다 · 정치·통솔이 높을수록 큼</small>
                     </div>); })()}
                 </>
               ) : null}
@@ -2077,8 +2077,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <div className="sub-card">
               <b>🧑‍🎓 재야 인재</b>
               {freeIn(selCastle).filter((g) => !castleGens.length || Math.round(recruitChance(game, g, pid, selCastle.id) * 100) >= 1).map((g) => (
-                <div key={g.id} className="row" style={{ justifyContent: 'space-between', marginTop: 4 }}>
-                  <span><Face g={g} /> {g.name} <small className="muted"><Stats g={g} /></small></span>
+                <div key={g.id} className="line-row">
+                  <span className="line-tx inline"><Face g={g} /><b>{g.name}</b><small className="muted"><Stats g={g} traits={false} /></small></span>
                   <button className="sm" disabled={playing || g.tried === game.turn || !castleGens.length} onClick={() => act((s) => recruit(s, g.id, pid))}>등용 {Math.round(recruitChance(game, g, pid, selCastle.id) * 100)}%</button>
                 </div>
               ))}
@@ -2112,8 +2112,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
               {Object.entries(BUILDINGS).filter(([k, b]) => (selCastle.kind !== 'pass' || k === 'wall') && (!b.port || selCastle.port)).map(([k, b]) => {
                 const why = canBuild(game, selCastle, k);
                 return (
-                  <div key={k} className="row" style={{ justifyContent: 'space-between', alignItems: 'center', padding: '2px 0' }}>
-                    <span title={b.desc}>{b.icon} {b.name} <small className="muted">{lv(selCastle, k)}/{b.max} · {b.desc}</small></span>
+                  <div key={k} className="line-row">
+                    <span className="line-tx" title={b.desc}><b>{b.icon} {b.name} <small className="muted">{lv(selCastle, k)}/{b.max}</small></b><small className="muted">{b.desc}</small></span>
                     {selCastle.owner === pid && !playing && lv(selCastle, k) < b.max && <button className="sm" disabled={!!why} title={why || ''} onClick={() => act((s) => startBuild(s, selCastle.id, k))}>짓기 {fmtGold(buildCost(game, selCastle, k))} · {b.turns}턴</button>}
                   </div>
                 );
@@ -2121,7 +2121,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             </details>
           )}
           {selCastle.owner === pid && !playing && selCastle.kind !== 'pass' && (
-            <details className="sub-card"><summary><b>⛺ 야전 시설 짓기</b></summary> <small className="muted">장수 없이 성 수비대가 지음 · 이 성 관할의 내 땅(초록 칸) · 성마다 시설 3개, 망루 2개까지 · 공격받는 중엔 못 지음</small>
+            <details className="sub-card"><summary><b>⛺ 야전 시설 짓기</b><small className="muted" title="장수 없이 성 수비대가 지음 · 이 성 관할의 내 땅(초록 칸) · 성마다 시설 3개, 망루 2개까지 · 공격받는 중엔 못 지음">수비대가 관할 땅에</small></summary>
                   <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                     {Object.entries(FORTS).map(([k, f]) => <button key={k} className="sm" disabled={me.gold < f.cost} title={f.desc} onClick={() => { setPlaceFort({ cid: selCastle.id, kind: k }); setSheet(false); toast(`${f.name} 지을 자리를 지도에서 누르세요`); }}>{f.icon} {f.name} {fmtGold(f.cost)}·{f.days ? `${f.days}일` : '바로'}</button>)}
                   </div>
@@ -2204,7 +2204,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 return (
                   <div className="stat-tiles">
                     <div><small>금 수입</small><b>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</b><small>/순</small></div>
-                    <div className={foodTurns < turnsToHarvest ? 'warn' : ''} title={`병량 ${fmtTroops(food)} · 순마다 −${fmtTroops(use)} · 수확까지 ${turnsToHarvest}순`}><small>병량</small><b>{foodTurns >= 99 ? '넉넉' : `${foodTurns}순`}</b><small>버팀 · 수확 {turnsToHarvest}순 뒤</small></div>
+                    <div className={foodTurns < turnsToHarvest ? 'warn' : ''} title={`병량 ${fmtTroops(food)} · 순마다 −${fmtTroops(use)} · 수확까지 ${turnsToHarvest}순`}><small>병량 버팀</small><b>{foodTurns >= 99 ? '넉넉' : `${foodTurns}순`}</b><small>수확 {turnsToHarvest}순 뒤</small></div>
                     <div><small>병력</small><b>{fmtTroops(powerOf(game, pid))}</b><small>장수 {gs.length}명</small></div>
                     <div className={low.length ? 'warn' : ''} title={low.length ? `불만: ${low.map((g) => g.name).join(', ')}` : ''}><small>충성</small><b>{avg}</b><small>{low.length ? `불만 ${low.length}명` : '평균'}</small></div>
                   </div>
@@ -2514,7 +2514,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       <div className="topbar h14-top">
         <b className="tb-nation"><span className="chip" style={{ background: me.color }} /> {me.name}</b>
         <div className="tb-stats">
-          <span className="pill">📅 {dateOf(game, startYear)} {game.day + 1}일</span>
+          <span className="pill">📅 {dateOf(game, startYear)} <span className="lbl-long">{game.day + 1}일</span></span>
           <span className="pill" title="내 도읍 날씨예요. 날씨는 지역마다 다릅니다(위도·계절). 눈: 이동 느림 · 비: 강 건너기 힘듦, 불 약함 · 바람: 불 강함">{weatherText(game)}</span>
           <span className="pill">💰 {fmtGold(me.gold)} <small style={{ color: inc < 0 ? 'var(--danger)' : 'var(--ok)' }}>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</small></span>
           <span className={'pill' + (food < use * 6 ? ' bad' : '')}>🍚 {fmtTroops(food)}</span>
