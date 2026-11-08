@@ -334,7 +334,11 @@ function pickCities(world, grid, base, tileOwner = null) {
     const D8 = ['동부', '남동부', '남부', '남서부', '서부', '북서부', '북부', '북동부'];
     for (const c of out.slice(before)) {
       let nm = null;
-      for (const p of pts.slice().sort((a, b) => grid.dist(a.t, c.tile) - grid.dist(b.t, c.tile)).slice(0, 8)) {
+      const near = pts.slice().sort((a, b) => grid.dist(a.t, c.tile) - grid.dist(b.t, c.tile)).slice(0, 12);
+      // 1) 아직 안 쓴 실제 지명이 가까이(약 5칸 안) 있으면 그 이름 그대로
+      for (const p of near) { if (grid.dist(p.t, c.tile) <= 5 && !used.has(p.name)) { nm = p.name; break; } }
+      // 2) 없으면 가장 가까운 지명 + 방위
+      if (!nm) for (const p of near) {
         const d = grid.dist(p.t, c.tile);
         let cand = p.name;
         if (d > 2) { const [x0, y0] = grid.center(p.t), [x1, y1] = grid.center(c.tile); cand = `${p.name} ${D8[((Math.round(Math.atan2(y1 - y0, x1 - x0) / (Math.PI / 4)) % 8) + 8) % 8]}`; }

@@ -54,6 +54,13 @@ function seamFix(grid, cv, sc) {
 }
 
 // ── 지형 그림 (한 번만): 바다·해안·강·산·구릉·숲·사막을 칸마다 작은 그림으로 ──
+// 메모리 절약: 강 그림을 지형 바탕에 합치고 강 전용 큰 캔버스는 버림 (영토 색은 옅어서 강이 그대로 보임)
+const OWN_SC = 0.5; // 영토 색 그림은 바탕의 절반 해상도 (색 면과 굵은 경계뿐이라 차이가 거의 안 보임) — 메모리 4분의 1
+function bakeRivers(B) {
+  if (B.rcv && B.rcv.width) { const c = B.cv.getContext('2d'); c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(B.rcv, 0, 0); c.restore(); B.rcv.width = 0; B.rcv.height = 0; }
+  B.rcv = null;
+  return B;
+}
 // chunk가 있으면: 그 사각형(지도 좌표)만, 주어진 배율로 새로 그림 (확대했을 때 흐려지지 않게)
 // 사각형(지도 좌표) 둘레 m 안의 칸들: 줄·열 범위로 바로 셈
 function tilesIn(grid, r, m) {
@@ -811,7 +818,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 땅 그림: 주인 배열이 바뀌었을 때만 새로
     // 처음 지도 그림은 큰 지도에서 몇 초 걸리므로 로딩 화면을 먼저 보여 준 뒤 그림
     if (!land.current.base) {
-      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { const t0 = performance.now(); land.current.base = paintTerrain(grid, world); land.current.paintMs = Math.round(performance.now() - t0); warmAI(gameRef.current, grid); warmWeather(grid); setBooted(true); }, 40); }
+      if (!land.current.booting) { land.current.booting = true; setTimeout(() => { const t0 = performance.now(); land.current.base = bakeRivers(paintTerrain(grid, world)); land.current.paintMs = Math.round(performance.now() - t0); warmAI(gameRef.current, grid); warmWeather(grid); setBooted(true); }, 40); }
       return;
     }
     if (land.current.ref !== s.owner) {
@@ -819,7 +826,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       // 조금 바뀌면 그 구역만 영토 그림·합친 그림·확대 조각에서 고침 (예전엔 날마다 큰 그림 세 장을 통째로 다시 합치고 확대 조각도 버렸음 → 날 바뀔 때 끊김)
       const L = land.current, prev = L.prev;
       const dPrev = L.dprev, dSame = dPrev && dPrev.length === s.district.length && s.district.every((v, i) => v === dPrev[i]);
-      const full = () => { L.ownVer = (L.ownVer || 0) + 1; if (L.over) { L.over.width = 0; L.over.height = 0; } L.over = paintOwners(grid, s, L.base.sc); for (const t of L.tiles?.values() || []) t.stale = true; };
+      const full = () => { L.ownVer = (L.ownVer || 0) + 1; if (L.over) { L.over.width = 0; L.over.height = 0; } L.over = paintOwners(grid, s, L.base.sc * OWN_SC); for (const t of L.tiles?.values() || []) t.stale = true; };
       if (!prev || !dSame || !L.over) full();
       else {
         const changed = [];
@@ -827,19 +834,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
         if (changed.length > grid.N * 0.2) full();
         else if (changed.length) {
           const sc = L.base.sc, B0 = L.base;
-          const rects = repaintOwners(grid, s, L.over, sc, changed);
+          const rects = repaintOwners(grid, s, L.over, sc * OWN_SC, changed);
           const v0 = L.ownVer || 0; L.ownVer = v0 + 1;
-          // 합친 그림: 그 사각형만 세 겹을 다시 합침 (가장자리면 통째로)
-          if (L.comp && L.compVer === v0 && L.compBase === B0 && !rects.some((r) => r.edge)) {
-            const cx2 = L.comp.getContext('2d');
-            for (const r of rects) {
-              const sx = Math.max(0, Math.floor(r.x0 * sc)), sy = Math.max(0, Math.floor(r.y0 * sc)), sw = Math.min(L.comp.width, Math.ceil(r.x1 * sc)) - sx, sh = Math.min(L.comp.height, Math.ceil(r.y1 * sc)) - sy;
-              if (sw <= 0 || sh <= 0) continue;
-              cx2.clearRect(sx, sy, sw, sh);
-              for (const img of [B0.cv, L.over, B0.rcv]) cx2.drawImage(img, sx, sy, sw, sh, sx, sy, sw, sh);
-            }
-            L.compVer = L.ownVer;
-          }
           // 확대 그림 타일: 바뀐 구역에 걸린 타일만 '다시 그릴 것'으로 표시 (새로 그릴 때까지는 옛 그림을 보여 줌)
           for (const t of L.tiles?.values() || []) if (rects.some((r) => r.x1 > t.x && r.x0 < t.x + t.w && r.y1 > t.y && r.y0 < t.y + t.h)) t.stale = true;
         }
@@ -931,16 +927,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     };
     // 선명한 타일이 화면을 다 덮으면 흐린 바탕은 그릴 필요 없음
     const chCovers = !!TL && TL.all;
-    // 지형·나라 색·강 세 겹을 한 장으로 합쳐 두고(나라 땅이 바뀔 때만 다시 합침) 매 장면엔 한 장만 그림
-    if (!chCovers) {
-      const L = land.current;
-      if (!L.comp || L.compVer !== L.ownVer || L.compBase !== B) {
-        if (!L.comp || L.comp.width !== B.cv.width || L.comp.height !== B.cv.height) { L.comp = document.createElement('canvas'); L.comp.width = B.cv.width; L.comp.height = B.cv.height; }
-        const cx2 = L.comp.getContext('2d'); cx2.clearRect(0, 0, L.comp.width, L.comp.height); cx2.drawImage(B.cv, 0, 0); cx2.drawImage(L.over, 0, 0); cx2.drawImage(B.rcv, 0, 0);
-        L.compVer = L.ownVer; L.compBase = B;
-      }
-      blit(L.comp, B.sc);
-    }
+    // 지형(강 포함) 바탕 위에 영토 색(절반 해상도)을 겹쳐 그림 — 합친 그림을 따로 두지 않아 메모리를 아낌
+    if (!chCovers) { blit(B.cv, B.sc); blit(land.current.over, B.sc * OWN_SC); }
     // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
     if (TL) { for (const t of TL.fallback) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); } }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
