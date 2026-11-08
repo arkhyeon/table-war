@@ -646,7 +646,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const withSiege = false; // 공성병기는 들판에서 부대로 만듦
   const [stopIdle, setStopIdle] = useState(() => { try { return localStorage.getItem('h14.stopIdle') === '1'; } catch { return false; } }); // 순 끝까지 중 내 부대가 도착하면 멈춤 (기본 끔)
   const [callAmt, setCallAmt] = useState(1000); // 장수 부를 때 데려올 병력
-  const [showAllCall, setShowAllCall] = useState(false);
   const [sendGen, setSendGen] = useState(null);
   const [chain, setChain] = useState(false); // 이어서 명령(경유지) 모드
   const [sendFrom, setSendFrom] = useState(null); // 병력 수송: 보내는 성
@@ -681,6 +680,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [report, setReport] = useState(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [gsort, setGsort] = useState('sum'); // 장수 줄 세우기 기준
+  const [jobRecAll, setJobRecAll] = useState(null); // 내정 추천: 펼친 담당 (성:담당)
   const [peopleAll, setPeopleAll] = useState(false), [myGensOpen, setMyGensOpen] = useState(true);
   // 장수 줄 세우기: 능력 합·무·통·지·정·충성
   const GSORT = [['sum', '합'], ['war', '무'], ['lead', '통'], ['intel', '지'], ['pol', '정'], ['loyal', '충']];
@@ -1918,13 +1918,14 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       // 이 성에 맡길 사람이 없으면: 다른 성에서 놀고 있는 알맞은 장수 추천 (무력 85 이하, 담당 없음)
                       const here = castleGens.filter((g) => !jobOf(g) && !g.ruler);
                       if (here.length) return <div className="job-rec muted">이 성의 {here.slice(0, 2).map((g) => g.name).join('·')}에게 맡길 수 있어요 (위에서 고르기)</div>;
-                      const c3 = jobCands(game, selCastle, role).slice(0, 3);
-                      if (!c3.length) return <div className="job-rec muted">맡길 장수가 없습니다 — 다른 성에도 담당 없는 장수(무력 85 이하)가 없어요</div>;
+                      const all = jobCands(game, selCastle, role), open = jobRecAll === `${selCastle.id}:${role}`, list = open ? all : all.slice(0, 3);
+                      if (!all.length) return <div className="job-rec muted">맡길 장수가 없습니다 — 다른 성에도 담당 없는 장수(무력 85 이하)가 없어요</div>;
                       const k = role === 'draft' ? '통' : '정', kv = (g) => (role === 'draft' ? g.lead : g.pol);
                       return (
                         <div className="job-rec">
-                          <span className="muted">💡 추천</span>
-                          {c3.map(({ g, d }, i) => <button key={g.id} className={'xs' + (i === 0 ? ' primary' : '')} disabled={playing} title={`${game.castles[g.castle].name}에서 ${d}칸 — 병사를 조금 데리고 걸어와 도착하면 ${label}을 맡습니다`} onClick={() => callForJob(selCastle.id, role, g.id)}>{g.name} {k}{kv(g)} · {game.castles[g.castle].name}</button>)}
+                          <span className="muted">💡 {open ? `모두 ${all.length}명` : '추천'}</span>
+                          {list.map(({ g, d }, i) => <button key={g.id} className={'xs' + (i === 0 ? ' primary' : '')} disabled={playing} title={`무${g.war} 통${g.lead} 지${g.intel} 정${g.pol} · ${game.castles[g.castle].name}에서 ${d}칸 — 병사를 조금 데리고 걸어와 도착하면 ${label}을 맡습니다`} onClick={() => callForJob(selCastle.id, role, g.id)}>{g.name} {k}{kv(g)} · {game.castles[g.castle].name} {d}칸</button>)}
+                          {all.length > 3 && <button className="xs link" onClick={() => setJobRecAll(open ? null : `${selCastle.id}:${role}`)}>{open ? '접기' : `모두 보기 (+${all.length - 3}명)`}</button>}
                         </div>
                       );
                     })()}
@@ -1944,28 +1945,6 @@ export default function Hex14({ world, game, setGame, onExit }) {
               ) : null}
             </div>
           )}
-          {selCastle.owner === pid && selCastle.kind !== 'pass' && !playing && (() => {
-            // 장수 부르기: 비어 있는 담당에 맞는 장수를 위로 (다른 성에 장수가 둘 이상 있을 때만 빼 옴)
-            const need = Object.keys(ROLES).filter((r) => !jobGen(game, selCastle, r));
-            const cands = Object.values(game.generals).filter((g) => g.nation === pid && g.status === 'active' && g.castle !== null && g.castle !== undefined && g.castle !== selCastle.id)
-              .map((g) => ({ g, fit: need.length ? Math.max(0, ...need.map((r) => (r === 'draft' ? g.lead : g.pol))) : 0, d: grid.dist(game.castles[g.castle].tile, selCastle.tile), last: Object.values(game.generals).filter((x) => x.castle === g.castle && x.status === 'active').length <= 1 }))
-              .sort((a, b) => b.fit - a.fit || a.d - b.d).slice(0, showAllCall ? 60 : 8);
-            if (!cands.length) return null;
-            return (
-              <details className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
-                <summary><b>👥 장수 부르기</b> <small className="muted">{need.length ? `빈 담당: ${need.map((r) => ROLES[r]).join('·')} — 맞는 장수가 위` : '다른 성 장수를 병력과 함께 데려옴'}</small></summary>
-                <div style={{ fontSize: 12, marginTop: 4 }}>데려올 병력 {fmtTroops(callAmt)} <small className="muted">(최소 1천)</small></div>
-                <Slider min={1000} max={20000} step={1000} value={callAmt} onChange={setCallAmt} style={{ width: '100%' }} />
-                {cands.map(({ g, d, last }) => (
-                  <div key={g.id} className="row" style={{ justifyContent: 'space-between', marginTop: 4, alignItems: 'center' }}>
-                    <span><Face g={g} col={me.color} /> {g.name} <Job g={g} /> <small className="muted"><Stats g={g} /> · {game.castles[g.castle].name} {d}칸{last ? ' · 그 성 마지막 장수' : ''}</small></span>
-                    <button className="sm" onClick={() => act((s) => summonGeneral(s, grid, g.id, selCastle.id, Math.min(callAmt, s.castles[g.castle].troops - 500)))}>부르기</button>
-                  </div>
-                ))}
-                <button className="xs" style={{ marginTop: 4 }} onClick={() => setShowAllCall((v) => !v)}>{showAllCall ? "접기" : "모든 장수 보기"}</button>
-              </details>
-            );
-          })()}
           {selCastle.owner === pid && freeIn(selCastle).length > 0 && (
             <div className="card" style={{ background: 'var(--panel)', marginTop: 8, fontSize: 13 }}>
               <b>🧑‍🎓 재야 인재</b>
@@ -2415,7 +2394,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <li>⚔️ 일기토는 무력이 높을수록 유리하지만 운도 큽니다(무력 차 10이면 약 30% 역전). 이기면 사기 +20, 적 병사 8% 도주, 무력이 자라기도 합니다. 🧠 지력 높은 장수는 적 전법을 간파해 막습니다.</li>
                 <li>👑 외교: 훨씬 약한 나라에 <b>속국 요구</b>(서로 안 싸우고 순마다 금 수입 15% 조공, 우리 전쟁을 도움), 아주 약한 나라나 1년 넘은 속국에는 <b>항복 권유</b>(통째로 흡수). 반대로 우리가 약하면 강한 나라의 <b>속국이 되어</b> 살아남을 수 있고, 나중에 독립 선언도 가능.</li>
                 <li>🎖️ 군단은 맡은 성을 지키고, 빼앗기면 맡은 성들의 병력을 모아 되찾습니다(남의 나라를 먼저 치지 않음). 도독을 고르면 주변 8칸 성이 자동으로 골라집니다.</li>
-                <li>👥 도시 패널 「장수 부르기」로 다른 성 장수를 병력과 함께 행군시켜 데려옵니다(빈 담당에 맞는 장수가 위).</li>
+                <li>👥 성 내정 칸의 빈 담당 아래 「💡 추천」으로 다른 성에서 놀고 있는 장수를 불러 맡기거나, 장수 카드의 ➡️로 다른 성에 보내 데려옵니다(빈 담당에 맞는 장수가 위).</li>
                 <li>🗡️ 넓은 변방 도시는 수비가 얇으면 도적이 땅을 휩쓸고, 조선소 없는 항구는 해적에게 털립니다.</li>
                 <li>🔥 도시 15개 넘게 커진 나라는 도읍에서 먼, 장수 없고 수비 얇은 변방 도시가 가끔 반란으로 떨어져 나가거나 이웃에 귀순합니다(장수가 있거나 수비 2만 넘으면 안전).</li>
                 <li>🕊️ 외교: 정치가 가장 높은 장수가 사신이 되어 제안 성공률(최대 +20%)과 친선 효과를 높입니다. 친선은 1만에 우호 +10, 3만에 +30 (나라 크기와 상관없음).</li>

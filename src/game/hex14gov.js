@@ -456,11 +456,21 @@ function spreadLand(s, grid) {
     let n = 4 + Math.round((s.generals[c.jobs?.farm]?.pol || 40) / 20);
     for (const t of dt[c.id]) {
       if (n <= 0) break;
-      // 삼국지14처럼: 남이 칠해 둔 땅은 저절로 되찾지 않음 (부대가 직접 칠해야 함) — 빈 땅만 넓힘
+      // 빈 땅부터 넓힘 (내 땅과 맞닿은 칸, 부대가 옆에 있으면 안 됨)
       if (s.owner[t] !== -1 || near.has(t)) continue;
       if (!grid.nb[t].some((x) => s.owner[x] === c.owner)) continue;
       s.owner[t] = c.owner ?? -1;
       n -= 1;
+    }
+    // 내 관할 안의 남의 땅: 아무 부대도 그 칸·옆에 없으면 순마다 2칸씩 되찾음 (남이 칠하고 간 땅이 몇 년씩 그대로 남지 않게)
+    let back = 2;
+    for (const t of dt[c.id]) {
+      if (back <= 0) break;
+      const o = s.owner[t];
+      if (o < 0 || o === c.owner || near.has(t) || s.castles.some((x) => x.tile === t)) continue;
+      if (!grid.nb[t].some((x) => s.owner[x] === c.owner)) continue;
+      s.owner[t] = c.owner;
+      back -= 1;
     }
   }
 }
