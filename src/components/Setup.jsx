@@ -284,9 +284,6 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <span className="muted start-sel" key={`${scn.id}:${pid}:${hexCount ? 1 : 0}`}>
             <b style={{ color: 'var(--text)' }}>{scn.name}</b> · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
-          <button className="sm" disabled={!ready} onClick={() => start(false, false)} title="지역 단위로 행동력을 써서 싸우는 예전 방식">
-            🗺️ 지역 모드(구버전)
-          </button>
           <button disabled={!ready} onClick={() => start(true, true)} title="모든 나라를 컴퓨터가 진행">
             👁️ 관전으로 시작
           </button>

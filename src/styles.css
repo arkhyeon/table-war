@@ -840,7 +840,7 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   .start-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none; }
   .start-bar .start-sel { grid-column: 1 / -1; flex: none; margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.5; }
   .start-bar button.primary { grid-column: 1 / -1; grid-row: 2; padding: 12px; font-size: 16px; white-space: nowrap; }
-  .start-bar button:not(.primary) { font-size: 12.5px; padding: 8px 6px; white-space: nowrap; min-width: 0; }
+  .start-bar button:not(.primary) { grid-column: 1 / -1; font-size: 12.5px; padding: 8px 6px; white-space: nowrap; min-width: 0; }
 }
 /* 터치 폰: 확대·축소는 두 손가락으로 — 버튼은 숨겨 지도를 넓게 */
 @media (max-width: 760px) and (pointer: coarse) { .map-ctrl .zoom-btn { display: none; } }
@@ -904,3 +904,31 @@ body:has(.cmodal-bg) .modal-bg:not(.cmodal-bg) { z-index: 90; } /* 작업 창 �
   .act-grid { gap: 5px; }
   .act-tile { padding: 8px 8px; font-size: 12.5px; }
 }
+/* 눌러서 뜨는 작은 설명창 (특성·전법·?) */
+.tip-pop { position: fixed; z-index: 950; padding: 8px 10px; border-radius: 10px; background: #0d0f13f2; color: #f3f3f3; border: 1px solid var(--line2, #3a3f47); box-shadow: 0 10px 28px #000c; font-size: 12.5px; line-height: 1.5; pointer-events: auto; animation: pop 0.12s ease-out; white-space: normal; word-break: keep-all; }
+[data-tip] { cursor: help; }
+.help-q { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; min-width: 18px; padding: 0; margin-left: 4px; border-radius: 50%; font-size: 11px; font-weight: 700; line-height: 1; background: var(--panel2, #262a31); border: 1px solid var(--line2, #3a3f47); color: var(--muted); vertical-align: middle; }
+.help-q:hover { color: var(--text); border-color: var(--accent, #ffb347); }
+/* 내정 창 */
+.job-auto { display: block; margin: 8px 0 4px; font-size: 13px; }
+.job-sec { border-top: 1px solid var(--line); padding: 8px 0 6px; }
+.job-sec-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.job-cur { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; font-size: 13px; }
+.job-cur img { margin: 0 !important; }
+.job-none { margin-left: auto; color: var(--danger, #e5483a); font-size: 12px; font-weight: 600; }
+.job-eff1 { display: block; font-size: 11.5px; margin: 2px 0 4px; }
+.job-cands { display: grid; gap: 3px; }
+.job-cand { display: grid; grid-template-columns: 22px minmax(0, auto) auto minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 8px; background: #ffffff08; font-size: 12.5px; }
+.job-cand img { margin: 0 !important; }
+.jc-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jc-stat { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jc-stat.up { color: var(--ok, #8fe08a); }
+.jc-where { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+b.hl, .hl { color: var(--accent, #ffb347); }
+/* 2줄 칸: 이름 / 값(+작은 덧붙임) */
+.stat-tiles.two b { display: flex; align-items: baseline; gap: 2px; white-space: nowrap; overflow: hidden; }
+.stat-tiles.two b i { font-style: normal; font-size: 10.5px; font-weight: 500; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.stat-tiles.two > .warn b i { color: var(--danger, #e5483a); }
+/* 장수 능력치 줄: 좁으면 특성·전법이 다음 줄로 (화면 밖으로 나가지 않게) */
+.gen-main .gen-line { flex-wrap: wrap; white-space: normal; min-width: 0; }
+.gen-main .gen-line > * { white-space: nowrap; }

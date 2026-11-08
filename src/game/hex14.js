@@ -1191,8 +1191,10 @@ export function stepDay(s, grid) {
   }
   // 5) 무너진 부대: 병력이 바닥나거나 사기가 꺾이면 장수는 가까운 성으로 퇴각(일부는 사로잡힘)
   for (const u of s.units) {
-    // 사기가 바닥나도 병력이 절반 넘게 남았으면 버티며 싸움 (사기가 낮으면 피해는 덜 줌) — 갉아먹는 싸움이 되게
-    if (u.troops > 300 && (u.morale > 5 || u.troops >= (u.max || u.troops) * 0.5)) continue;
+    // 내 부대: 사기가 바닥나도 병력이 절반 넘게 남았으면 버티며 싸움 (사기가 낮으면 피해는 덜 줌) — 갉아먹는 싸움이 되게
+    // 컴퓨터 부대는 예전대로 (물러날지는 컴퓨터 판단에 맡김)
+    const holdOn = u.nation === s.playerId && !s.spectator && u.troops >= (u.max || u.troops) * 0.5;
+    if (u.troops > 300 && (u.morale > 5 || holdOn)) continue;
     const home = nearestCastle(s, grid, u.tile, u.nation);
     // 병력이 남았으면 패주: 그 자리에서 가까운 내 성으로 걸어서 물러남 (싸우지 않고, 쫓기면 잡힘)
     if (u.troops > 1000 && home && !u.routed) {
