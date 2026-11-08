@@ -28,6 +28,7 @@ const ownerColor = (s, o) => (o !== null && o >= 0 && s.nations[o] ? s.nations[o
 
 // 칸마다 같은 값이 나오는 작은 난수
 const hash = (i, k = 0) => { let x = (i * 374761393 + k * 668265263) | 0; x = (x ^ (x >>> 13)) * 1274126177; x ^= x >>> 16; return ((x >>> 0) % 10000) / 10000; };
+const isPhone = () => window.innerWidth <= 760; // 폰 화면 (아래 시트 배치)
 const mapScale = (grid) => Math.min(3, 4096 / Math.max(grid.W, grid.H));
 const newLayer = (grid, sc) => { const cv = document.createElement('canvas'); cv.width = Math.ceil(Math.max(grid.W, grid.wrap ? grid.period + grid.size * 2 : 0) * sc); cv.height = Math.ceil(grid.H * sc); const ctx = cv.getContext('2d'); ctx.scale(sc, sc); return [cv, ctx]; };
 const shade = (hex, f) => { const n = parseInt(hex.slice(1), 16); const c = (v) => Math.max(0, Math.min(255, Math.round(v * f))); return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`; };
@@ -1784,7 +1785,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     return Object.values(gm.generals).filter((g) => g.nation === pid && g.status === 'active' && !g.ruler && g.unit == null && g.castle != null && g.castle !== c.id && !held.has(g.id) && g.war <= 85 && (cnt.get(g.castle) || 0) >= 2 && gm.castles[g.castle]?.troops >= 1500)
       .map((g) => ({ g, d: grid.dist(gm.castles[g.castle].tile, c.tile) })).sort((a, b) => b.g[key] - a.g[key] || a.d - b.d);
   };
-  const callForJob = (cid, role, gid) => act((s) => {
+  const callJob = (s, cid, role, gid) => {
     const c = s.castles[cid], g = s.generals[gid];
     if (!g || g.castle == null) return { ok: false, msg: '부를 수 없는 장수입니다.' };
     const r = summonGeneral(s, grid, gid, cid, Math.min(callAmt, s.castles[g.castle].troops - 500));
@@ -1792,6 +1793,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     for (const rr of Object.keys(ROLES)) if (c.jobs?.[rr] === gid) c.jobs[rr] = null;
     c.jobs = c.jobs || {}; c.jobs[role] = gid;
     return { ok: true, msg: `${g.name}이(가) ${c.name}(으)로 갑니다 — 도착하면 ${ROLES[role]}을 맡습니다` };
+  };
+  const callForJob = (cid, role, gid) => act((s) => callJob(s, cid, role, gid));
+  // 담당 빈 성 여러 곳을 추천대로 한 번에 (장수마다 한 곳씩)
+  const callJobsAll = (rows) => act((s) => {
+    let n = 0;
+    for (const r of rows) if (callJob(s, r.c.id, r.role, r.best.g.id).ok) n++;
+    return n ? { ok: true, msg: `장수 ${n}명이 담당 빈 성으로 갑니다 — 도착하면 업무를 맡습니다` } : { ok: false, msg: '부를 수 있는 장수가 없습니다.' };
   });
   // 장수 나누기: 계획을 보여 주고 확인을 받은 뒤 보냄
   const spreadPlan = useMemo(() => (game.spectator ? [] : planGenSpread(game, grid, pid)), [game, grid, pid]);
@@ -1837,7 +1845,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 병량: 다음 수확까지 버틸 수 있나
     {
       const use = foodUse(g, pid), left = (((HARVEST_MONTH * 3 - (g.turn - 1)) % 36) + 36) % 36 || 36, need = use * left;
-      if (use > 0 && me.food < need) out.push({ id: 'food', sev: me.food < use * 3 ? 'danger' : 'todo', icon: '🌾', title: `병량이 수확까지 모자람`, sub: `수확까지 ${left}순 · 필요 ${fmtTroops(need)} / 있음 ${fmtTroops(me.food)} (순마다 −${fmtTroops(use)})`, act: { label: '시장 열기', fn: () => { setSel(null); setTab('home'); setSheet(true); } } });
+      if (use > 0 && me.food < need) out.push({ id: 'food', sev: me.food < use * 3 ? 'danger' : 'todo', icon: '🌾', title: `병량이 수확까지 모자람`, sub: `수확까지 ${left}순 · 필요 ${fmtTroops(need)} / 있음 ${fmtTroops(me.food)} (순마다 −${fmtTroops(use)})`, act: { label: '시장 열기', fn: () => { setSel(null); setTab('home'); setSheet(true); if (isPhone()) setTodoOpen(false); } } });
     }
     // 할 일: 멈춰 선 부대
     for (const u of g.units) {
@@ -1857,6 +1865,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       out.push({ id: 'pc' + o, sev: 'todo', icon: '🤝', title: `${g.nations[o]?.name}와(과) ${PACT[p.type] || p.type} ${p.until - g.turn}순 뒤 끝남`, sub: '끝나면 서로 칠 수 있습니다', act: { label: '연장 청하기', disabled: me.lastAsk?.[o] === g.turn, fn: () => act((s) => renewPact(s, pid, o)) } });
     }
     // 할 일: 업무 담당이 빈 성 — 성 안에 맡길 사람이 있으면 「알아서 맡기기」, 없으면 다른 성에서 놀고 있는 알맞은 장수 「부르기」
+    const jobClaimed = new Set(), jobRows = [];
     for (const c of mine) {
       if (c.kind === 'pass') continue;
       const miss = Object.keys(ROLES).filter((r) => !jobGen(g, c, r) && !(c.jobs?.[r] && g.generals[c.jobs[r]]?.unit != null));
@@ -1867,8 +1876,16 @@ export default function Hex14({ world, game, setGame, onExit }) {
         out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} 업무 담당 없음`, sub: miss.map((r) => ROLES[r]).join('·') + ' 담당이 비었습니다', go: goC(c), act: { label: '알아서 맡기기', tip: '머무는 장수 중 알맞은 사람에게 맡깁니다 (이 성은 앞으로도 자동)', fn: () => act((s) => { const x = s.castles[c.id]; x.auto = true; autoJobs(s, x); return { ok: true, msg: `${c.name}: 업무를 맡겼습니다` }; }) } });
         continue;
       }
-      const role = miss[0], best = jobCands(g, c, role)[0];
+      // 같은 장수를 여러 성에 추천하지 않게: 앞 성에서 추천한 장수는 빼고 고름
+      const role = miss[0], best = jobCands(g, c, role).find((x) => !jobClaimed.has(x.g.id));
       if (!best) continue;
+      jobClaimed.add(best.g.id);
+      jobRows.push({ c, role, miss, best });
+    }
+    if (jobRows.length >= 3) {
+      // 세 곳 이상이면 한 줄로 묶음 (목록이 같은 줄로 가득 차지 않게)
+      out.push({ id: 'jobs', sev: 'todo', icon: '👔', title: `담당 빈 성 ${jobRows.length}곳 — 놀고 있는 장수로 채울 수 있음`, sub: jobRows.slice(0, 4).map((r) => `${r.c.name}←${r.best.g.name}`).join(' · ') + (jobRows.length > 4 ? ' …' : ''), act: { label: '추천대로 모두 부르기', primary: true, tip: '장수마다 한 곳씩, 걸어와 도착하면 비어 있는 업무를 맡습니다', fn: () => callJobsAll(jobRows) } });
+    } else for (const { c, role, miss, best } of jobRows) {
       const kv = role === 'draft' ? `통${best.g.lead}` : `정${best.g.pol}`;
       out.push({ id: 'job' + c.id, sev: 'todo', icon: '👔', title: `${c.name} ${miss.map((r) => ROLES[r]).join('·')} 담당 없음`, sub: `추천: ${best.g.name}(${kv}) — ${g.castles[best.g.castle].name}에서 놀고 있음`, go: goC(c), act: { label: `${best.g.name} 부르기`, tip: `${g.castles[best.g.castle].name}에서 걸어와 도착하면 ${ROLES[role]}을 맡습니다`, fn: () => callForJob(c.id, role, best.g.id) } });
     }
@@ -1881,7 +1898,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
   }, [game, pid, grid, spreadPlan]); // eslint-disable-line react-hooks/exhaustive-deps
   // 순이 바뀌면(첫날) 할 일 목록을 저절로 엶
   const todoTurn = useRef(null);
-  useEffect(() => { if (playing || game.spectator || game.day !== 0 || todoTurn.current === game.turn) return; todoTurn.current = game.turn; if (todoAuto && todos.length) setTodoOpen(true); }, [game, playing]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [todoPing, setTodoPing] = useState(false); // 저절로 열지 않은 순: 할 일 버튼을 반짝여 알림
+  // 폰: 할 일 목록을 열면 아래 패널을 접어 목록이 가려지지 않게, 줄을 누르면 목록을 닫고 그곳으로
+  useEffect(() => { if (todoOpen) { setTodoPing(false); if (isPhone()) setSheet(false); } }, [todoOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const todoGo = (t) => { if (!t.go) return; t.go(); if (isPhone()) setTodoOpen(false); };
+  useEffect(() => { if (playing || game.spectator || game.day !== 0 || todoTurn.current === game.turn) return; todoTurn.current = game.turn; if (todoAuto && todos.length && (window.innerWidth > 760 || todos.some((t) => t.sev === 'danger'))) setTodoOpen(true); else if (todos.length) setTodoPing(true); }, [game, playing]); // eslint-disable-line react-hooks/exhaustive-deps
   // ── 오늘의 소식: 하루가 끝날 때 내게 중요한 일을 지도 위 카드로 (📍로 그 자리로, 지도에 고리 표시) ──
   const [news, setNews] = useState([]);
   const pulses = useRef([]);
@@ -2318,7 +2339,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 return (
                   <div className="stat-tiles">
                     <div><small>금 수입</small><b>{inc >= 0 ? '+' : ''}{fmtGold(inc)}</b><small>/순</small></div>
-                    <div className={foodTurns < turnsToHarvest ? 'warn' : ''} title={`병량 ${fmtTroops(food)} · 순마다 −${fmtTroops(use)} · 수확까지 ${turnsToHarvest}순`}><small>병량 버팀</small><b>{foodTurns >= 99 ? '넉넉' : `${foodTurns}순`}</b><small>수확 {turnsToHarvest}순 뒤</small></div>
+                    <div className={foodTurns < turnsToHarvest ? 'warn' : ''} title={`병량 ${fmtTroops(food)} · 순마다 −${fmtTroops(use)} · 수확까지 ${turnsToHarvest}순`}><small>병량 버팀</small><b>{foodTurns >= 99 ? '넉넉' : `${foodTurns}순`}</b><small>수확 {turnsToHarvest}순</small></div>
                     <div><small>병력</small><b>{fmtTroops(powerOf(game, pid))}</b><small>장수 {gs.length}명</small></div>
                     <div className={low.length ? 'warn' : ''} title={low.length ? `불만: ${low.map((g) => g.name).join(', ')}` : ''}><small>충성</small><b>{avg}</b><small>{low.length ? `불만 ${low.length}명` : '평균'}</small></div>
                   </div>
@@ -2654,7 +2675,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
             <button className="h14-menu" title="세력·외교·인재" onClick={() => { setSel(null); setSheet(true); }}>📋</button>
             {report && <button title="지난 순 결과 다시 보기" disabled={playing} onClick={() => setReportOpen((v) => !v)}>📊</button>}
             <button className="panel-toggle" title={`${panelOff ? '오른쪽 패널 펴기' : '오른쪽 패널 접기 (지도 넓게)'} — 단축키 P`} onClick={() => setPanelOff(!panelOff)}>{panelOff ? '⇤' : '⇥'}</button>
-            {!game.spectator && <button className={'todo-btn' + (todoOpen ? ' on' : '')} title="할 일 목록" aria-label={`할 일 ${todos.length}개`} onClick={() => setTodoOpen((v) => !v)}>✅{todos.length ? <span className={'todo-badge' + (todos.some((t) => t.sev === 'danger') ? ' danger' : '')}>{todos.length > 99 ? '99+' : todos.length}</span> : null}</button>}
+            {!game.spectator && <button className={'todo-btn' + (todoOpen ? ' on' : '') + (todoPing && !todoOpen ? ' ping' : '')} title="할 일 목록" aria-label={`할 일 ${todos.length}개`} onClick={() => setTodoOpen((v) => !v)}>✅{todos.length ? <span className={'todo-badge' + (todos.some((t) => t.sev === 'danger') ? ' danger' : '')}>{todos.length > 99 ? '99+' : todos.length}</span> : null}</button>}
           </div>
           {placeFort && <div className="map-hint">{FORTS[placeFort.kind].icon} {game.castles[placeFort.cid]?.name}에서 4칸 안, 내 땅을 누르면 {FORTS[placeFort.kind].name}을(를) 짓습니다 <button className="hint-clear" onClick={() => setPlaceFort(null)}>✕ 취소</button></div>}
           {sendFrom !== null && <div className="map-hint">🚚 {game.castles[sendFrom]?.name}의 병력 {fmtTroops(sendAmt)}을(를) 받을 내 성을 누르세요 <button className="hint-clear" onClick={() => setSendFrom(null)}>✕ 취소</button></div>}
@@ -2800,7 +2821,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     <div key={sev} className={`todo-group ${sev}`}>
                       <div className="todo-gl">{label} <small>{list.length}</small></div>
                       {list.map((t) => (
-                        <div key={t.id} className={'todo-row' + (t.go ? ' clickable' : '')} onClick={t.go} role={t.go ? 'button' : undefined} tabIndex={t.go ? 0 : undefined} onKeyDown={(e) => { if (t.go && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); t.go(); } }}>
+                        <div key={t.id} className={'todo-row' + (t.go ? ' clickable' : '')} onClick={() => todoGo(t)} role={t.go ? 'button' : undefined} tabIndex={t.go ? 0 : undefined} onKeyDown={(e) => { if (t.go && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); todoGo(t); } }}>
                           <span className="todo-ic" aria-hidden>{t.icon}</span>
                           <span className="todo-tx"><b>{t.title}</b>{t.sub ? <small>{t.sub}</small> : null}</span>
                           {t.act && <button className={'sm' + (t.act.primary ? ' primary' : '')} disabled={t.act.disabled} title={t.act.tip} onClick={(e) => { e.stopPropagation(); t.act.fn(); }}>{t.act.label}</button>}
