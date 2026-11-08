@@ -664,3 +664,48 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .gen-top small { flex: 0 0 auto; }
 .job-rec { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin: 3px 0 2px 40px; font-size: 11.5px; }
 .job-rec .xs { font-size: 11.5px; padding: 3px 7px; }
+/* ── 오른쪽 패널 UI 정리 ── */
+.tabs-top { position: sticky; top: -12px; z-index: 3; margin: -12px -12px 0; padding: 10px 12px 8px; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 0; }
+.tabs-top button { flex: 1; white-space: nowrap; }
+.sel-back { display: flex; align-items: center; gap: 8px; margin-top: -2px; }
+.sel-back .xs { padding: 4px 10px; }
+.stat-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 4px; }
+.stat-tiles > div { background: var(--panel2, #1f2329); border: 1px solid var(--line); border-radius: 10px; padding: 6px 7px; display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.stat-tiles small { color: var(--muted); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-tiles b { font-size: 15px; white-space: nowrap; }
+.stat-tiles > .warn { border-color: #e5483a88; background: #e5483a14; }
+.stat-tiles > .warn b { color: #ff8a7a; }
+.sec-h { font-weight: 700; font-size: 12.5px; margin: 12px 0 6px; color: var(--text); cursor: default; }
+summary.sec-h { cursor: pointer; list-style: none; }
+summary.sec-h::-webkit-details-marker { display: none; }
+summary.sec-h::before { content: '▸'; display: inline-block; margin-right: 5px; color: var(--muted); transition: transform 0.15s; }
+details[open] > summary.sec-h::before { transform: rotate(90deg); }
+.qa-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.qa-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.qa { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 9px; border-radius: 10px; text-align: left; font-size: 12.5px; font-weight: 700; line-height: 1.25; min-width: 0; }
+.qa small { font-weight: 500; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.qa:disabled small { opacity: 0.7; }
+.city-table { width: 100%; font-size: 12px; border-collapse: collapse; }
+.city-table th { font-weight: 600; color: var(--muted); font-size: 11px; padding: 3px 4px; text-align: right; white-space: nowrap; }
+.city-table th:first-child, .city-table td:first-child { text-align: left; }
+.city-table th.sortable { cursor: pointer; user-select: none; }
+.city-table th.sortable.on { color: var(--text); }
+.city-table td { padding: 4px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+.city-table td:first-child { max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+.city-table tr.clickable:hover td { background: #ffffff0a; }
+.city-table td.warn { color: #f0c24b; }
+.city-table td.bad { color: #ff8a7a; font-weight: 700; }
+.pol-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.pol-row .pol-tx { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.pol-row .pol-tx small { font-size: 11px; }
+.pol-row.on .pol-tx b { color: #ffe066; }
+.pol-row > button { white-space: nowrap; }
+.pact-pill.war { background: #e5483a33; color: #ff9a8a; }
+.dip-far { margin-top: 6px; }
+.kbd-help { font-size: 12px; margin: 6px 0; line-height: 1.8; }
+.kbd-help kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--line2, #444); border-bottom-width: 2px; border-radius: 4px; font-size: 11px; background: var(--panel2, #222); color: var(--text); }
+@media (min-width: 761px) { .h14-body.panel-off { grid-template-columns: minmax(0, 1fr) 0; } .h14-body.panel-off .h14-panel { display: none; } }
+@media (min-width: 1600px) { .h14-body:not(.panel-off) { grid-template-columns: minmax(0, 1fr) 400px; } }
+@media (max-width: 760px) { .panel-toggle { display: none; } .stat-tiles b { font-size: 14px; } }
+.qa-grid.three .qa { font-size: 11.5px; padding: 6px 7px; }
+.qa-grid.three .qa, .qa-grid .qa { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
