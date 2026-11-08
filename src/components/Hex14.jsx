@@ -680,6 +680,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [amt, setAmt] = useState(0);
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const playingRef = useRef(false); playingRef.current = playing;
   // 군단(위임)은 뺌: 맡겨 두면 징병도 없이 돌진만 해서 쓸모가 없었음 — 예전 저장에 있던 군단은 풀어서 내가 다시 지휘
   useEffect(() => { if (game.corps?.length) setGame((g) => ({ ...g, corps: [], units: g.units.map((u) => (u.corps ? { ...u, corps: undefined } : u)) })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 다른 것을 고르거나 날이 흐르기 시작하면 성 작업 창은 닫음
@@ -783,7 +784,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   useEffect(() => () => {
     const L = land.current, free = (c) => { if (c && c.width !== undefined) { c.width = 0; c.height = 0; } };
     free(L.base?.cv); free(L.base?.rcv); free(L.over); free(L.comp); free(L.snow); free(L.fog);
-    for (const t of L.tiles?.values() || []) free(t.comp);
+    for (const t of L.tiles?.values() || []) { free(t.comp); free(t.own); }
     for (const c of Object.values(L.statC || {})) free(c?.cv);
     L.tiles?.clear();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -870,6 +871,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         const key = `${lv}|${tx}|${ty}`, t = L.tiles.get(key), inView = tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1;
         if (inView) vis.push(key);
         if (t) t.used = frame;
+        // 날이 넘어가는 동안(진행 중)엔 땅 주인이 바뀐 타일을 매일 새로 그리지 않고 옛 그림을 씀 — 진행이 멈추면 한 번에 고침 (느린 폰에서 하루하루가 끊기지 않게)
         if (!t || t.stale) want2.push({ key, tx, ty, inView, d: Math.hypot(tx - (tx0 + tx1) / 2, ty - (ty0 + ty1) / 2) });
       }
       // 그릴 차례: 화면 안 → 가운데 가까운 순, 옛 그림이 있는 것보다 없는 것 먼저
@@ -883,20 +885,21 @@ export default function Hex14({ world, game, setGame, onExit }) {
           const pad = 4 / Q.sc;
           const job = Q.list.shift(), r = { x: job.tx * Q.TW - pad, y: job.ty * Q.TW - pad, w: Q.TW + pad * 2, h: Q.TW + pad * 2, sc: Q.sc };
           const s2 = gameRef.current;
+          // 영토 그림: 타일마다 따로 둠 → 땅 주인이 바뀌면 이것만 다시 그림 (지형은 그대로 — 예전엔 지형까지 통째로 다시 그려 느렸음)
+          const ownLayer = (old) => { const oc = old || document.createElement('canvas'); oc.width = Math.ceil(r.w * r.sc); oc.height = Math.ceil(r.h * r.sc); const ox = oc.getContext('2d'); ox.setTransform(1, 0, 0, 1, 0, 0); ox.clearRect(0, 0, oc.width, oc.height); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y); drawOwnerTiles(grid, s2, ox, tilesIn(grid, r, grid.size * 3)); return oc; };
+          const oldT = L.tiles.get(job.key);
+          if (oldT && oldT.comp && oldT.own) { ownLayer(oldT.own); oldT.stale = false; oldT.used = L.frame || 0; draw(); if (Q.list.length) L.tileT = setTimeout(pump, Q.list[0].slow ? 120 : 0); return; }
           const T = paintTerrain(grid, world, r);
-          const oc = document.createElement('canvas'); oc.width = T.cv.width; oc.height = T.cv.height; const ox = oc.getContext('2d'); ox.scale(r.sc, r.sc); ox.translate(-r.x, -r.y);
-          drawOwnerTiles(grid, s2, ox, tilesIn(grid, r, grid.size * 3));
-          const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(oc, 0, 0); cx3.drawImage(T.rcv, 0, 0); // 한 장으로 합침 (지형 위에 영토, 그 위에 강)
-          oc.width = 0; oc.height = 0; T.rcv.width = 0; T.rcv.height = 0; // 합치고 난 그림은 바로 돌려줌
-          const oldT = L.tiles.get(job.key); if (oldT?.comp && oldT.comp !== T.cv) { oldT.comp.width = 0; oldT.comp.height = 0; } // 다시 그린 조각: 옛 그림 해제
-          L.tiles.set(job.key, { ...r, comp: T.cv, used: L.frame || 0, stale: false });
+          const cx3 = T.cv.getContext('2d'); cx3.setTransform(1, 0, 0, 1, 0, 0); cx3.drawImage(T.rcv, 0, 0); T.rcv.width = 0; T.rcv.height = 0; // 강은 지형에 합침
+          if (oldT?.comp && oldT.comp !== T.cv) { oldT.comp.width = 0; oldT.comp.height = 0; } if (oldT?.own) { oldT.own.width = 0; oldT.own.height = 0; }
+          L.tiles.set(job.key, { ...r, comp: T.cv, own: ownLayer(null), used: L.frame || 0, stale: false });
           // 너무 많이 쌓이면 오래 안 본 것부터 버림 (타일 하나 약 1MB)
-          const MAXT = Math.max(isPhone() ? 24 : 72, (L.tileNeed || 0) + 6); if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
+          const MAXT = Math.max(isPhone() ? 24 : 72, (L.tileNeed || 0) + 6); if (L.tiles.size > MAXT) { const old = [...L.tiles].sort((a, b) => a[1].used - b[1].used).slice(0, L.tiles.size - MAXT); for (const [k2] of old) { const o3 = L.tiles.get(k2)?.own; if (o3) { o3.width = 0; o3.height = 0; } const c3 = L.tiles.get(k2)?.comp; if (c3) { c3.width = 0; c3.height = 0; } L.tiles.delete(k2); } }
           draw();
           if (Q.list.length) L.tileT = setTimeout(pump, 0);
         }, 0);
       }
-      const all = vis.every((key) => { const t = L.tiles.get(key); return t && !t.stale; });
+      const all = vis.every((key) => { const t = L.tiles.get(key); return t && (!t.stale || !!t.own); });
       // 확대·축소 직후 새 배율 타일이 아직 없으면: 이웃 배율에서 그려 둔 타일을 늘이거나 줄여 먼저 보여 줌 (흐린 전체 지도 대신)
       const fallback = [];
       if (!all) for (const l2 of [lv - 0.5, lv + 0.5, lv - 1, lv + 1]) {
@@ -930,7 +933,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 지형(강 포함) 바탕 위에 영토 색(절반 해상도)을 겹쳐 그림 — 합친 그림을 따로 두지 않아 메모리를 아낌
     if (!chCovers) { blit(B.cv, B.sc); blit(land.current.over, B.sc * OWN_SC); }
     // 크게 확대했을 때: 보이는 부분만 화면 배율로 다시 그린 선명한 조각을 덮어 그림 (흐릿하게 늘어나지 않게)
-    if (TL) { for (const t of TL.fallback) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); } }
+    if (TL) { const dt2 = (t) => { ctx.drawImage(t.comp, t.x, t.y, t.w, t.h); if (t.own) ctx.drawImage(t.own, t.x, t.y, t.w, t.h); }; for (const t of TL.fallback) dt2(t); for (const key of TL.vis) { const t = land.current.tiles.get(key); if (t) dt2(t); } }
     // 지역 지도 가장자리: 땅이 칼로 자른 듯 끊기지 않게 안개처럼 바다색으로 흐려지게
     if (!polar) {
       const m = grid.size * 5, W = grid.W, Hh = grid.H, sea = 'rgba(26,64,100,';
@@ -1394,10 +1397,17 @@ export default function Hex14({ world, game, setGame, onExit }) {
     const ambient = !lively && (wk === 'rain' || wk === 'snow' || wk === 'wind' || s.units.length);
     const busy = lively || ambient;
     cancelAnimationFrame(raf.current); clearTimeout(ambT.current);
-    if (lively) raf.current = requestAnimationFrame(draw);
-    else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, 80);
+    // 한 장면 그리는 데 걸린 시간(평균)만큼 쉬었다 다음 장면 — 느린 폰에서 그림이 계산(하루 진행)을 밀어내지 않게 (그림에 CPU 절반 이하)
+    const LC = land.current, dt = performance.now() - now;
+    LC.drawAvg = LC.drawAvg ? LC.drawAvg * 0.8 + dt * 0.2 : dt;
+    LC.frames = (LC.frames || 0) + 1; LC.drawSum = (LC.drawSum || 0) + dt;
+    const rest = LC.drawAvg > 14 ? Math.min(250, LC.drawAvg * 1.2) : 0;
+    if (lively) { if (rest) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, rest); else raf.current = requestAnimationFrame(draw); }
+    else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, Math.max(80, rest * 2));
   };
-  useEffect(() => { draw(); });
+  // 화면(React)이 다시 그려질 때마다 지도를 통째로 다시 그리지 않고, 다음 프레임에 한 번만 (생각 중 표시처럼 자주 바뀌는 것 때문에 큰 지도를 수십 번 그리던 것 막음)
+  const drawQ = useRef(0);
+  useEffect(() => { if (drawQ.current) return; drawQ.current = requestAnimationFrame(() => { drawQ.current = 0; draw(); }); });
   // Esc: 선택·새 도시 자리 고르기 취소
   useEffect(() => {
     const onKey = (e) => {
@@ -1416,6 +1426,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 자동 시험용: 부대·도시의 화면 좌표
   useEffect(() => {
     window.__h14 = {
+      perf: () => { const L = land.current; const r = { frames: L.frames || 0, drawMs: Math.round(L.drawSum || 0), avg: Math.round(L.drawAvg || 0) }; L.frames = 0; L.drawSum = 0; return r; },
       chunk: () => { const L = land.current; const Q = L.tileQ; return { ok: !!Q && Q.list.filter((x) => x.inView).length === 0, fb: (L.lastFallback || 0) > 0, tiles: L.tiles?.size || 0, queued: Q?.list.length || 0 }; },
       probe: (lon, lat) => { const [x, y] = world.geo.toPx(lon, lat); const t = pixelToCell(grid.size, grid.cols, grid.rows, x, y); return { t, terrain: grid.terrain[t], pass: grid.passable(t), N: grid.N, cols: grid.cols, W: world.W, H: world.H, wc: world.cols, wr: world.rows }; },
       screenOf: (tile, up = 0) => { const r = wrap.current.getBoundingClientRect(), v = view.current, [x0, y] = grid.center(tile), x = grid.wrap && x0 < v.x ? x0 + grid.period : x0; return [r.left + (x - v.x) * v.k, r.top + (y - grid.size * up - v.y) * v.k]; },
@@ -1667,7 +1678,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [thinking, setThinking] = useState(null);
   const thinkShow = useRef(0);
   const thinkT0 = useRef(0);
-  const onThink = (nid, k, n) => { const now = performance.now(); if (now - thinkT0.current < 150 || now - thinkShow.current < 60) return; thinkShow.current = now; setThinking({ nid, k, n }); };
+  const onThink = (nid, k, n) => { const now = performance.now(); if (now - thinkT0.current < 150 || now - thinkShow.current < (isPhone() ? 400 : 120)) return; thinkShow.current = now; setThinking({ nid, k, n }); };
   // 미리 계산: 하루가 끝나고 가만히 있으면 다음 하루를 뒤에서 (잘게 나눠) 계산해 둠.
   // 「하루 진행」을 누를 때 그 사이 아무 명령도 없었으면(게임 상태가 그대로면) 그 결과를 씀 — 덜 끝났으면 이어서 끝냄. 명령을 내리면 게임 상태가 새로 바뀌므로 버리고 다시 계산
   const spec = useRef(null);
