@@ -1410,6 +1410,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
     LC.drawAvg = LC.drawAvg ? LC.drawAvg * 0.8 + dt * 0.2 : dt;
     LC.frames = (LC.frames || 0) + 1; LC.drawSum = (LC.drawSum || 0) + dt;
     const rest = LC.drawAvg > 24 ? Math.min(60, LC.drawAvg * 0.5) : 0;
+    // 군주들이 생각하는 동안엔 지도를 멈춰 둠 (끊겨 보이지 않고, 계산도 빨라짐) — 다 끝나면 다시 움직임
+    if (thinkingRef.current && playingRef.current) return;
     if (lively) { if (rest) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, rest); else raf.current = requestAnimationFrame(draw); }
     else if (busy) ambT.current = setTimeout(() => { raf.current = requestAnimationFrame(draw); }, Math.max(80, rest));
   };
@@ -1690,7 +1692,11 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [thinking, setThinking] = useState(null);
   const thinkShow = useRef(0);
   const thinkT0 = useRef(0);
-  const onThink = (nid, k, n) => { const now = performance.now(); if (now - thinkT0.current < 150 || now - thinkShow.current < (isPhone() ? 400 : 120)) return; thinkShow.current = now; setThinking({ nid, k, n }); };
+  // 군주 얼굴이 차례로 넘어가며 로딩 대신 보임 — 얼굴이 너무 빨리 바뀌지 않게 0.35초에 한 번
+  const thinkHist = useRef([]);
+  const thinkingRef = useRef(null); thinkingRef.current = thinking;
+  useEffect(() => { if (!thinking) thinkHist.current = []; }, [thinking]);
+  const onThink = (nid, k, n) => { const now = performance.now(); if (now - thinkT0.current < 150 || now - thinkShow.current < 350) return; thinkShow.current = now; const h = thinkHist.current; if (h[h.length - 1] !== nid) { h.push(nid); if (h.length > 4) h.shift(); } setThinking({ nid, k, n }); };
   // 미리 계산: 하루가 끝나고 가만히 있으면 다음 하루를 뒤에서 (잘게 나눠) 계산해 둠.
   // 「하루 진행」을 누를 때 그 사이 아무 명령도 없었으면(게임 상태가 그대로면) 그 결과를 씀 — 덜 끝났으면 이어서 끝냄. 명령을 내리면 게임 상태가 새로 바뀌므로 버리고 다시 계산
   const spec = useRef(null);
@@ -2799,10 +2805,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
           {toastMsg && <div className="toast">{toastMsg}</div>}
           {thinking && playing && (() => {
             const n = game.nations[thinking.nid], g = Object.values(game.generals).find((x) => x.nation === thinking.nid && x.ruler);
+            // 얼굴 하나: 군주가 없으면 나라 색 동그라미에 나라 이름 첫 글자
+            const face = (nid, cls) => { const n2 = game.nations[nid]; if (!n2) return null; const g2 = Object.values(game.generals).find((x) => x.nation === nid && x.ruler); return g2 ? <img key={`${nid}`} className={cls} src={portraitURL(g2, n2.color)} alt="" style={{ borderColor: n2.color }} /> : <span key={`${nid}`} className={cls + ' think-flag'} style={{ background: n2.color }}>{n2.name[0]}</span>; };
+            const prev = thinkHist.current.filter((x) => x !== thinking.nid).slice(-3);
             return n ? (
               <div className="h14-think">
-                {g && <img src={portraitURL(g, n.color)} alt="" width={40} height={40} />}
-                <div><b style={{ color: n.color }}>{n.name}</b>{g ? ` ${g.name}` : ''}<small>다음 수를 생각하는 중… {thinking.k}/{thinking.n}</small></div>
+                <div className="think-faces">{prev.map((x) => face(x, 'think-prev'))}{face(thinking.nid, 'think-cur')}</div>
+                <div className="think-txt" key={thinking.nid}><b style={{ color: n.color }}>{n.name}</b>{g ? ` ${g.name}` : ''}<small>생각하는 중… ({thinking.k}/{thinking.n})</small></div>
                 <div className="h14-think-bar"><div style={{ width: `${Math.round((thinking.k / Math.max(1, thinking.n)) * 100)}%` }} /></div>
               </div>
             ) : null;
