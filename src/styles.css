@@ -492,7 +492,7 @@ button.ord-row:hover:not(:disabled) { background: var(--panel2); }
 .think-flag { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; border-color: #fff6 !important; }
 .think-cur.think-flag { font-size: 22px; }
 .think-txt { animation: txtIn .25s ease-out; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.h14-think { min-width: 270px; max-width: calc(100vw - 32px); }
+.h14-think { min-width: 270px; max-width: calc(100vw - 32px); background: rgba(18,21,28,.95); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); } /* 지도 글자가 비쳐 읽기 어렵지 않게 */
 .h14-think .think-txt small { white-space: nowrap; }
 @keyframes faceIn { from { opacity: 0; transform: translateX(26px) scale(.6) rotateY(70deg); } to { opacity: 1; transform: none; } }
 @keyframes txtIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
