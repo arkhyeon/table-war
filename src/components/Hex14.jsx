@@ -1936,7 +1936,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     { title: '🏯 성 정보', target: '.h14-panel .stat-tiles', before: () => { if (!(sel?.type === 'castle' && game.castles[sel.id]?.owner === pid) && capC) goTo(capC); setSheet(true); }, body: <>수비병·성벽·인구·수입이 한눈에. 인구를 뽑아 징병하면 그만큼 금 수입이 줄어요(바닥나면 절반).</> },
     { title: '⚔️ 출진', target: '.h14-panel .big-act', before: () => { if (!(sel?.type === 'castle' && game.castles[sel.id]?.owner === pid) && capC) goTo(capC); setSheet(true); }, wait: () => sortieOpen, doIt: '「⚔️ 출진」을 누르세요', body: <>출진은 장수(최대 3명)가 병사를 데리고 성 밖으로 나가는 거예요. 전쟁은 결국 <b>병사 수</b> 싸움이에요.</> },
     { title: '🧑‍✈️ 장수 고르고 내보내기', target: (n) => { const go = document.querySelector('.sortie-go'); if (n < 3) go?.scrollIntoView({ block: 'center', behavior: 'smooth' }); return (go?.parentElement || document.querySelector('.h14-panel .act-card'))?.getBoundingClientRect(); }, before: () => { tourBase.current.units = myUnitN; setSheet(true); if (!sortieOpen) setSortieOpen(true); }, wait: () => myUnitN > (tourBase.current.units ?? myUnitN), doIt: '장수를 고르고 아래 「출진」을 누르세요', body: <>무력·통솔이 높은 장수가 잘 싸워요. 장수가 많을수록(최대 3명) 더 많은 병사를 데려가고 공·방이 오릅니다. 막대로 데려갈 병사 수를 정해요.</> },
-    { title: '🎯 적 성 공략', target: foeC ? mapRect(foeC.tile, 170, 130) : null, before: () => { setSheet(false); focusOn(foeC?.tile); }, wait: () => game.units.some((u) => u.nation === pid && u.order && (u.order.kind !== 'castle' || game.castles[u.order.id]?.owner !== pid)), doIt: foeC ? `부대가 골라진 채로 ${foeC.name}(${game.nations[foeC.owner]?.name})을 누르세요` : '지도에서 갈 곳을 누르세요', body: <>부대(깃발)를 고른 뒤 지도를 누르면: 빈 땅은 <b>이동</b>, 적 부대는 <b>공격</b>, 적 성은 <b>공략</b>. 진로 끝 <b>○일</b>이 도착 예정일이고, 지나간 칸은 내 땅이 됩니다.</> },
+    { title: '🎯 적 성 공략', target: foeC ? mapRect(foeC.tile, 170, 130) : null, before: () => { setSheet(false); focusOn(foeC?.tile); if (sel?.type !== 'unit' || game.units.find((u) => u.id === sel.id)?.nation !== pid) { const mine = game.units.filter((u) => u.nation === pid && !u.order); if (mine.length) setSel({ type: 'unit', id: mine[mine.length - 1].id }); } }, wait: () => game.units.some((u) => u.nation === pid && u.order && (u.order.kind !== 'castle' || game.castles[u.order.id]?.owner !== pid)), doIt: foeC ? `부대가 골라진 채로 ${foeC.name} 성(${game.nations[foeC.owner]?.name})을 누르세요` : '지도에서 갈 곳을 누르세요', body: <>부대(깃발)를 고른 뒤 지도를 누르면: 빈 땅은 <b>이동</b>, 적 부대는 <b>공격</b>, 적 성은 <b>공략</b>. 진로 끝 <b>○일</b>이 도착 예정일이고, 지나간 칸은 내 땅이 됩니다.</> },
     { title: '▶ 시간 진행', target: '.end-turn-box', before: () => { tourBase.current.day = nowDay; setSheet(false); }, wait: () => nowDay > (tourBase.current.day ?? nowDay) && !playing, doIt: '「하루 진행」을 눌러 보세요', body: <>누를 때마다 모든 나라가 하루씩 동시에 움직여요. <b>－/＋</b>로 한 번에 며칠(최대 10일), <b>⏩ 순 끝까지</b>는 이번 순 끝까지. PC는 <kbd>Space</kbd>.</> },
     { title: '✅ 할 일 목록', target: '.todo-btn', body: <>위험한 성, 멈춘 부대, 등용할 인재, 끝나가는 약조, 빈 담당처럼 <b>챙길 일</b>을 모아 줘요. 줄을 누르면 그곳으로, 버튼으로 바로 처리. 순마다 저절로 열립니다.</> },
     { title: '📋 세력·외교·인재 탭', target: '.tabs-top', before: () => { setSel(null); setTab('home'); setSheet(true); }, body: <><b>세력</b>: 빠른 작업·내 성 표·정책 · <b>외교</b>: 정전·동맹·친선 · <b>인재</b>: 장수 목록·등용·포로 · <b>기록</b>: 지난 소식. PC는 <kbd>1</kbd>~<kbd>5</kbd>.</> },
@@ -2551,7 +2551,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               <input type="search" id="help-q" className="help-search" placeholder="🔍 도움말 검색 (예: 망루, 정전, 보급)" value={helpQ} onChange={(e) => setHelpQ(e.target.value)} />
               {helpQ.trim() && helpHits === 0 && <div className="help-none">「{helpQ.trim()}」에 맞는 도움말이 없습니다.</div>}
               내 도시를 눌러 <b>출진</b>하고, 깃발(부대)을 고른 뒤 지도를 눌러 명령하세요. <b>하루 진행</b>을 누를 때마다 모든 부대가 하루씩 함께 움직이니 매일 명령을 바꿀 수 있습니다. 수입·수확 정산은 10일(1순)마다, 「⏩ 순 끝까지」는 한 번에 넘김.
-              <button className="primary" style={{ width: '100%', margin: '6px 0' }} onClick={() => { setTourOn(true); setSheet(false); }}>🎓 게임 안내 다시 보기</button>
+              <button className="primary" style={{ width: '100%', margin: '6px 0' }} onClick={() => { setTourOn(true); setSheet(false); setPeek(false); }}>🎓 게임 안내 다시 보기</button>
               <div className="kbd-help">⌨️ PC 단축키: <kbd>Space</kbd> 진행(고른 날 수) · <kbd>Shift</kbd>+<kbd>Space</kbd> 순 끝까지 · <kbd>1</kbd>~<kbd>5</kbd> 탭 · <kbd>T</kbd> 할 일 · <kbd>P</kbd> 패널 접기 · <kbd>Esc</kbd> 선택 해제</div>
               <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
                 <li>부대가 지나간 칸은 내 땅. 도시는 관할(점선 안) 땅을 매 순 조금씩 넓히고, 내 땅 비율만큼 금·병량이 들어옵니다.</li>
@@ -2858,7 +2858,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
               ))}
             </div>
           )}
-          {tourOn && <HexTour steps={tourSteps} onClose={() => { setTourOn(false); setSel(null); setTab('home'); }} />}
+          {tourOn && <HexTour steps={tourSteps} paused={!playing && !game.over && !!(game.inbox?.length || game.eventsQ?.length || (report && reportOpen))} onClose={() => { setTourOn(false); setSel(null); setTab('home'); }} />}
           {game.over && (
             <div className="h14-over">
               {game.over.winner === pid ? '🏆 천하통일!' : game.over.lost ? '💀 멸망' : `${game.nations[game.over.winner]?.name} 천하통일`}

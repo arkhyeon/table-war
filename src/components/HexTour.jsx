@@ -8,7 +8,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 export const TOUR_KEY = 'h14-tour-done';
 export const tourSeen = () => { try { return localStorage.getItem(TOUR_KEY) === '1'; } catch { return true; } };
 
-export default function HexTour({ steps, onClose }) {
+export default function HexTour({ steps, onClose, paused = false }) {
+  // paused: 사신·사건 창이 떠 있는 동안은 투어를 잠깐 숨김 (창을 먼저 처리하고, 닫히면 그 단계부터 이어서)
   const [i, setI] = useState(0);
   const [rect, setRect] = useState(null);
   const [vw, setVw] = useState(() => window.innerWidth);
@@ -38,14 +39,29 @@ export default function HexTour({ steps, onClose }) {
     id = setTimeout(measure, 60);
     return () => clearTimeout(id);
   }, [i]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 창이 닫혀 다시 보일 때 대상 위치를 새로 잼 (그새 화면이 바뀌었을 수 있음)
+  useEffect(() => {
+    if (paused) return;
+    let n = 0, id;
+    const re = () => {
+      const cur = stepsRef.current[i]; if (!cur) return;
+      let r = null;
+      if (typeof cur.target === 'function') r = cur.target(6);
+      else if (cur.target) r = document.querySelector(cur.target)?.getBoundingClientRect();
+      setRect(r && r.width && r.height ? { x: r.left, y: r.top, w: r.width, h: r.height } : null);
+      if (++n < 4) id = setTimeout(re, 150);
+    };
+    id = setTimeout(re, 60);
+    return () => clearTimeout(id);
+  }, [paused]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onR = () => { setVw(window.innerWidth); setI((x) => x); };
     window.addEventListener('resize', onR);
-    const onKey = (e) => { if (e.key === 'Escape') finish(); else if (e.key === 'ArrowRight' || e.key === 'Enter') next(); else if (e.key === 'ArrowLeft') prev(); };
+    const onKey = (e) => { if (paused) return; if (e.key === 'Escape') finish(); else if (e.key === 'ArrowRight' || e.key === 'Enter') next(); else if (e.key === 'ArrowLeft') prev(); };
     window.addEventListener('keydown', onKey, true);
     return () => { window.removeEventListener('resize', onR); window.removeEventListener('keydown', onKey, true); };
   });
-  useLayoutEffect(() => { if (bubble.current) setBh(bubble.current.offsetHeight); }, [i, rect, vw]);
+  useLayoutEffect(() => { if (bubble.current) setBh(bubble.current.offsetHeight); }, [i, rect, vw, paused]);
 
   const finish = () => { try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* 무시 */ } onClose(); };
   const next = () => (i < steps.length - 1 ? setI(i + 1) : finish());
@@ -64,9 +80,13 @@ export default function HexTour({ steps, onClose }) {
     else if (vw - rect.x - rect.w > bw + 24) { bx = rect.x + rect.w + 12; by = Math.max(12, Math.min(vh - bh - 12, rect.y)); }
     else by = Math.max(12, vh - bh - 12);
   }
+  if (paused) return null;
+  // 비추는 칸은 화면 안으로 (가장자리 대상이 화면 밖으로 삐져나가지 않게)
+  const hl = rect && Math.max(2, rect.x - 6), ht = rect && Math.max(2, rect.y - 6);
+  const hr = rect && Math.min(vw - 2, rect.x + rect.w + 6), hb = rect && Math.min(vh - 2, rect.y + rect.h + 6);
   return (
     <div className="tour" role="dialog" aria-modal="true" aria-label="게임 안내">
-      {rect ? <div className="tour-hole" style={{ left: rect.x - 6, top: rect.y - 6, width: rect.w + 12, height: rect.h + 12 }} /> : <div className="tour-dim" />}
+      {rect ? <div className="tour-hole" style={{ left: hl, top: ht, width: hr - hl, height: hb - ht }} /> : <div className="tour-dim" />}
       <div ref={bubble} className="tour-bubble" style={{ left: bx, top: by, width: bw }}>
         <div className="tour-step">{i + 1} / {steps.length}</div>
         <h3>{st.title}</h3>
