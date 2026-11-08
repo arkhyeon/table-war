@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILD, versionText } from '../version.js';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
@@ -67,10 +67,13 @@ export default function Setup({ onStart, onResume, hasSave }) {
     }, 60);
   };
   const nameOf = (n) => names[n.id] || n.name;
+  const nationRef = useRef(null);
   const pick = (id) => {
     setScnId(id);
     setPlayer(0);
     setNames({});
+    // 시나리오를 고르면 바로 나라 고르기로 (시나리오 목록이 길어 한참 내려야 했음)
+    setTimeout(() => nationRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   };
 
   return (
@@ -192,7 +195,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
             </select>
           </label>
         </div>
-        <h3>3. 국가 선택</h3>
+        <h3 ref={nationRef} style={{ scrollMarginTop: 12 }}>3. 국가 선택</h3>
         <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>나라 이름은 ✏️로 바꿀 수 있습니다. 장수 이름은 게임 중 장수 목록에서 바꿉니다.</p>
         <div className="setup-body">
           <div className="preview" style={{ position: 'relative' }}>
@@ -236,9 +239,9 @@ export default function Setup({ onStart, onResume, hasSave }) {
             })}
           </div>
         </div>
-        <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
-          <span className="muted">
-            {world ? `육지 ${world.landCount}곳 · 바다 ${world.regions.length - world.landCount}구역` : ''} · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
+        <div className="row start-bar">
+          <span className="muted start-sel">
+            <b style={{ color: 'var(--text)' }}>{scn.name}</b> · 선택: <b style={{ color: 'var(--text)' }}>{preview && nameOf(preview.nations[pid])}</b>
           </span>
           <button className="sm" disabled={!ready} onClick={() => start(false, false)} title="지역 단위로 행동력을 써서 싸우는 예전 방식">
             🗺️ 지역 모드(구버전)

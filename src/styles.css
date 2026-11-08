@@ -772,3 +772,33 @@ details.sub-card > summary small { margin-left: auto; overflow: hidden; text-ove
 .tip-more > summary { cursor: pointer; color: var(--muted); }
 .tip-more > div { margin-top: 4px; font-size: 11.5px; line-height: 1.5; }
 @media (max-width: 760px) { .unit-hint .uh-tx .muted { display: none; } }
+/* ── 가이드 투어 ── */
+.tour { position: fixed; inset: 0; z-index: 900; pointer-events: none; }
+.tour-dim { position: fixed; inset: 0; background: rgba(5, 8, 12, 0.62); pointer-events: auto; }
+.tour-hole { position: fixed; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(5, 8, 12, 0.62), 0 0 0 3px #ffb347, 0 0 24px 4px #ffb34788; transition: all 0.25s ease; pointer-events: none; }
+.tour-bubble { position: fixed; pointer-events: auto; background: var(--panel, #1a1d22); border: 1px solid var(--line2, #3a3f47); border-radius: 16px; padding: 14px 16px 12px; box-shadow: 0 16px 40px #000b; transition: left 0.25s ease, top 0.25s ease; color: var(--text); }
+.tour-bubble h3 { margin: 2px 0 6px; font-size: 16px; }
+.tour-step { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.04em; }
+.tour-body { font-size: 13.5px; line-height: 1.6; }
+.tour-body kbd { padding: 0 5px; border: 1px solid var(--line2, #444); border-bottom-width: 2px; border-radius: 4px; font-size: 11px; background: var(--panel2, #222); }
+.tour-dots { display: flex; gap: 4px; margin: 10px 0 8px; }
+.tour-dots i { width: 7px; height: 7px; border-radius: 50%; background: #ffffff26; }
+.tour-dots i.done { background: #ffb34788; }
+.tour-dots i.on { background: #ffb347; width: 18px; border-radius: 4px; }
+.tour-btns { display: flex; gap: 6px; align-items: center; }
+/* 설정 화면: 게임 시작 막대를 화면 아래에 붙여 둠 */
+.start-bar { position: sticky; bottom: 0; z-index: 5; margin-top: 14px; justify-content: flex-end; gap: 8px; padding: 10px 12px; background: var(--glass, #15171bee); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 -8px 24px #0007; flex-wrap: wrap; }
+.start-bar .start-sel { margin-right: auto; min-width: 0; }
+@media (max-width: 760px) { .start-bar .start-sel { flex: 0 0 100%; } .start-bar button.primary { flex: 1; } }
+/* 오늘의 소식 카드 */
+.news-stack { position: absolute; left: 10px; bottom: 80px; z-index: 7; display: flex; flex-direction: column-reverse; gap: 6px; width: min(340px, calc(100% - 90px)); pointer-events: none; }
+.news-card { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border-radius: 12px; background: var(--glass, #15171bee); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line2, #333); border-left: 4px solid #ffd166; font-size: 13px; box-shadow: 0 6px 18px #0008; animation: newsIn 0.25s ease-out; }
+.news-card.good { border-left-color: #8fe08a; }
+.news-card.bad { border-left-color: #ff6b5a; }
+.news-ic { font-size: 16px; flex: 0 0 auto; }
+.news-tx { flex: 1; min-width: 0; line-height: 1.35; }
+.news-card .xs { padding: 3px 7px; flex: 0 0 auto; }
+.news-x { opacity: 0.7; }
+@keyframes newsIn { from { transform: translateX(-12px); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (max-width: 760px) { .news-stack { bottom: 76px; left: 8px; width: calc(100% - 70px); } .news-card { font-size: 12.5px; } }
+.kv b.up { color: #8fe08a; } .kv b.warn { color: #f0c24b; } .kv b.down { color: #ff8a7a; }
