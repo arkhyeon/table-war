@@ -149,8 +149,7 @@ export function outlawSack(s, grid, c, u) {
   c.bandit = null;
   c.capital = false;
   if (c.jobs) c.jobs = { farm: null, trade: null, draft: null };
-  // 도적에게 털린 성은 폐허: 흩어졌던 백성만 조금 모임 (예전엔 처음 빈 성만큼 1.8~4.5만이 새로 생겨, 털린 성을 아무도 못 되찾아 지역사에서 빈 성이 수백 순 남았음 — 통일 시험)
-  c.troops = c.kind === 'pass' ? 3000 : Math.round(Math.min(12000, 4000 + (c.pop || 0) * 40) / 100) * 100;
+  c.troops = c.kind === 'pass' ? 3000 : Math.round(Math.min(45000, 18000 + (c.pop || 0) * 180) / 100) * 100;
   c.dur = Math.max(c.dur, c.maxDur * 0.3);
   const tiles = c.kind === 'pass' ? [c.tile, ...grid.nb[c.tile]] : districtTiles(s)[c.id] || [];
   for (const t of tiles) if (s.owner[t] === old) s.owner[t] = -1;

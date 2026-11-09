@@ -915,8 +915,7 @@ export function orderNew(s, grid, u, kind, id) {
 export const absDay = (s) => s.turn * DAYS + s.day;
 // 성 수용 한도: 한 성에 무한정 쌓이지 않게 (넘는 병력은 순마다 15%씩 흩어짐 — 남는 병력은 부대로 내보내야 함)
 // 수용 병력 = 성 자체 수용 + 그 성 장수 중 출진 병력을 가장 많이 데리고 나갈 수 있는 3명의 출진 병력
-// 장수가 늘리는 수용: 가장 높은 장수는 지휘 한도만큼, 둘째·셋째는 절반씩 (부대 지휘 한도와 같은 셈 — 예전엔 셋 다 온전히 더해 성 하나에 20만 넘게 쌓여 어떤 부대로도 못 뚫었음)
-export const genRoom = (s, c) => (s ? Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').map((g) => 8000 + g.lead * 800).sort((a, b) => b - a).slice(0, 3).reduce((a, x, i) => a + (i ? x * 0.5 : x), 0) : 0);
+export const genRoom = (s, c) => (s ? Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').map((g) => 8000 + g.lead * 800).sort((a, b) => b - a).slice(0, 3).reduce((a, x) => a + x, 0) : 0);
 export const capOf = (c, s) => (c.kind === 'pass' ? 30000 : Math.max(40000, Math.round((c.pop || 0) * 600)) + lv(c, 'wall') * 10000) + genRoom(s, c);
 export const roomOf = (c, s) => Math.max(0, capOf(c, s) - c.troops);
 // 포위: 적 부대가 성 바로 옆에 있음

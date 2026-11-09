@@ -5,7 +5,7 @@ import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
 import { aiPeople } from './hex14people.js';
 import { makeRng } from './rng.js';
-import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost } from './hex14.js';
+import { sortie, order, nearestCastle, commandCap, gensOf, draft14, draftMax14, enemy, buildSiege, SIEGE_COST, sendTroops, summonGeneral, roomOf, draftCost, findPath } from './hex14.js';
 
 export const GRACE = 9;
 // 플레이어 숨 돌릴 틈: 보통 9순, 도시 3개 이하 작은 나라로 시작하면 1년(36순)
@@ -128,7 +128,12 @@ export function chooseStrategy(s, grid, nid) {
   let k, focus = null;
   // 후반 결전: 1등이 넓게 앞서면 남은 이웃 중 가장 센 맞수(속국 아닌 나라)를 정면으로 노림 — 잔존 세력만 두드리며 교착되지 않게
   const bigRival = pool.filter((x) => lordOf(s, x) === null).sort((a, b) => citiesOf(s, b) - citiesOf(s, a))[0];
-  if (top.id === nid && topShare >= 0.35 && bigRival !== undefined && citiesOf(s, bigRival) >= 3) {
+  // 끝판 결전: 1등인데 오래(24순) 도시가 늘지 않으면, 이웃 큰 나라(도시 3곳 이상) 가운데 가장 약한 하나에 전력을 모음 (통일 시험: 비슷한 셋이 수백 순 교착)
+  const bigWeak = pool.filter((x) => lordOf(s, x) === null && citiesOf(s, x) >= 3).sort((a, b) => powerOf(s, a) - powerOf(s, b))[0];
+  if (top.id === nid && topShare >= 0.2 && s.turn - (n.stallSince ?? s.turn) >= 24 && bigWeak !== undefined) {
+    k = 'blitz';
+    focus = bigWeak;
+  } else if (top.id === nid && topShare >= 0.35 && bigRival !== undefined && citiesOf(s, bigRival) >= 3) {
     k = 'blitz';
     focus = bigRival;
   } else if (top.id === nid && topShare >= 0.22) {
@@ -240,7 +245,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const busyWars = new Set(s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle').map((u) => s.castles[u.order.id]?.owner).filter((o) => o !== null && o !== undefined && o >= 0 && o !== nid && o !== heg)).size;
     if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && busyWars < 2 && makeRng(`heg:${s.seed}:${s.turn}:${nid}`)() < 0.5 && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
   }
-  if (!scope && (!n.strat || s.turn - (n.stratAt || 0) >= 36 || Math.abs(citiesOf(s, nid) - (n.stratCities ?? 0)) >= 3)) {
+  const leaderStall = !scope && s.turn - (n.stallSince ?? s.turn) >= 24 && n.strat !== 'blitz' && s.turn - (n.stratAt || 0) >= 12; // 정체한 1등은 결전을 고를 수 있게 다시 생각
+  if (!scope && (!n.strat || leaderStall || s.turn - (n.stratAt || 0) >= 36 || Math.abs(citiesOf(s, nid) - (n.stratCities ?? 0)) >= 3)) {
     chooseStrategy(s, grid, nid);
     n.stratCities = citiesOf(s, nid);
   }
@@ -454,6 +460,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     }
   }
   if (daily) return;
+  // 3.7) 바다 건너 원정: 다른 땅덩이(대륙·섬)에 빈 성이나 약한 나라 성이 있으면 항구에서 배를 띄워 침 (예전엔 바다 건너는 아무도 안 가서 세계판은 아메리카가 끝까지 남아 통일이 안 됐음)
+  if (!scope) overseas(s, grid, nid, n, mine, mark);
   // 4) 시장: 병량이 3년 치 넘게 쌓이고 금이 모자라면 팔고, 금이 넘치는데 병량이 모자라면 삼
   if (!scope) {
     const use = Math.max(1000, foodUse(s, nid));
@@ -516,6 +524,57 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   }
 }
 
+// 땅덩이 번호: 땅으로 이어진 칸끼리 같은 번호 (바다 건너인지 가림) — 지도마다 한 번
+const compCache = new WeakMap();
+function landComp(grid) {
+  let comp = compCache.get(grid);
+  if (comp) return comp;
+  comp = new Int32Array(grid.N).fill(-1);
+  let k = 0;
+  for (let i = 0; i < grid.N; i++) {
+    if (comp[i] >= 0 || !grid.passable(i)) continue;
+    const q = [i]; comp[i] = k;
+    while (q.length) { const t = q.pop(); for (const x of grid.nb[t]) if (comp[x] < 0 && grid.passable(x)) { comp[x] = k; q.push(x); } }
+    k++;
+  }
+  compCache.set(grid, comp);
+  return comp;
+}
+// 바다 건너 원정: 3순에 한 번, 도시 4곳 넘는 나라가 원정대 하나씩 (센 나라는 둘)
+function overseas(s, grid, nid, n, mine, mark) {
+  if ((s.turn + nid) % 3 || mine.length < 4) return;
+  const going = s.units.filter((u) => u.nation === nid && u.expedition && !u.dead).length;
+  const strong = powerOf(s, nid) >= Math.max(...s.nations.filter((m) => m.alive && !m.horde && !m.outlaw).map((m) => powerOf(s, m.id))) * 0.6;
+  if (going >= (strong ? 2 : 1)) return;
+  const comp = landComp(grid);
+  const home = new Set(mine.map((c) => comp[c.tile]));
+  const ports = mine.filter((c) => c.port && fighters(s, c).length && threatNear(s, grid, c) === 0);
+  if (!ports.length) return;
+  const myP = powerOf(s, nid), R = 70 * grid.k;
+  // 노릴 성: 우리 성이 없는 땅덩이의 빈 성, 또는 우리보다 훨씬 약한 나라의 성
+  const cands = s.castles.filter((x) => x.kind !== 'pass' && !home.has(comp[x.tile]) && (x.owner === null || (x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && !s.nations[x.owner]?.outlaw && powerOf(s, x.owner) < myP * 0.7))
+    && !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && !s.units.some((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === x.id));
+  if (!cands.length) return;
+  let best = null;
+  for (const p of ports) {
+    const gids = fighters(s, p).slice(0, 3).map((g) => g.id);
+    const spare = Math.floor(Math.min(commandCap(s, gids), p.troops - Math.max(4000, p.troops * 0.35)) / 1000) * 1000;
+    if (spare < 8000) continue;
+    for (const x of cands) {
+      const d = grid.dist(p.tile, x.tile);
+      if (d > R) continue;
+      const guard = x.troops * (x.dur > x.maxDur * 0.3 ? 1.5 : 1) * 1.4; // 바다 건너는 원군이 없으니 넉넉히
+      if (guard > spare) continue;
+      const v = d / grid.k + x.troops / 2000 - (x.owner === null ? 4 : 0);
+      if (!best || v < best.v) best = { p, x, gids, spare, v };
+    }
+  }
+  if (!best || !findPath(s, grid, best.p.tile, best.x.tile, nid, true)) return;
+  const r = sortie(s, grid, best.p.id, best.gids, best.spare);
+  if (!r.ok) return;
+  if (order(s, grid, mark(r.unit), 'castle', best.x.id).ok) r.unit.expedition = true;
+  else order(s, grid, r.unit, 'castle', best.p.id); // 길이 없으면 바로 돌아옴
+}
 // 교착: 도시가 늘지 않은 지 8순 뒤부터 조금씩 과감해짐 (40순에 걸쳐 최대 45%) — 예전(12순 뒤·60순·35%)엔 대국끼리 수백 순 교착
 const stallOf = (s, n) => Math.max(0, Math.min(0.45, (s.turn - (n.stallSince ?? s.turn) - 8) / 40));
 // 노릴 성: 가까우면서(25칸 이내) 수비가 내 병력보다 약한 남의 성

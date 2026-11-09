@@ -142,13 +142,14 @@ export function vassalTurn(s, grid, rng) {
     if (!n.alive || n.horde || (n.id === s.playerId && !s.spectator) || lordOf(s, n.id) !== null || vassalsOf(s, n.id).length) continue;
     const mine = s.castles.filter((c) => c.owner === n.id);
     if (!mine.length || mine.length > 3) continue;
-    // 적 부대가 우리 성 앞까지 왔으면 훨씬 자주 (멸망 직전에 강국에 기댐)
+    // 적 부대가 우리 성 앞까지 왔으면 훨씬 자주 (멸망 직전에 강국에 기댐) — 도시 2곳 이하는 처음부터 서둘러 기댐 (통일 시험: 2성 나라가 16순 만에 멸망)
     const pressed = s.units.some((u) => u.nation !== n.id && enemy(s, n.id, u.nation) && mine.some((m) => grid.dist(m.tile, u.tile) <= 4 * grid.k));
-    if (rng() > (pressed ? 0.2 : 0.05)) continue;
+    const tiny = mine.length <= 2;
+    if (rng() > (tiny ? (pressed ? 0.5 : 0.25) : pressed ? 0.2 : 0.05)) continue;
     const near = new Set();
     for (const c of s.castles) if (c.owner !== null && c.owner !== n.id && s.nations[c.owner]?.alive && mine.some((m) => grid.dist(m.tile, c.tile) <= 10 * grid.k)) near.add(c.owner);
-    const strong = [...near].filter((x) => powerOf(s, x) > powerOf(s, n.id) * 2.5).sort((a, b) => powerOf(s, b) - powerOf(s, a));
-    if (strong.length >= 1 && (strong.length >= 2 || pressed || rng() < 0.4)) askProtection(s, n.id, strong[0], rng);
+    const strong = [...near].filter((x) => powerOf(s, x) > powerOf(s, n.id) * (tiny ? 2 : 2.5)).sort((a, b) => powerOf(s, b) - powerOf(s, a));
+    if (strong.length >= 1 && (tiny || strong.length >= 2 || pressed || rng() < 0.4)) askProtection(s, n.id, strong[0], rng);
   }
 }
 
