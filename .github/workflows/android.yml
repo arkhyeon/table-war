@@ -1,0 +1,48 @@
+# 안드로이드 앱(APK) 만들기: main에 올릴 때마다 새로 만들어 릴리스 「android-latest」에 올림
+# 폰에서 받기: https://github.com/arkhyeon/table-war/releases/download/android-latest/table-war.apk
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 판 번호(커밋 수)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm ci
+      - run: npm run build
+      - run: npm i --no-save @capacitor/cli@6 @capacitor/core@6 @capacitor/android@6
+      - run: npx cap add android
+      - run: node scripts/android-prep.mjs
+      # 늘 같은 서명 열쇠로 서명해야 새 APK를 지우지 않고 덮어 설치할 수 있음 (저장이 남음)
+      - run: mkdir -p ~/.android && cp android-res/debug.keystore ~/.android/debug.keystore
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk table-war.apk
+          gh release delete android-latest -y --cleanup-tag || true
+          gh release create android-latest table-war.apk --target "$GITHUB_SHA" --title "Table War 안드로이드 앱 (최신)" --notes "폰에서 table-war.apk를 받아 설치하세요 (처음 한 번 '출처를 알 수 없는 앱' 허용). 인터넷 없이 실행됩니다. 새 판은 그냥 덮어 설치하면 저장이 그대로 남아요."

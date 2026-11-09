@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILD, versionText } from '../version.js';
 import InstallCard from './InstallCard.jsx';
+import { pref, setPref } from '../prefs.js';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
 import SaveSlots from './SaveSlots.jsx';
@@ -31,6 +32,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [showSaves, setShowSaves] = useState(false);
   const [cloudHas, setCloudHas] = useState(false); // 클라우드에 저장이 있으면 이어하기 버튼을 보임
   useEffect(() => { let on = true; cloudList(SLOT_COUNT).then((m) => on && setCloudHas(Object.keys(m).length > 0)); return () => { on = false; }; }, []);
+  const [motion, setMotion] = useState(() => pref('motion', true));
   const [rules, setRules] = useState({ revealMap: true, revealTroops: true, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
@@ -229,6 +231,9 @@ export default function Setup({ onStart, onResume, hasSave }) {
               <input type="checkbox" checked={rules[k]} onChange={(e) => setRules({ ...rules, [k]: e.target.checked })} /> {label}
             </label>
           ))}
+          <label title="비·눈·바람 효과와 깃발 흔들림. 끄면 배터리·발열이 줄어요 (이 기기에 저장, 게임 중 ⋯ 메뉴의 🌦️로도 바꿈)">
+            <input type="checkbox" checked={motion} onChange={(e) => { setPref('motion', e.target.checked); setMotion(e.target.checked); }} /> 🌦️ 날씨·깃발 움직임
+          </label>
           <label title="컴퓨터 세수·초기 병력 보정">
             🎚️ 난이도{' '}
             <select value={rules.difficulty} onChange={(e) => setRules({ ...rules, difficulty: e.target.value })}>

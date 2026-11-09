@@ -1,0 +1,6 @@
+{
+  "appId": "io.github.arkhyeon.tablewar",
+  "appName": "Table War",
+  "webDir": "dist",
+  "android": { "backgroundColor": "#1b1d22" }
+}

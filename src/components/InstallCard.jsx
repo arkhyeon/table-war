@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 
 // 홈 화면에 앱처럼 설치: 크롬은 버튼 한 번, 아이폰은 사파리 공유 메뉴 안내, 설치를 못 하는 곳(미리보기 등)에선 게임 주소 안내
 const HOME = 'https://arkhyeon.github.io/table-war/';
+const APK = 'https://github.com/arkhyeon/table-war/releases/download/android-latest/table-war.apk';
+const isAndroid = () => /Android/i.test(navigator.userAgent);
 const standalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const framed = () => { try { return window.self !== window.top; } catch { return true; } };
 
 export default function InstallCard() {
   const [evt, setEvt] = useState(() => window.__installEvt || null);
-  const [hide, setHide] = useState(() => { try { return standalone() || localStorage.getItem('tw-install-hide') === '1'; } catch { return standalone(); } });
+  const [hide, setHide] = useState(() => { try { return standalone() || !!window.Capacitor || localStorage.getItem('tw-install-hide') === '1'; } catch { return standalone() || !!window.Capacitor; } });
   const [help, setHelp] = useState(false);
   useEffect(() => { const on = () => setEvt(window.__installEvt || null); window.addEventListener('tw-install', on); return () => window.removeEventListener('tw-install', on); }, []);
   if (hide) return null;
@@ -25,6 +27,7 @@ export default function InstallCard() {
             {away ? <>여기(미리보기)에선 설치가 안 돼요. 크롬·사파리로 <a href={HOME} target="_blank" rel="noreferrer">{HOME.replace('https://', '')}</a> 를 열고 설치하세요.</>
               : isIOS() ? <>사파리 아래쪽 <b>공유 버튼(□↑)</b> → <b>홈 화면에 추가</b>를 누르세요.</>
               : <>크롬 오른쪽 위 <b>⋮ 메뉴</b> → <b>홈 화면에 추가</b>(PC는 <b>앱 설치</b>)를 누르세요.</>}
+            {!isIOS() && <><br />안드로이드는 <a href={APK}>앱 파일(APK) 받기</a> — 받아서 설치하면 인터넷 없이 실행돼요 (처음 한 번 「출처를 알 수 없는 앱」 허용).</>}
           </small>
         )}
       </div>

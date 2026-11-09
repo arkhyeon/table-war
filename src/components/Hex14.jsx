@@ -22,6 +22,7 @@ import { weatherText, weatherAt, weatherShare, warmWeather, uniqueOf } from '../
 import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, foundCity, foundCheck, foundSpots, FOUND_COST, FOUND_TURNS, buildCost, FORTS, fortCheck, startFort, castleFortCheck } from '../game/hex14build.js';
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
+import { pref, setPref } from '../prefs.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
@@ -684,6 +685,9 @@ export default function Hex14({ world, game, setGame, onExit }) {
   const [draftAmt, setDraftAmt] = useState(0);
   const [playing, setPlaying] = useState(false);
   const playingRef = useRef(false); playingRef.current = playing;
+  // 날씨(비·눈·바람)·깃발 흔들림 효과 — 끄면 가만히 있을 때 지도를 다시 그리지 않아 배터리·발열이 줄어듦 (이 기기에 저장)
+  const [motion, setMotion] = useState(() => pref('motion', true));
+  const motionRef = useRef(true); motionRef.current = motion;
   // 군단(위임)은 뺌: 맡겨 두면 징병도 없이 돌진만 해서 쓸모가 없었음 — 예전 저장에 있던 군단은 풀어서 내가 다시 지휘
   useEffect(() => { if (game.corps?.length) setGame((g) => ({ ...g, corps: [], units: g.units.map((u) => (u.corps ? { ...u, corps: undefined } : u)) })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 다른 것을 고르거나 날이 흐르기 시작하면 성 작업 창은 닫음
@@ -1262,7 +1266,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
       const fx0 = cx - sz * 0.25;
       ctx.fillStyle = '#3a2a1a';
       ctx.fillRect(fx0 - sz * 0.08, top, sz * 0.14, sz * 3.2);
-      const wave = Math.sin(now / 260 + u.id) * sz * 0.12;
+      const wave = motionRef.current ? Math.sin(now / 260 + u.id) * sz * 0.12 : 0;
       ctx.beginPath();
       ctx.moveTo(fx0, top);
       ctx.lineTo(fx0 + fw, top + wave);
@@ -1389,7 +1393,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 날씨 효과 (화면 기준): 비 줄기·눈송이·바람
     // 날씨 효과는 화면 가운데 구역 날씨로
     const wk = (() => { const v = view.current; if (!v || !s.wx) return s.weather?.kind; let x = v.x + cw / v.k / 2; if (grid.wrap) x = ((x % grid.period) + grid.period) % grid.period; const t = pixelToCell(grid.size, grid.cols, grid.rows, x, v.y + ch / v.k / 2); return t >= 0 ? weatherAt(s, grid, t) : s.weather?.kind; })();
-    if (wk === 'rain' || wk === 'snow' || wk === 'wind') {
+    if (motionRef.current && (wk === 'rain' || wk === 'snow' || wk === 'wind')) {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const n = wk === 'rain' ? 90 : wk === 'snow' ? 70 : 24;
       for (let q = 0; q < n; q++) {
@@ -1402,7 +1406,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
     }
     // 움직임이 있을 때(부대 이동·글자·충돌)는 매 프레임, 가만히 있는 부대 깃발·날씨만 있을 땐 초당 약 12번만 다시 그림 (가만히 있어도 화면을 쉼 없이 그리지 않게)
     const lively = !!spotsRef.current || f < 1 || fx.current.length || pulses.current.length || (s.fx || []).some((e) => e.type === 'clash' || e.type === 'arrow');
-    const ambient = !lively && (wk === 'rain' || wk === 'snow' || wk === 'wind' || s.units.length);
+    const ambient = !lively && motionRef.current && (wk === 'rain' || wk === 'snow' || wk === 'wind' || s.units.length);
     const busy = lively || ambient;
     cancelAnimationFrame(raf.current); clearTimeout(ambT.current);
     // 아주 느린 폰에서만 장면 사이를 조금 쉼 (계산할 틈) — 부드러움이 먼저라 그림 시간의 절반만, 최대 0.06초
@@ -2756,6 +2760,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           <button className="icon" title="배경음악" onClick={() => { unlockAudio(); setAudio('bgm', !aud.bgm); setAud(audioOpt()); }}>{aud.bgm ? '🎵' : '🔇'}</button>
           <button className="icon" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
           <button className="icon" title={stopIdle ? "순 끝까지 넘길 때 내 부대가 도착하면 멈춤 (켬)" : "순 끝까지 넘길 때 부대가 도착해도 멈추지 않음 (끔)"} style={{ opacity: stopIdle ? 1 : 0.45 }} onClick={() => setStopIdle((v) => { try { localStorage.setItem('h14.stopIdle', v ? '0' : '1'); } catch {} return !v; })}>⏸️</button>
+          <button className="icon" title={motion ? '날씨·깃발 움직임 효과 (켬) — 끄면 배터리·발열이 줄어요' : '날씨·깃발 움직임 효과 (끔)'} aria-pressed={motion} style={{ opacity: motion ? 1 : 0.45 }} onClick={() => { const v = !motion; setPref('motion', v); setMotion(v); }}>🌦️</button>
           <button className="icon" title="진행 속도" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶' : '⏩'}</button>
           <button className="icon" title="나가기" onClick={onExit}>🚪</button>
         </div>
