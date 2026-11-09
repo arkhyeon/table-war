@@ -411,24 +411,27 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   if (!scope && nUnits() < maxUnits) {
     const ready = [];
     for (const c of mine) {
-      if (threatNear(s, grid, c) > 0) continue;
+      // 적 부대가 근처에 있어도(국경 성은 늘 그럼) 그 위협만큼 남기고 나머지는 보탬 — 예전엔 위협이 조금만 있어도 빠져 국경 대국끼리 영영 합동 공격을 못 했음 (통일 시험: 3강 교착)
+      const th = threatNear(s, grid, c);
       const gs = fighters(s, c);
       if (!gs.length) continue;
       const foeCastle = foeCastleNear(s, grid, nid, c, 8 * grid.k);
-      const spare = Math.floor((c.troops - Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.4)) / 1000) * 1000;
+      const spare = Math.floor((c.troops - Math.max(2500, c.troops * P.reserve * 0.8, foeCastle * 0.4, th * 1.2)) / 1000) * 1000;
       const gids = gs.slice(0, Math.min(3, gs.length)).map((g) => g.id);
       const troops = Math.min(commandCap(s, gids), spare);
       if (troops >= 5000) ready.push({ c, gids, troops });
     }
     if (ready.length >= 2) {
-      const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60));
+      const stall = stallOf(s, n);
       const need = 1.2 * (1 - stall);
-      const cands = s.castles.filter((x) => x.kind !== 'pass' && x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && frontier(s, grid, nid, x) <= 12 * grid.k)
+      // 빈 성(중립)도 합동으로 침 — 수비가 센 빈 성은 작은 나라 부대 하나로는 못 넘어 지역사에서 빈 성이 수백 순 남았음
+      const cands = s.castles.filter((x) => x.kind !== 'pass' && (x.owner === null || (x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner))) && frontier(s, grid, nid, x) <= 12 * grid.k)
         .filter((x) => !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && (wars.size < 3 || wars.has(x.owner) || x.owner === focus))
         .sort((a, b) => (b.owner === focus) - (a.owner === focus) || a.troops - b.troops);
       for (const x of cands.slice(0, 4)) {
-        const guard = (x.troops + s.units.filter((u) => u.nation === x.owner && grid.dist(u.tile, x.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0)) * (x.dur > x.maxDur * 0.3 ? 1.5 : 1);
-        const near = ready.filter((r) => grid.dist(r.c.tile, x.tile) <= 12 * grid.k).sort((a, b) => grid.dist(a.c.tile, x.tile) - grid.dist(b.c.tile, x.tile)).slice(0, 3);
+        const guard = (x.troops + (x.owner === null ? 0 : s.units.filter((u) => u.nation === x.owner && grid.dist(u.tile, x.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0))) * (x.dur > x.maxDur * 0.3 ? 1.5 : 1);
+        // 가까운 성 넷까지 힘을 모음 (셋으론 장수 많은 대국 거점 성을 못 넘었음)
+        const near = ready.filter((r) => grid.dist(r.c.tile, x.tile) <= 14 * grid.k).sort((a, b) => grid.dist(a.c.tile, x.tile) - grid.dist(b.c.tile, x.tile)).slice(0, 4);
         const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === x.id).reduce((a, u) => a + u.troops, 0);
         if (near.length < 2 || near.reduce((a, r) => a + r.troops, 0) + ours < guard * need) continue;
         for (const r of near) { const o = sortie(s, grid, r.c.id, r.gids, r.troops); if (o.ok) order(s, grid, mark(o.unit), 'castle', x.id); }
@@ -513,6 +516,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   }
 }
 
+// 교착: 도시가 늘지 않은 지 8순 뒤부터 조금씩 과감해짐 (40순에 걸쳐 최대 45%) — 예전(12순 뒤·60순·35%)엔 대국끼리 수백 순 교착
+const stallOf = (s, n) => Math.max(0, Math.min(0.45, (s.turn - (n.stallSince ?? s.turn) - 8) / 40));
 // 노릴 성: 가까우면서(25칸 이내) 수비가 내 병력보다 약한 남의 성
 // 전략: 노리는 나라(focus)의 성은 우선, 수성·사방 방어는 노리지 않는 나라는 건드리지 않음,
 // 다른 나라와 싸우느라 부대가 밖에 나가 있는 나라는 빈틈으로 봄
@@ -536,7 +541,7 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     const guard = c.troops + s.units.filter((u) => u.nation === c.owner && grid.dist(u.tile, c.tile) <= 3 * grid.k).reduce((a, u) => a + u.troops, 0);
     // 이미 그 성으로 가는 우리 부대와 힘을 합침
     const ours = s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === c.id).reduce((a, u) => a + u.troops, 0);
-    const stall = Math.max(0, Math.min(0.35, (s.turn - (n.stallSince ?? s.turn) - 12) / 60)); // 교착이 길수록 과감해짐 (최대 35%)
+    const stall = stallOf(s, n); // 교착이 길수록 과감해짐
     const need = (n.strat === 'blitz' ? 0.85 : n.strat === 'expand' || n.strat === 'ride' || n.strat === 'coalition' ? 0.95 : 1.05) * (1 - stall); // 적당히 이길 만하면 친다
     if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * need > (troops + ours) * P.bold) continue; // 수비보다 넉넉히 모였을 때만
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
