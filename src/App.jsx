@@ -32,9 +32,12 @@ export default function App() {
   const saveT = useRef(null), latest = useRef(null);
   useEffect(() => {
     const flush = () => { if (latest.current) { writeSave(latest.current); latest.current = null; } };
+    // 폰: 다른 앱으로 넘어가면(화면이 가려지면) 바로 저장 — 폰은 뒤로 간 앱을 창 닫기 신호 없이 꺼 버리는 일이 많음
+    const hide = () => { if (document.visibilityState === 'hidden') flush(); };
     window.addEventListener('beforeunload', flush);
     window.addEventListener('pagehide', flush);
-    return () => { window.removeEventListener('beforeunload', flush); window.removeEventListener('pagehide', flush); };
+    document.addEventListener('visibilitychange', hide);
+    return () => { window.removeEventListener('beforeunload', flush); window.removeEventListener('pagehide', flush); document.removeEventListener('visibilitychange', hide); };
   }, []);
   useEffect(() => {
     if (!game || !session || game.tutGame) return; // 튜토리얼 판은 자동 저장하지 않음 (진짜 저장을 덮지 않게)
