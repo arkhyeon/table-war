@@ -885,7 +885,9 @@ export function sortie(s, grid, castleId, gids, troops, siege = false) {
 
   // 성 옆 빈 칸에 나감
   const occ = unitAt(s);
-  const spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
+  let spot = grid.nb[c.tile].find((t) => grid.passable(t) && !occ.has(t) && !s.castles.some((x) => x.tile === t));
+  // 둘레가 모두 물인 섬 성(항구): 배를 띄워 물 위로 나감 (예전엔 나갈 자리가 없어 섬 성의 병력이 영영 갇혔음 — 통일 시험에서 32만이 섬에 묶임)
+  if (spot === undefined && c.port) spot = grid.nb[c.tile].find((t) => (grid.water[t] || grid.sea[t]) && !occ.has(t));
   if (spot === undefined) return { ok: false, msg: '성 주변에 나갈 자리가 없습니다.' };
   c.troops -= troops;
   const u = { id: s.nextUnit++, nation: c.owner, gens: gids, troops, max: troops, morale: 80, tile: spot, path: [], order: null, mp: 0, home: castleId, wait: 0, cd: 0, navy: !!c.port, ships: lv(c, 'shipyard') > 0 || undefined, atkB: hasPolicy(s, c.owner, 'military') ? 1.08 : undefined, siege: siege || undefined };
