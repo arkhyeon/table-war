@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Setup from './components/Setup.jsx';
 import Hex14 from './components/Hex14.jsx';
+import TouchTips from './components/TouchTips.jsx';
 import { generateWorld } from './game/mapgen.js';
 import { normalizeHex14 } from './game/hex14.js';
 import { getScenario } from './game/scenarios.js';
@@ -82,6 +83,6 @@ export default function App() {
     return () => clearTimeout(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (resuming) return <div className="boot-loading"><div className="spinner" /><b>하던 게임으로 돌아가는 중…</b><small className="muted">화면이 다시 열려서 마지막 자동 저장을 불러오고 있어요</small></div>;
-  if (!session || !game) return <Setup onStart={start} onResume={resume} hasSave={!!loadSave() || hasSlots()} />;
-  return <Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { ss.del(PLAYING); setSession(null); setGame(null); }} />;
+  if (!session || !game) return <><Setup onStart={start} onResume={resume} hasSave={!!loadSave() || hasSlots()} /><TouchTips /></>;
+  return <><Hex14 key={gen} world={session.world} game={game} setGame={setGame} onExit={() => { ss.del(PLAYING); setSession(null); setGame(null); }} /><TouchTips /></>;
 }

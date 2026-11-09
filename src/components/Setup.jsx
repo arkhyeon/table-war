@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { BUILD, versionText } from '../version.js';
 import InstallCard from './InstallCard.jsx';
 import { pref, setPref } from '../prefs.js';
+import { canVibrate } from '../haptics.js';
 import MapView from './MapView.jsx';
 import EditableName from './EditableName.jsx';
 import SaveSlots from './SaveSlots.jsx';
@@ -33,6 +34,7 @@ export default function Setup({ onStart, onResume, hasSave }) {
   const [cloudHas, setCloudHas] = useState(false); // 클라우드에 저장이 있으면 이어하기 버튼을 보임
   useEffect(() => { let on = true; cloudList(SLOT_COUNT).then((m) => on && setCloudHas(Object.keys(m).length > 0)); return () => { on = false; }; }, []);
   const [motion, setMotion] = useState(() => pref('motion', true));
+  const [vibe, setVibe] = useState(() => pref('vibe', true));
   const [rules, setRules] = useState({ revealMap: true, revealTroops: true, rememberExplored: true, showBattles: true, showArmy: true, histStats: false, difficulty: 'normal' });
   const [names, setNames] = useState({});
   const achieved = useMemo(loadAchievements, []);
@@ -223,8 +225,8 @@ export default function Setup({ onStart, onResume, hasSave }) {
             ['revealMap', '🗺️ 지도 전체 공개', '끄면 내 성 둘레 5칸·내 부대 둘레 4칸 밖은 안개로 가려지고 적 부대·못 본 성이 안 보임'],
             ['revealTroops', '👁️ 병력 전체 공개', '끄면 시야 밖 적 성·부대의 병력은 ?로 표시'],
             ['rememberExplored', '🧭 탐색 지역 기억', '한 번 본 땅·성은 옅은 안개로 계속 보임 (지도 전체 공개를 껐을 때)'],
-            ['showBattles', '⚔️ 일기토·전법 장면', '내 장수가 낀 일기토 장면과 고유 전법 컷인을 보여 줌 (지역 모드: 턴마다 전투 다시보기)'],
-            ['showArmy', '💂 이동 애니메이션', '부대가 칸을 따라 움직이는 모습을 보여 줌. 끄면 하루가 바로 넘어감 (지역 모드: 병력 그림·애니메이션)'],
+            ['showBattles', '⚔️ 일기토·전법 장면', '내 장수가 낀 일기토 장면과 고유 전법 컷인을 보여 줌'],
+            ['showArmy', '💂 이동 애니메이션', '부대가 칸을 따라 움직이는 모습을 보여 줌. 끄면 하루가 바로 넘어감'],
             ['histStats', '📜 역사 능력치 사용', '끄면(기본) 장수 능력치·특성은 무작위, 나라마다 총합만 공평하게'],
           ].map(([k, label, tip]) => (
             <label key={k} title={tip}>
@@ -234,6 +236,11 @@ export default function Setup({ onStart, onResume, hasSave }) {
           <label title="비·눈·바람 효과와 깃발 흔들림. 끄면 배터리·발열이 줄어요 (이 기기에 저장, 게임 중 ⋯ 메뉴의 🌦️로도 바꿈)">
             <input type="checkbox" checked={motion} onChange={(e) => { setPref('motion', e.target.checked); setMotion(e.target.checked); }} /> 🌦️ 날씨·깃발 움직임
           </label>
+          {canVibrate() && (
+            <label title="성을 얻거나 잃을 때, 적이 내 성을 노릴 때 폰이 진동 (이 기기에 저장, 게임 중 ⋯ 메뉴의 📳로도 바꿈)">
+              <input type="checkbox" checked={vibe} onChange={(e) => { setPref('vibe', e.target.checked); setVibe(e.target.checked); }} /> 📳 진동 알림
+            </label>
+          )}
           <label title="컴퓨터 세수·초기 병력 보정">
             🎚️ 난이도{' '}
             <select value={rules.difficulty} onChange={(e) => setRules({ ...rules, difficulty: e.target.value })}>
@@ -259,7 +266,6 @@ export default function Setup({ onStart, onResume, hasSave }) {
                 regions={preview.regions}
                 nations={preview.nations.map((n) => ({ ...n, name: nameOf(n) }))}
                 selected={preview.nations[pid]?.capital}
-                compact
                 onClick={(rid) => {
                   const o = preview.regions[rid].owner;
                   if (o !== null) setPlayer(o);

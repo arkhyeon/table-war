@@ -23,6 +23,7 @@ import { BUILDINGS, canBuild, startBuild, cancelBuild, lv, slotsOf, usedSlots, f
 import { loyalOf, rewardAll, rewardCost, SCHEMES, schemeChance, doScheme } from '../game/hex14people.js';
 import { POLICIES, POLICY_COST, POLICY_UPKEEP, policySlots, adoptPolicy, dropPolicy } from '../game/hex14policy.js';
 import { pref, setPref } from '../prefs.js';
+import { buzz, BUZZ, canVibrate } from '../haptics.js';
 
 // ───────── 삼국지14식 화면: 육각 칸 지도 + 도시·관문 + 부대 깃발 + 10일 진행 ─────────
 const NEUTRAL = '#b9b2a0';
@@ -688,6 +689,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   // 날씨(비·눈·바람)·깃발 흔들림 효과 — 끄면 가만히 있을 때 지도를 다시 그리지 않아 배터리·발열이 줄어듦 (이 기기에 저장)
   const [motion, setMotion] = useState(() => pref('motion', true));
   const motionRef = useRef(true); motionRef.current = motion;
+  const [vibe, setVibe] = useState(() => pref('vibe', true)); // 진동 알림 (안드로이드)
   // 군단(위임)은 뺌: 맡겨 두면 징병도 없이 돌진만 해서 쓸모가 없었음 — 예전 저장에 있던 군단은 풀어서 내가 다시 지휘
   useEffect(() => { if (game.corps?.length) setGame((g) => ({ ...g, corps: [], units: g.units.map((u) => (u.corps ? { ...u, corps: undefined } : u)) })); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 다른 것을 고르거나 날이 흐르기 시작하면 성 작업 창은 닫음
@@ -1792,8 +1794,8 @@ export default function Hex14({ world, game, setGame, onExit }) {
         const fx = s.fx || [];
         const gained = s.castles.some((c, i) => c.owner === pid && ownBefore[i] !== pid);
         const lost = s.castles.some((c, i) => ownBefore[i] === pid && c.owner !== pid);
-        if (lost) sfx('lose');
-        else if (gained) sfx('capture');
+        if (lost) { sfx('lose'); buzz(BUZZ.lose); }
+        else if (gained) { sfx('capture'); buzz(BUZZ.gain); }
         else if (fx.some((e) => e.type === 'clash' && near(e))) sfx('clash');
         else if (fx.some((e) => e.type === 'hit' && near(e))) sfx('hit');
         if ((s.duels || []).some((x) => x.an === pid || x.bn === pid)) sfx('duel');
@@ -2060,6 +2062,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
   const pushNews = (list) => {
     if (!list.length) return;
+    if (list.some((n) => n.icon === '⚠️')) buzz(BUZZ.threat); // 적이 새로 내 성을 노림
     const now = performance.now();
     for (const n of list) if (n.tile != null) pulses.current.push({ tile: n.tile, t0: now, col: n.tone === 'good' ? '#8fe08a' : n.tone === 'bad' ? '#ff6b5a' : '#ffd166' });
     setNews((v) => { const old = v.filter((x) => !list.some((n) => n.text === x.text)); return [...list.map((n) => ({ ...n, id: ++newsId.current, at: Date.now() })), ...old].slice(0, window.innerWidth <= 760 ? 3 : 5); }); // 같은 소식은 새 것으로 바꿈
@@ -2761,6 +2764,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
           <button className="icon" title="효과음" onClick={() => { unlockAudio(); setAudio('sfx', !aud.sfx); setAud(audioOpt()); }}>{aud.sfx ? '🔔' : '🔕'}</button>
           <button className="icon" title={stopIdle ? "순 끝까지 넘길 때 내 부대가 도착하면 멈춤 (켬)" : "순 끝까지 넘길 때 부대가 도착해도 멈추지 않음 (끔)"} style={{ opacity: stopIdle ? 1 : 0.45 }} onClick={() => setStopIdle((v) => { try { localStorage.setItem('h14.stopIdle', v ? '0' : '1'); } catch {} return !v; })}>⏸️</button>
           <button className="icon" title={motion ? '날씨·깃발 움직임 효과 (켬) — 끄면 배터리·발열이 줄어요' : '날씨·깃발 움직임 효과 (끔)'} aria-pressed={motion} style={{ opacity: motion ? 1 : 0.45 }} onClick={() => { const v = !motion; setPref('motion', v); setMotion(v); }}>🌦️</button>
+          {canVibrate() && <button className="icon" title={vibe ? '진동 알림 (켬) — 성을 얻거나 잃을 때, 적이 내 성을 노릴 때' : '진동 알림 (끔)'} aria-pressed={vibe} style={{ opacity: vibe ? 1 : 0.45 }} onClick={() => { const v = !vibe; setPref('vibe', v); setVibe(v); if (v) buzz(60); }}>📳</button>}
           <button className="icon" title="진행 속도" onClick={() => setSpeed((v) => (v > 250 ? 170 : 420))}>{speed > 250 ? '▶' : '⏩'}</button>
           <button className="icon" title="나가기" onClick={onExit}>🚪</button>
         </div>

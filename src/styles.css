@@ -98,7 +98,6 @@ h1, h2, h3, h4 { margin: 0 0 8px; }
 .menu { position: fixed; z-index: 30; width: 190px; display: flex; flex-direction: column; gap: 4px; min-width: 170px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #000a; }
 .menu button { text-align: left; background: transparent; border-color: transparent; }
 .menu button:hover { background: var(--panel2); }
-.plan-arrow { pointer-events: none; }
 .end-turn { position: absolute; right: 14px; bottom: 14px; z-index: 6; padding: 12px 20px; font-size: 16px; border-radius: 12px; box-shadow: 0 6px 18px #000a; }
 .log { position: absolute; left: 10px; bottom: 10px; width: min(460px, 60%); max-height: 34%; overflow: auto; background: #15171bdd; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; padding: 6px 8px; }
 .log div { padding: 2px 0; border-bottom: 1px solid #ffffff10; }
@@ -181,25 +180,12 @@ tr.clickable:hover, tr.sel { background: var(--panel2); }
 .btnlike:hover { border-color: var(--accent); }
 button.ghost { background: transparent; border-color: transparent; padding: 0 4px; }
 
-.flash { animation: flash 0.9s ease-in-out 6 alternate; pointer-events: none; }
-@keyframes flash { from { opacity: 1; } to { opacity: 0.15; } }
-
-/* 병사 그림: 제자리에서 살짝 들썩임, 군기는 펄럭임 */
-.live .soldier { animation: bob 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
-@keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
-.live .banner { animation: wave 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: left center; }
-@keyframes wave { 0%, 100% { transform: skewY(0deg) scaleX(1); } 50% { transform: skewY(8deg) scaleX(0.85); } }
-@media (prefers-reduced-motion: reduce) { .live .soldier, .live .banner, .flash { animation: none; } }
 details.more { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
 details.more > summary { cursor: pointer; color: var(--muted); font-size: 13px; list-style: none; }
 details.more > summary::before { content: '▸ '; }
 details.more[open] > summary::before { content: '▾ '; }
 details.more > .kv { margin-top: 6px; }
 
-/* 계획 화살표: 점선이 앞으로 흐름 */
-.march-dash { animation: marchDash 0.9s linear infinite; }
-@keyframes marchDash { to { stroke-dashoffset: calc(-1 * var(--dash, 8px)); } }
-@media (prefers-reduced-motion: reduce) { .march-dash { animation: none; } }
 .slots { display: flex; flex-direction: column; gap: 8px; }
 .slot { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
 .slot .info { flex: 1; min-width: 0; font-size: 13px; }
@@ -871,3 +857,7 @@ b.hl, .hl { color: var(--accent, #ffb347); }
 .install-card .install-x { position: absolute; top: 4px; right: 6px; font-size: 13px; opacity: .6; }
 .install-help { display: block; margin-top: 6px; color: var(--text, #e8e8e8); line-height: 1.5; }
 .install-help a { color: var(--accent, #f0b94a); word-break: break-all; }
+
+/* 폰 설명 말풍선 (눌러서·꾹 눌러서) */
+.touch-tip { position: fixed; z-index: 100; transform: translateX(-50%); max-width: min(300px, calc(100vw - 24px)); padding: 8px 12px; border-radius: 10px; background: rgba(18,21,28,.97); border: 1px solid var(--line2, #3d4458); color: #eef; font-size: 13px; line-height: 1.45; box-shadow: 0 8px 22px #000a; white-space: pre-line; animation: txtIn .15s ease-out; }
+@media (hover: none) { button, [role="button"], .pill { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
