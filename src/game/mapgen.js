@@ -236,7 +236,7 @@ function buildHistorical(scn, g) {
     // 무대 땅 가까이(땅으로 지도 크기의 약 12% 안)의 바깥 땅은 외지에서 뺌 — 나라 사이·전쟁터 한가운데가 회색으로 막히지 않게.
     // 회색은 무대에서 멀리 떨어진 진짜 변두리만
     {
-      const K = Math.max(6, Math.round(Math.min(g.cols, g.rows) * 0.2));
+      const K = Math.max(scn.stageBelt !== undefined ? 2 : 6, Math.round(Math.min(g.cols, g.rows) * (scn.stageBelt ?? 0.2))); // 둘레 빈 땅의 폭 (시나리오에서 줄일 수 있음)
       const dd = new Int16Array(N).fill(-1), qd = [];
       for (let i = 0; i < N; i++) if (terrain[i] !== T.SEA && !cand[i]) { dd[i] = 0; qd.push(i); }
       for (let k = 0; k < qd.length; k++) { const x = qd[k]; if (dd[x] >= K) continue; for (const j of nbOf(x)) if (dd[j] < 0 && terrain[j] !== T.SEA) { dd[j] = dd[x] + 1; qd.push(j); } }

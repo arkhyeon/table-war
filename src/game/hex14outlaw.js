@@ -46,7 +46,7 @@ export function outlawTurn(s, grid, rng) {
   s.units = s.units.filter((u) => !u.dead);
   const cities = s.castles.filter((c) => c.kind !== 'pass');
   const cap = Math.max(3, Math.round(cities.length / 8));
-  const tries = Math.max(1, Math.ceil(cities.length / 40));
+  const tries = Math.max(1, Math.ceil(cities.length / 40)) + (grid.wrap ? 0 : 1); // 지역사는 변방 몫으로 한 번 더
   for (let i = 0; i < tries; i++) if (!spawnOne(s, grid, rng, oid, cities, cap)) break;
 }
 
@@ -60,7 +60,14 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   const capAt = new Map();
   for (const c of s.castles) if (c.capital && c.owner !== null && c.owner >= 0) capAt.set(c.owner, c.tile);
   const R = 25 * (grid.k || 1);
-  const wts = owned.map((c) => 1 + 3 * Math.min(1, capAt.has(c.owner) ? grid.dist(c.tile, capAt.get(c.owner)) / R : 0.3));
+  // 지역사(세계 지도가 아닌 판): 지도의 변방 — 나라들 도읍의 한가운데에서 먼 가장자리 쪽 성일수록 더 자주 (가장 먼 곳은 한가운데의 5배)
+  let edgeOf = () => 1;
+  if (!grid.wrap && capAt.size >= 2) {
+    let mx = 0, my = 0; for (const t of capAt.values()) { const [x, y] = grid.center(t); mx += x; my += y; } mx /= capAt.size; my /= capAt.size;
+    const far = Math.max(1, ...owned.map((c) => { const [x, y] = grid.center(c.tile); return Math.hypot(x - mx, y - my); }));
+    edgeOf = (c) => { const [x, y] = grid.center(c.tile); return 1 + 4 * (Math.hypot(x - mx, y - my) / far) ** 2; };
+  }
+  const wts = owned.map((c) => (1 + 3 * Math.min(1, capAt.has(c.owner) ? grid.dist(c.tile, capAt.get(c.owner)) / R : 0.3)) * edgeOf(c));
   let pickR = rng() * wts.reduce((a, b) => a + b, 0), near = owned[0];
   for (let i = 0; i < owned.length; i++) { pickR -= wts[i]; if (pickR <= 0) { near = owned[i]; break; } }
   const sea = rng() < 0.22;

@@ -871,11 +871,13 @@ export const SCENARIOS = [
   {
     id: 'later_three900',
     group: 'region',
+    stageMargin: 1.2, // 대륙 쪽이 넓어 여백·둘레 빈 땅을 좁게 (주인 없는 벌판이 지도를 다 덮지 않게)
+    stageBelt: 0.05,
     winShare: 0.6,
     startYear: 901,
     name: '후삼국 901년',
     era: '견훤·궁예·왕건',
-    desc: '신라가 기울고 견훤의 후백제와 궁예의 후고구려(태봉)가 일어선 때. 왕건이 떠오르고, 북쪽에는 저물어 가는 발해.',
+    desc: '신라가 기울고 견훤의 후백제와 궁예의 후고구려(태봉)가 일어선 때. 왕건이 떠오르고, 북쪽에는 저물어 가는 발해 — 그 등 뒤로 야율아보기의 거란과 해족·실위·흑수말갈, 유주의 노룡 절도사가 노린다.',
     bbox: [123.8, 33, 131.2, 45.5],
     cols: 40,
     rows: 52,
@@ -885,13 +887,21 @@ export const SCENARIOS = [
       N('후백제', 'korea', 127.15, 35.82, 4, '완산주', '견훤|88|90|75|70|맹장'),
       N('태봉', 'korea', 127.31, 38.2, 5, '철원', '궁예|82|85|78|60|책략'),
       N('신라', 'korea', 129.21, 35.84, 3, '서라벌', '효공왕|30|40|55|60|정치'),
-      N('발해', 'korea', 129.6, 44.0, 6, '상경 용천부', '대인선|60|65|65|60|수성'),
+      N('발해', 'korea', 129.6, 44.0, 6, '상경 용천부', '대인선|60|65|65|60|수성', undefined, 0.55), // 땅은 넓어도 저물어 가는 나라: 처음 병력 55%
       N('패서 호족', 'korea', 125.75, 39.02, 2, '평양', '패서 호족장|70|70|60|60|기마'),
       N('명주 호족', 'korea', 128.9, 37.75, 1, '명주', '김순식|70|72|65|70|수성'),
       N('탐라', 'korea', 126.53, 33.5, 1, '탐라', '탐라 성주|40|50|50|60|수군'),
+      // 발해의 등 뒤: 901년 야율아보기가 질랄부 이리근이 되어 거란의 실권을 쥠(907년 가한), 해족은 거란 남쪽, 실위는 눈강·흥안령, 흑수말갈은 발해가 기울며 흑룡강에서 다시 독립, 유주는 노룡 절도사 유인공
+      N('거란', 'steppe', 120.5, 43.5, 3, '송막', '야율아보기|85|90|85|80|기마', undefined, 1.3),
+      N('해족', 'steppe', 118.9, 41.6, 2, '요락', '거제|72|70|55|50|기마'),
+      N('실위', 'steppe', 122.5, 47.6, 2, '실위', '실위 막하불|70|65|40|40|기마'),
+      N('흑수말갈', 'steppe', 132.3, 47.6, 3, '흑수', '흑수 대추장|78|68|45|40|기마'),
+      N('노룡', 'china', 116.4, 39.9, 3, '유주', '유인공|75|72|62|45|수성'),
     ],
     chronicle: [
       [901, '궁예가 후고구려를 세웠습니다.', '태봉'],
+      [907, '야율아보기가 거란의 가한이 되었습니다.', '거란'],
+      [913, '진왕 이존욱이 유주를 빼앗아 노룡의 유씨가 무너졌습니다.', '노룡'],
       [918, '왕건이 궁예를 몰아내고 고려를 세웠습니다.', '태봉'],
       [926, '거란이 발해를 멸망시켰습니다.', '발해'],
       [935, '신라 경순왕이 고려에 항복했습니다.', '신라'],
@@ -1219,7 +1229,7 @@ const NOT_JAPAN = (lon, lat) => lon < 139 && lat > 0.55 * (lon - 129) + 34.4;
 for (const scn of SCENARIOS) if (scn.id === 'later_three900') { scn.keepLand = NOT_JAPAN; scn.strictStage = true; } // 왜·일본이 나라로 나오는 지역사는 그대로
 
 // ── 국적이 뚜렷한 나라는 따로 명단을 씀 (스코틀랜드에 잉글랜드 장수가 들어가지 않게 등) ──
-const NAT_POOL = { 읍루: 'jurchen', 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
+const NAT_POOL = { 읍루: 'jurchen', 스코틀랜드: 'scottish', 세르비아: 'balkan', 왈라키아: 'balkan', 알바니아: 'balkan', 몰다비아: 'balkan', 네덜란드: 'dutch', 바타비아: 'dutch', 동여진: 'jurchen', 말갈: 'jurchen', 흑수말갈: 'jurchen', 물길: 'jurchen', 건주여진: 'jurchen', 해서여진: 'jurchen', 야인여진: 'jurchen' };
 for (const scn of SCENARIOS) for (const n of scn.nations || []) if (NAT_POOL[n.name] && !n.pools) n.pools = [NAT_POOL[n.name]];
 
 // ── 세계 지도 칸: 2배 촘촘하게 (칸 하나 적도 약 83km·한반도 위도 약 60km — 서울~부산 5~6칸). 지역 수는 그대로 (지역 크기도 같은 비율로)
@@ -1243,7 +1253,7 @@ for (const scn of SCENARIOS) {
 const KM = 111.32, COL_KM = 50, ROW_KM = 43.3, MAX_CELLS = 8500, LAND_CELLS = 2200;
 const wob = (lon, lat) => Math.sin(lon * 1.7 + lat * 0.6) * 0.5 + Math.sin(lat * 2.3 - lon * 0.9 + 1.3) * 0.35 + Math.sin(lon * 4.1 + lat * 3.7) * 0.15;
 // 일본 무대: 홋카이도까지 열도 전체
-const LAND_SHARE = {"eastasia650":0.445,"europe1400":0.422,"africa1400":0.342,"warring_bc260":0.472,"korea400":0.25,"punic_bc218":0.271,"sengoku1560":0.077,"imjin1592":0.339,"napoleon1805":0.41,"later_three900":0.109,"genghis1206":0.303,"hundred1340":0.194,"thirty1618":0.245,"sui612":0.266,"goryeo1010":0.287,"genpei1180":0.081,"yuanend1360":0.268,"constantinople1453":0.225}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
+const LAND_SHARE = {"eastasia650":0.445,"europe1400":0.422,"africa1400":0.342,"warring_bc260":0.472,"korea400":0.25,"punic_bc218":0.271,"sengoku1560":0.077,"imjin1592":0.339,"napoleon1805":0.41,"later_three900":0.371,"genghis1206":0.303,"hundred1340":0.194,"thirty1618":0.245,"sui612":0.266,"goryeo1010":0.287,"genpei1180":0.081,"yuanend1360":0.268,"constantinople1453":0.225}; // 무대 안 뭍 비율 (미리 계산해 둔 값 — 바뀌면 다시 계산해 넣음, 없으면 불러올 때 계산)
 // 역사 보정으로 새로 넣은 둘레 세력: 무대(지도 크기)는 넓히지 않고, 이미 무대 안에 있던 주인 없는 땅만 차지
 const NEW_EDGE = {
   threekingdoms200: new Set(['보도근', '강족', '정령', '선선', '차사', '야룽', '표', '부남', '임읍', '읍루']),
@@ -1301,7 +1311,7 @@ for (const scn of SCENARIOS) {
       if (n.area) for (const [a, b, e, f] of n.area) add(a - pad * 1.3, b - pad * 1.3, e + pad * 1.3, f + pad * 1.3);
     }
     for (const [a, b, e, f] of stage) add(a, b, e, f);
-    const m = 2.5; // 지도 여백(도) — 무대 바로 바깥 땅(예: 말레이 반도·홋카이도)이 잘리지 않게
+    const m = scn.stageMargin ?? 2.5; // 지도 여백(도) — 무대 바로 바깥 땅(예: 말레이 반도·홋카이도)이 잘리지 않게 (시나리오에서 줄일 수 있음)
     scn.bbox = [Math.max(-179, W - m), Math.max(-56, S - m), Math.min(179, E + m), Math.min(80, Nn + m)].map((v) => Math.round(v * 10) / 10);
   }
   const [w, so, e, n] = scn.bbox;
