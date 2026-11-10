@@ -7,8 +7,8 @@ import { BUILD, versionText } from '../version.js';
 import { buildGrid, stepDay, endTurn14, sortie, order, commandCap, gensOf, unitStats, nearestCastle, draft14, draftMax14, draftCost, DAYS, dateOf, TERRAIN_NAME, castleIncome, landShare, enemy, districtTiles, queueOrder, orderNew, sendTroops, absDay, splitUnit, splitAll, buildSiege, summonGeneral, sortieAfford, SIEGE_COST, moveCost, speedOf, capOf, convoyDays, besieged, draftLeft14, planGenSpread, doGenSpread, fogOn, troopsHidden, sightOf } from '../game/hex14.js';
 import { aiTurn14, STRATS, warmAI } from '../game/hex14ai.js';
 import { unlockAudio, setAudio, audioOpt, sfx, setMood, holdSfx } from '../audio.js';
-import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText } from '../game/hex14vassal.js';
-import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
+import { lordOf, vassalChance, protectChance, surrenderChance, demandVassal, askProtection, urgeSurrender, declareIndependence, vassalInboxText, vassalCost, surrenderCost, askWait } from '../game/hex14vassal.js';
+import { ROLES, jobGen, autoJobs, goldOf, popGold, harvestOf, foodUse, relOf, pactOf, PACT, acceptChance, gift, propose, renewPact, ransomValue, ransomChance, offerRansom, renewChance, RENEW_WINDOW, answerInbox, breakPact, pactBanned, RANSOM_REST, recruit, recruitChance, release, execute, powerOf, HARVEST_MONTH, trade, MARKET, isRuler, envoyOf, giftSizes, giftGain } from '../game/hex14gov.js';
 import { TERRAIN } from '../game/rules.js';
 import { tlabel, tdesc, TIER_NAME, T14 } from '../game/hex14traits.js';
 import { corner, pixelToCell } from '../game/hex.js';
@@ -1143,7 +1143,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         const ly = cy + sz * 0.7 + sz * 0.38 + fs * 0.95; // 성벽 막대 바로 아래 (크게 확대해도 이름이 성에서 멀어지지 않게)
         const bh = fs * 1.25;
         if (pri > 0 && placed.some(([x, y, w, h]) => Math.abs(x - cx) * 2 < w + tw && y < ly - fs * 0.85 + bh && ly - fs * 0.85 < y + h)) continue;
-        placed.push([cx, ly - fs * 0.85, tw, bh]);
+        placed.push([cx, ly - fs * 0.85, tw, bh, c.id]);
         const x0 = cx - tw / 2;
         ctx.fillStyle = 'rgba(20,16,12,0.84)';
         ctx.beginPath(); ctx.roundRect(x0, ly - fs * 0.85, tw, fs * 1.2, fs * 0.25); ctx.fill();
@@ -1229,6 +1229,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
         ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(cv2, 0, 0); ctx.restore();
       } else placed = drawStatic(ctx);
     }
+    labelRects.current = placed;
     // 망루 화살
     for (const e of s.fx || []) {
       if (e.type !== 'arrow') continue;
@@ -1564,6 +1565,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
   };
 
   // 누른 곳 근처의 부대·도시 (깃발과 성은 칸보다 크게 그려지므로 넉넉히)
+  const labelRects = useRef([]); // 지금 화면에 그려진 성 이름표 자리 [가운데 x, 위 y, 너비, 높이, 성 번호]
   const pick = (wx, wy) => {
     // 깃발은 칸 위쪽에 그려지므로 칸 중심~깃발 사이를 기준으로, 멀리서 볼 때도 손가락 크기만큼은 잡히게
     const minR = 16 / (view.current?.k || 1);
@@ -1582,6 +1584,13 @@ export default function Hex14({ world, game, setGame, onExit }) {
     // 성 그림이 크므로 성 안쪽을 누르면 근처 부대보다 성을 우선
     if (bc && (!bu || dc * 0.5 < du)) return { type: 'castle', o: bc };
     if (bu) return { type: 'unit', o: bu };
+    // 성 이름표를 눌러도 그 성 (성 쪽으로 '이동'이 아니라 바로 공략·입성·선택)
+    for (const r of labelRects.current || []) {
+      if (r[4] === undefined) continue;
+      let dx = wx - r[0];
+      if (grid.wrap && grid.period) dx = (((dx + grid.period / 2) % grid.period) + grid.period) % grid.period - grid.period / 2;
+      if (Math.abs(dx) * 2 <= r[2] && wy >= r[1] && wy <= r[1] + r[3] && game.castles[r[4]]) return { type: 'castle', o: game.castles[r[4]] };
+    }
     let bf = null, df = Math.max(grid.size * 1.3, minR) ** 2;
     for (const f of game.forts || []) { const [x, y] = grid.center(f.tile); const d = (x - wx) ** 2 + (y - grid.size * 0.6 - wy) ** 2; if (d < df) { df = d; bf = f; } }
     return bf ? { type: 'fort', o: bf } : null;
@@ -2164,7 +2173,7 @@ export default function Hex14({ world, game, setGame, onExit }) {
                 <div className={durP < 40 ? 'warn' : ''} title={`성벽 내구 ${Math.round(selCastle.dur)} / ${selCastle.maxDur}`}><small>성벽</small><b>{durP}%</b><small>{fmtTroops(Math.round(selCastle.dur))}</small></div>
                 {selCastle.kind !== 'pass' ? <>
                   <div className={popGold(selCastle) < 0.8 ? 'warn' : ''} title="징병으로 인구가 줄면 금 수입도 줄어듭니다 (바닥나면 절반). 인구는 순마다 조금씩 다시 늘어납니다"><small>인구</small><b>{Math.round(selCastle.pop)}천</b><small>금 {Math.round(popGold(selCastle) * 100)}%</small></div>
-                  {selCastle.owner !== null ? <div title="관할 땅: 지도에 흰색=내 관할, 빨강=아직 남의 것 (채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)"><small>수입</small><b>{fmtGold(castleIncome(game, grid, selCastle))}</b><small>관할 {Math.round(landShare(game, selCastle) * 100)}%</small></div> : <div><small>수입</small><b>-</b><small>중립</small></div>}
+                  {selCastle.owner !== null ? <div title="관할 땅: 지도에 흰색=내 관할, 빨강=아직 남의 것 (채울수록 금·병량·자원병↑, 매 순 저절로 몇 칸씩 넓어짐)"><small>수입{selCastle.plain ? <span title="중원 대평야: 금 수입 +20% (주인이 바뀌어도 유지)"> 🌾중원</span> : null}</small><b>{fmtGold(castleIncome(game, grid, selCastle))}</b><small>관할 {Math.round(landShare(game, selCastle) * 100)}%</small></div> : <div><small>수입</small><b>-</b><small>중립</small></div>}
                 </> : <><div><small>인구</small><b>-</b><small>관문</small></div><div><small>수입</small><b>-</b><small>길목</small></div></>}
               </div>
             );
@@ -2566,17 +2575,22 @@ export default function Hex14({ world, game, setGame, onExit }) {
                       <small>우호 {r}{STRATS[n.strat] ? <span title={STRATS[n.strat].desc}> · 전략 {STRATS[n.strat].name}{n.focus !== null && n.focus !== undefined && game.nations[n.focus] ? `(${n.focus === pid ? '우리' : game.nations[n.focus].name} 노림)` : ''}</span> : null}</small>
                       <span style={{ marginLeft: 'auto' }} />
                       {giftSizes(game, pid, n.id).map((amt, i) => <button key={i} className="sm" disabled={playing || me.gold < amt} title={`우호 +${giftGain(game, pid, n.id, amt)}`} onClick={() => act((s) => gift(s, pid, n.id, amt))}>🎁 {fmtGold(amt)} (+{giftGain(game, pid, n.id, amt)})</button>)}
-                      {p && p.type !== 'vassal' && p.until - game.turn <= RENEW_WINDOW && <button className="sm primary" disabled={playing || me.lastAsk?.[n.id] === game.turn} title="끝나기 전에 같은 약조를 이어 감" onClick={() => act((s) => renewPact(s, pid, n.id))}>🔁 연장 요청 {Math.round(renewChance(game, pid, n.id) * 100)}% ({p.until - game.turn}순 남음)</button>}
-                      {!p && Math.round(acceptChance(game, pid, n.id, 'ally') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
-                      {!p && Math.round(acceptChance(game, pid, n.id, 'truce') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
+                      {p && p.type !== 'vassal' && p.broken === undefined && p.until - game.turn <= RENEW_WINDOW && <button className="sm primary" disabled={playing || me.lastAsk?.[n.id] === game.turn} title="끝나기 전에 같은 약조를 이어 감" onClick={() => act((s) => renewPact(s, pid, n.id))}>🔁 연장 요청 {Math.round(renewChance(game, pid, n.id) * 100)}% ({p.until - game.turn}순 남음)</button>}
+                      {!p && pactBanned(game, pid, n.id) && <small className="muted" title="약조를 깬 나라와는 1년 동안 새 약조를 맺을 수 없습니다">💔 약조를 깬 사이</small>}
+                      {!p && !pactBanned(game, pid, n.id) && Math.round(acceptChance(game, pid, n.id, 'ally') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'ally'))}>동맹 {Math.round(acceptChance(game, pid, n.id, 'ally') * 100)}%</button>}
+                      {!p && !pactBanned(game, pid, n.id) && Math.round(acceptChance(game, pid, n.id, 'truce') * 100) >= 1 && <button className="sm" disabled={playing || me.lastAsk?.[n.id] === game.turn} onClick={() => act((s) => propose(s, pid, n.id, 'truce'))}>정전 {Math.round(acceptChance(game, pid, n.id, 'truce') * 100)}%</button>}
                       {(() => {
-                        // 속국·항복: 힘 차이가 클 때만 버튼이 나옴
-                        const asked = playing || me.lastAsk?.[n.id] === game.turn;
+                        // 속국·항복: 국경이 맞닿은 작은 나라에만, 큰 예물을 걸고 (거절당하면 예물만 넘어가고 9순 동안 다시 못 청함)
+                        const wait = askWait(game, pid, n.id), nearN = isNear(n);
+                        const asked = playing || me.lastAsk?.[n.id] === game.turn || wait > 0 || !nearN;
                         const vc = vassalChance(game, pid, n.id), pc = protectChance(game, pid, n.id), sc = surrenderChance(game, pid, n.id);
+                        const vCost = vassalCost(game, n.id), sCost = surrenderCost(game, n.id);
+                        const why = !nearN ? ' — 국경이 맞닿은 나라에만 청할 수 있습니다' : wait > 0 ? ` — 거절당해 ${wait}순 뒤에 다시 청할 수 있습니다` : '';
                         return <>
-                          {!p && vc >= 0.005 && <button className="sm" disabled={asked} title="받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다" onClick={() => act((s) => demandVassal(s, pid, n.id))}>👑 속국 요구 {Math.round(vc * 100)}%</button>}
-                          {sc >= 0.005 && <button className="sm" disabled={asked} title="받아들이면 도시·장수·부대가 모두 우리 것이 됩니다" onClick={() => act((s) => urgeSurrender(s, pid, n.id))}>🏳️ 항복 권유 {Math.round(sc * 100)}%</button>}
-                          {!p && pc >= 0.005 && lordOf(game, pid) === null && <button className="sm" disabled={asked} title="그 나라가 우리를 치지 않게 되고, 순마다 금 수입의 15%를 바칩니다" onClick={async () => { if (await uiConfirm(`${n.name}의 속국이 될까요? 순마다 금 수입의 15%를 바칩니다.`)) act((s) => askProtection(s, pid, n.id)); }}>🙇 속국 되기 {Math.round(pc * 100)}%</button>}
+                          {!p && vc >= 0.005 && <button className="sm" disabled={asked || me.gold < vCost} title={`예물 금 ${fmtGold(vCost)}을 보냅니다 (받아들이든 말든 건너감). 받아들이면 서로 치지 않고, 순마다 금 수입의 15%를 바치며 우리 전쟁을 돕습니다${why}`} onClick={async () => { if (await uiConfirm(`${n.name}에 예물 금 ${fmtGold(vCost)}을 보내 속국을 요구할까요? (받아들일 확률 ${Math.round(vc * 100)}% · 거절해도 예물은 돌아오지 않습니다)`)) act((s) => demandVassal(s, pid, n.id, Math.random, grid)); }}>👑 속국 요구 {Math.round(vc * 100)}% · 금 {fmtGold(vCost)}</button>}
+                          {sc >= 0.005 && <button className="sm" disabled={asked || me.gold < sCost} title={`예물 금 ${fmtGold(sCost)}을 겁니다 (거절당하면 예물은 그 나라로). 받아들이면 도시·장수·부대가 모두 우리 것이 됩니다${why}`} onClick={async () => { if (await uiConfirm(`${n.name}에 예물 금 ${fmtGold(sCost)}을 걸고 항복을 권할까요? (받아들일 확률 ${Math.round(sc * 100)}% · 거절하면 예물만 넘어갑니다)`)) act((s) => urgeSurrender(s, pid, n.id, Math.random, grid)); }}>🏳️ 항복 권유 {Math.round(sc * 100)}% · 금 {fmtGold(sCost)}</button>}
+                          {!p && pc >= 0.005 && lordOf(game, pid) === null && <button className="sm" disabled={asked} title={`그 나라가 우리를 치지 않게 되고, 순마다 금 수입의 15%를 바칩니다${why}`} onClick={async () => { if (await uiConfirm(`${n.name}의 속국이 될까요? 순마다 금 수입의 15%를 바칩니다.`)) act((s) => askProtection(s, pid, n.id, Math.random, grid)); }}>🙇 속국 되기 {Math.round(pc * 100)}%</button>}
+                          {p && p.type !== 'vassal' && (p.broken !== undefined ? <small className="muted">💔 파기 통보됨 ({p.until - game.turn}순 뒤 끝남)</small> : <button className="sm danger" disabled={playing} title="통보하면 3순 뒤 약조가 끝납니다. 신의를 저버린 값: 그 나라 우호 −40, 다른 모든 나라 −10, 그 나라와는 1년 동안 새 약조 불가" onClick={async () => { if (await uiConfirm(`${n.name}과(와)의 ${PACT[p.type]}을 깰까요? 3순 뒤 약조가 끝나고, 그 나라 우호 −40·다른 모든 나라 −10, 1년 동안 그 나라와 새 약조를 맺을 수 없습니다.`)) act((s) => breakPact(s, pid, n.id)); }}>💔 약조 파기</button>)}
                           {p?.type === 'vassal' && p.b === pid && <button className="sm danger" disabled={playing} onClick={async () => { if (await uiConfirm('독립을 선언할까요? 우호가 크게 떨어집니다.')) act((s) => declareIndependence(s, pid)); }}>⚔️ 독립 선언</button>}
                         </>;
                       })()}
@@ -2632,14 +2646,15 @@ export default function Hex14({ world, game, setGame, onExit }) {
                     <button className="sm danger" disabled={playing} onClick={() => act((s) => execute(s, g.id))}>처단</button>
                   </div>
                   {game.nations[g.nation]?.alive && (() => {
-                    const val = ransomValue(g), purse = Math.floor(game.nations[g.nation].gold / 1000) * 1000;
+                    if ((g.ransomRest || 0) > game.turn) return <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>💰 얼마 전 몸값을 치른 장수라 {g.ransomRest - game.turn}순 동안은 몸값을 받을 수 없습니다.</div>;
+                    const val = ransomValue(g, game), purse = Math.floor(game.nations[g.nation].gold / 1000) * 1000;
                     if (purse < 1000) return <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>💰 {game.nations[g.nation].name}에 금이 없어(금 {fmtGold(game.nations[g.nation].gold)}) 지금은 몸값을 낼 수 없습니다.</div>;
                     // 상대가 가진 금보다 비싸게는 못 부름 (넘으면 0%) — 슬라이더도 상대 금까지만
                     const top = Math.max(1000, Math.min(Math.round(val * 2 / 1000) * 1000, purse)), price = Math.min(ransomAsk[g.id] ?? Math.min(val, purse), top);
                     const ch = ransomChance(game, g, price);
                     return (
                       <div style={{ marginTop: 4 }}>
-                        <div style={{ fontSize: 12 }}>💰 몸값 {fmtGold(price)} <small className="muted">· 받아들일 확률 {Math.round(ch * 100)}% · 가치 약 {fmtGold(val)} · {game.nations[g.nation].name} 금 {fmtGold(game.nations[g.nation].gold)}{purse < val ? ' (가치만큼은 못 냄)' : ''}</small></div>
+                        <div style={{ fontSize: 12 }}>💰 몸값 {fmtGold(price)} <small className="muted">· 받아들일 확률 {Math.round(ch * 100)}% · <span title="우리가 상대보다 도시가 많을수록 값이 내려갑니다 (작은 나라가 큰 나라 장수를 잡으면 제값). 한 번 몸값을 치른 장수는 1년 동안 다시 내지 않습니다.">가치 약 {fmtGold(val)}</span> · {game.nations[g.nation].name} 금 {fmtGold(game.nations[g.nation].gold)}{purse < val ? ' (가치만큼은 못 냄)' : ''}</small></div>
                         <div className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
                           <Slider min={1000} max={Math.max(2000, top)} step={1000} value={price} onChange={(v) => setRansomAsk((m) => ({ ...m, [g.id]: v }))} style={{ flex: 1, minWidth: 0 }} />
                           <button className="sm primary" disabled={playing || g.ransomAsked === game.turn || ch <= 0} onClick={() => act((s) => offerRansom(s, pid, g.id, price))}>몸값 제안</button>

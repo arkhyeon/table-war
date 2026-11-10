@@ -147,8 +147,7 @@ export function hegemonOf(s) {
   const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
   const ranked = s.nations.filter((n) => n.alive && !n.horde).map((n) => [n.id, cc(n.id)]).sort((x, y) => y[1] - x[1]);
   if (!ranked.length || ranked[0][1] < total * 0.3 || (ranked[1] && ranked[0][1] < ranked[1][1] * 1.5)) return null;
-  // 대세가 기운 나라(45% 이상)나 300순이 지난 판은 견제하지 않음 — 견제만 하다 끝없이 균형이 이어지지 않게
-  if (ranked[0][1] >= total * 0.45 || s.turn > 300) return null;
+  // 아무리 커져도·판이 길어져도 견제는 계속됨 (큰 나라가 견제 없이 굴러가지 않게)
   return ranked[0][0];
 }
 // 대세: 전체 도시의 45%를 넘은 나라 (작은 나라들이 속국으로 잘 들어감)
@@ -194,6 +193,7 @@ export const renewChance = (s, a, b) => { const p = pactOf(s, a, b); return p &&
 export function renewPact(s, a, b, rng = Math.random) {
   const p = pactOf(s, a, b);
   if (!p || p.type === 'vassal') return { ok: false, msg: '연장할 약조가 없습니다.' };
+  if (p.broken !== undefined) return { ok: false, msg: '파기를 알린 약조는 연장할 수 없습니다.' };
   if (p.until - s.turn > RENEW_WINDOW) return { ok: false, msg: `아직 ${p.until - s.turn}순 남았습니다 (${RENEW_WINDOW}순 이하일 때 연장).` };
   const n = s.nations[a];
   if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 순에 이미 사신을 보냈습니다.' };
@@ -208,6 +208,7 @@ export function renewPact(s, a, b, rng = Math.random) {
 }
 export function propose(s, a, b, type, rng = Math.random) {
   if (pactOf(s, a, b)) return { ok: false, msg: '이미 맺은 약조가 있습니다.' };
+  if (pactBanned(s, a, b)) return { ok: false, msg: '약조를 깬 지 1년이 안 되어 새 약조를 맺을 수 없습니다.' };
   const n = s.nations[a];
   if (n.lastAsk?.[b] === s.turn) return { ok: false, msg: '이번 순에 이미 사신을 보냈습니다.' };
   n.lastAsk = { ...(n.lastAsk || {}), [b]: s.turn };
@@ -226,6 +227,22 @@ export function propose(s, a, b, type, rng = Math.random) {
   return { ok: true, accepted: yes, msg: yes ? `${s.nations[b].name}과(와) ${PACT[type]}을 맺었습니다!` : `${s.nations[b].name}이(가) 거절했습니다.` };
 }
 
+// 약조 파기: 통보하면 3순 뒤 약조가 끝남 (그날 바로 뒤통수를 칠 수는 없음). 신의를 저버린 값 — 그 나라 우호 −40, 다른 모든 나라 −10, 그 나라와는 1년 동안 새 약조 불가
+export const BREAK_NOTICE = 3, BREAK_BAN = 36;
+export function breakPact(s, a, b) {
+  const p = pactOf(s, a, b);
+  if (!p || p.type === 'vassal') return { ok: false, msg: '깰 약조가 없습니다.' };
+  if (p.broken) return { ok: false, msg: `이미 파기를 알렸습니다 (${p.until - s.turn}순 뒤 끝남).` };
+  p.until = Math.min(p.until, s.turn + BREAK_NOTICE);
+  p.broken = a;
+  addRel(s, a, b, -40);
+  for (const n of s.nations) if (n.alive && !n.horde && n.id !== a && n.id !== b) addRel(s, a, n.id, -10);
+  s.nations[a].brokeAt = { ...(s.nations[a].brokeAt || {}), [b]: s.turn };
+  log(s, `💔 ${s.nations[a].name}이(가) ${s.nations[b].name}과(와)의 ${PACT[p.type]}을 깨겠다고 알렸습니다 (${p.until - s.turn}순 뒤 끝남).`, 'diplo', [a, b]);
+  return { ok: true, msg: `${PACT[p.type]} 파기 통보 — ${p.until - s.turn}순 뒤부터 칠 수 있습니다 (그 나라 우호 −40, 다른 나라들 −10)` };
+}
+// 약조를 깬 나라와는 1년 동안 새 약조를 맺지 않음
+export const pactBanned = (s, a, b) => s.turn - (s.nations[a]?.brokeAt?.[b] ?? -999) < BREAK_BAN || s.turn - (s.nations[b]?.brokeAt?.[a] ?? -999) < BREAK_BAN;
 export function makePact(s, a, b, type) {
   s.pacts = s.pacts.filter((p) => !((p.a === a && p.b === b) || (p.a === b && p.b === a)));
   s.pacts.push({ a, b, type, until: s.turn + (type === 'ally' ? 36 : 18) });
@@ -250,18 +267,19 @@ export function answerInbox(s, i, yes) {
     if (me.gold < p.price) { log(s, `금이 모자라 ${g.name}의 몸값 ${fmtGold(p.price)}을(를) 낼 수 없습니다.`, 'bad', [s.playerId]); return; }
     me.gold -= p.price; s.nations[p.from].gold += p.price;
     const home = s.castles.find((c) => c.owner === s.playerId);
-    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null });
+    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null, ransomRest: s.turn + RANSOM_REST });
     log(s, `💰 몸값 금 ${fmtGold(p.price)}을(를) 내고 ${g.name}을(를) 데려왔습니다.`, 'diplo', [s.playerId, p.from]);
     return;
   }
   if (!yes) { addRel(s, p.from, s.playerId, p.type === 'vassal_demand' ? -10 : -5); return; }
+  if ((p.type === 'vassal_offer' || p.type === 'vassal_demand') && s.endgame) return; // 대세가 기운 뒤에는 속국을 맺지 않음
   if (p.type === 'vassal_offer') makeVassal(s, s.playerId, p.from);
-  else if (p.type === 'vassal_demand') makeVassal(s, p.from, s.playerId);
+  else if (p.type === 'vassal_demand') { const gift = Math.min(p.gift || 0, s.nations[p.from].gold); if (gift > 0) { s.nations[p.from].gold -= gift; s.nations[s.playerId].gold += gift; } makeVassal(s, p.from, s.playerId); }
   else makePact(s, p.from, s.playerId, p.type);
 }
 
 // ── 시장: 금으로 병량을 사고팔기 ──
-export const MARKET = { buy: 1.5, sell: 0.5 }; // 금 1 → 병량 1.5, 병량 1 → 금 0.5
+export const MARKET = { buy: 0.5, sell: 0.5 }; // 금 1 → 병량 0.5, 병량 1 → 금 0.5 (병량을 금으로 때우려면 비쌈 — 농업·둔전·농장이 값짐)
 export function trade(s, nid, kind, amt) {
   const n = s.nations[nid];
   if (kind === 'buy') {
@@ -303,11 +321,16 @@ export function recruit(s, gid, nid, rng = Math.random) {
 }
 
 // ── 몸값 흥정: 포로의 가치(능력치 합, 군주는 3배)보다 싸게 부를수록 잘 받아 줌. 돈이 모자라면 못 냄 ──
-export const ransomValue = (g) => Math.round(((g.war + g.lead + g.intel + g.pol) * 150 * (isRuler(g) ? 3 : 1)) / 1000) * 1000;
+// 큰 나라가 작은 나라 장수로 돈벌이하지 못하게: 잡은 나라가 낸 나라보다 도시가 많을수록 값이 내려감(√비율, 최저 25%). 작은 나라가 큰 나라 장수를 잡으면 제값
+const cityN = (s, id) => s.castles.reduce((a, c) => a + (c.owner === id && c.kind !== 'pass' ? 1 : 0), 0);
+export const ransomScale = (s, g) => (s && g.captor !== null && g.captor !== undefined && g.nation !== null && g.nation !== undefined ? Math.max(0.25, Math.min(1, Math.sqrt(Math.max(1, cityN(s, g.nation)) / Math.max(1, cityN(s, g.captor))))) : 1);
+export const RANSOM_REST = 36; // 몸값을 치른 장수는 1년 동안 다시 몸값을 내지 않음 (같은 장수를 거듭 잡아 받아 내지 못하게)
+export const ransomValue = (g, s) => Math.max(1000, Math.round(((g.war + g.lead + g.intel + g.pol) * 150 * (isRuler(g) ? 3 : 1) * ransomScale(s, g)) / 1000) * 1000);
 export function ransomChance(s, g, price) {
   const payer = s.nations[g.nation];
   if (!payer?.alive || price > payer.gold) return 0;
-  const r = price / Math.max(1, ransomValue(g));
+  if ((g.ransomRest || 0) > s.turn) return 0; // 얼마 전 몸값을 치른 장수
+  const r = price / Math.max(1, ransomValue(g, s));
   return Math.max(0.03, Math.min(0.95, 1.2 - r * 0.7));
 }
 // 내가(또는 by가) 잡은 포로를 돌려주는 대가로 몸값을 부름
@@ -321,7 +344,7 @@ export function offerRansom(s, by, gid, price, rng = Math.random) {
   if (rng() < ransomChance(s, g, price)) {
     payer.gold -= price; s.nations[by].gold += price;
     const home = s.castles.find((c) => c.owner === g.nation);
-    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null });
+    Object.assign(g, { status: 'active', castle: home?.id ?? null, held: 0, captor: null, ransomRest: s.turn + RANSOM_REST });
     log(s, `💰 ${payer.name}이(가) 금 ${fmtGold(price)}을(를) 내고 ${g.name}을(를) 데려갔습니다.`, 'diplo', [by, g.nation]);
     return { ok: true, msg: `몸값 금 ${fmtGold(price)}을(를) 받고 ${g.name}을(를) 돌려보냈습니다.` };
   }
@@ -332,9 +355,9 @@ export function offerRansom(s, by, gid, price, rng = Math.random) {
 function ransomDemands(s, rng) {
   const me = s.spectator ? null : s.playerId;
   if (me === null || s.inbox.length || s.turn - (s.envoyAt ?? -99) < 3) return;
-  const g = Object.values(s.generals).find((x) => x.status === 'prisoner' && x.nation === me && x.captor !== me && x.captor !== null && s.nations[x.captor]?.alive && (x.held || 0) >= 1 && rng() < 0.35);
+  const g = Object.values(s.generals).find((x) => x.status === 'prisoner' && x.nation === me && x.captor !== me && x.captor !== null && s.nations[x.captor]?.alive && (x.held || 0) >= 1 && !((x.ransomRest || 0) > s.turn) && rng() < 0.35);
   if (!g) return;
-  const price = Math.round((ransomValue(g) * (0.8 + rng() * 0.4)) / 1000) * 1000;
+  const price = Math.round((ransomValue(g, s) * (0.8 + rng() * 0.4)) / 1000) * 1000;
   s.inbox.push({ from: g.captor, type: 'ransom', gid: g.id, price });
   s.envoyAt = s.turn;
 }
@@ -394,8 +417,9 @@ const traitGold = (s, c) => { const g = castleGens(s, c); return 1 + t14(g, '정
 // 특성: 머무는 장수의 모병·인덕 (자원병 명/순)
 const traitDraft = (s, c) => { const g = castleGens(s, c); return t14(g, '모병') + Math.round(t14(g, '인덕') * 300); }; // 인덕: 사람이 모여듦 (등급마다 +15·30·51명/순)
 // 인구와 금: 처음 인구 그대로면 100%, 징병으로 인구가 바닥나면 절반 (사이는 비례) — 처음보다 늘면 그대로 100%
+export const PLAIN_TAX = 1.2; // 중원(대평야) 성: 금 수입 +20%
 export const popGold = (c) => { const ref = c.pop0 || (c.popMax ? c.popMax / 1.2 : c.pop) || 1; return 0.5 + 0.5 * Math.max(0, Math.min(1, (c.pop || 0) / ref)); };
-export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * popGold(c) * (1 + (jobGen(s, c, 'trade')?.pol || 0) * 0.005) * (c.founding ? 0.3 : 1))); // 상업 담당: 맡고 있는 동안 금 +정치×0.5%
+export const goldOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round(traitGold(s, c) * (1200 + c.trade * 5 * (0.4 + 0.6 * landShare(s, c))) * (hasPolicy(s, c.owner, 'commerce') ? 1.25 : 1) * (1 + 0.25 * (c.bld?.market || 0)) * popGold(c) * (1 + (jobGen(s, c, 'trade')?.pol || 0) * 0.005) * (c.plain ? PLAIN_TAX : 1) * (c.founding ? 0.3 : 1))); // 상업 담당: 맡고 있는 동안 금 +정치×0.5%
 export const harvestOf = (s, c) => (c.kind === 'pass' || c.owner === null ? 0 : Math.round((1 + (jobGen(s, c, 'farm') ? t14([jobGen(s, c, 'farm')], '농정') + jobGen(s, c, 'farm').pol * 0.005 : 0)) * c.farm * 48 * (0.4 + 0.6 * landShare(s, c)) * (hasPolicy(s, c.owner, 'farming') ? 2 : 1) * (1 + 1 * (c.bld?.farmland || 0)) * sprawlOf(s, c.owner) * (c.founding ? 0.3 : 1)));
 export const foodUse = (s, nid) => Math.round(powerOf(s, nid) * FOOD_PER * (hasPolicy(s, nid, 'farming') ? 0.7 : 1));
 export const isHarvest = (s) => (s.turn - 1) % 36 === HARVEST_MONTH * 3;
@@ -574,6 +598,11 @@ function people(s, rng) {
     if (!cap?.alive) { release(s, g.id, g.captor); continue; }
     if (g.captor === s.playerId && !s.spectator) continue; // 내 포로는 내가 처리
     if (rng() < 0.3) { recruit(s, g.id, cap.id, () => 0); continue; }
+    // 컴퓨터도 몸값을 받음: 낼 나라가 살아 있고 금이 있으면 값의 0.6배쯤에 돌려보냄 (플레이어 장수는 사신으로 따로 물음)
+    if (g.held >= 2 && s.nations[g.nation]?.alive && (g.nation !== s.playerId || s.spectator) && !((g.ransomRest || 0) > s.turn) && rng() < 0.35) {
+      const price = Math.round((ransomValue(g, s) * 0.6) / 1000) * 1000;
+      if (price >= 1000 && s.nations[g.nation].gold >= price * 2) { offerRansom(s, cap.id, g.id, price, () => 0); continue; }
+    }
     if (g.held >= 6) {
       const home = s.nations[g.nation]?.alive ? s.castles.find((c) => c.owner === g.nation) : null;
       if (home) Object.assign(g, { status: 'active', castle: home.id, held: 0, captor: null });

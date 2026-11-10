@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, renewPact, hegemonOf, bordering } from './hex14gov.js';
+import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, renewPact, hegemonOf, bordering, MARKET } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -419,7 +419,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     if (!gs.length) continue;
     // 속공은 장수를 셋까지 몰아 넣고, 나머지는 둘 (군단은 무력 높은 장수부터)
     if (scope) gs.sort((a, b) => b.war - a.war);
-    const gids = gs.slice(0, Math.min(n.strat === 'blitz' ? 3 : 2, gs.length)).map((g) => g.id);
+    const gids = gs.slice(0, Math.min(n.strat === 'blitz' || gs.length >= 4 ? 3 : 2, gs.length)).map((g) => g.id); // 장수가 넉넉한 성은 셋을 묶어 보냄 (부장 하나마다 공·방 +12%)
     const troops = Math.min(commandCap(s, gids), spare);
     const t = tgt(c.tile, troops);
     if (!t) continue;
@@ -485,7 +485,7 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     const use = Math.max(1000, foodUse(s, nid));
     const toHarvest = (((HARVEST_MONTH * 3 - (s.turn - 1)) % 36) + 36) % 36 || 36; // 다음 가을 수확까지 남은 순
     if (n.food > use * 108 && n.gold < 60000) trade(s, nid, 'sell', Math.round((n.food - use * 72) / 1000) * 1000);
-    else if (n.food < use * (toHarvest + 3) && n.gold > 30000) trade(s, nid, 'buy', Math.round(Math.min((n.gold - 20000) / 2, ((use * (toHarvest + 6) - n.food) / 1.5)) / 1000) * 1000); // 수확까지 모자라면 금으로 사 둠
+    else if (n.food < use * (toHarvest + 3) && n.gold > 30000) trade(s, nid, 'buy', Math.round(Math.min((n.gold - 20000) / 2, ((use * (toHarvest + 6) - n.food) / MARKET.buy)) / 1000) * 1000); // 수확까지 모자라면 금으로 사 둠
   }
   // 5) 시설 먼저(시장·성벽), 남는 금은 팍팍 징병: 녹봉 몇 순 치만 남기고 장수 있는 성(위협받는 곳 먼저)에 뽑아 둠 — 출진 비용이 없으니 쌓아 둘 까닭이 없음
   //    인구가 너무 줄어든 성(20 아래)은 위협받을 때만 뽑음 (인구가 곧 자원병·금 수입)
@@ -496,12 +496,16 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   // 징병은 다음 수확까지(+4순) 먹일 병량이 있을 때만 — 뽑은 병사도 먹어야 함
   const toH = (((HARVEST_MONTH * 3 - (s.turn - 1)) % 36) + 36) % 36 || 36;
   if (n.gold > floor && n.food > foodUse(s, nid) * (toH + 4) * 1.15) {
-    const budget = (n.gold - floor) * (scope ? 1 : share);
-    const hub = mine.filter((c) => c.kind !== 'pass' && Object.values(s.generals).some((g) => g.castle === c.id && g.status === 'active') && (c.pop >= 20 || threatNear(s, grid, c) > 0)).sort((a, b) => threatNear(s, grid, b) - threatNear(s, grid, a));
-    const k = Math.max(1, Math.min(6, hub.length));
-    for (const c of hub.slice(0, 6)) { const per = Math.floor(budget / draftCost(c, s) / k / 100) * 100; const m = Math.min(draftMax14(s, c), per, Math.max(0, Math.floor((c.pop - (c.pop0 || c.pop) * (threatNear(s, grid, c) > 0 ? 0.2 : 0.4)) * 1000 / 100) * 100)); if (m >= 500) draft14(s, c.id, m); } // 위협받는 성은 인구 20%까지, 아니면 40%까지만
-    // 그래도 금이 넉넉하면(예비의 3배 넘게) 장수 없는 후방 성에서도 뽑아 둠 — 쌓아 두지 않고 병사로 바꿈 (병력 받기로 앞으로 보냄)
-    if (n.gold > floor * 3) { const rest = mine.filter((c) => c.kind !== 'pass' && !hub.slice(0, 6).includes(c) && draftMax14(s, c) >= 1000 && c.pop > (c.pop0 || c.pop) * 0.6).sort((a, b) => b.pop - a.pop); for (const c of rest) { if (n.gold < floor * 2) break; draft14(s, c.id, Math.min(draftMax14(s, c), Math.floor((c.pop - (c.pop0 || c.pop) * 0.6) * 1000 / 1000) * 1000, Math.floor((n.gold - floor * 2) / draftCost(c, s) / 1000) * 1000)); } }
+    // 모든 도시에서 뽑음: 도시마다 인구가 처음의 55%(위협받는 성은 30%) 아래로 내려가지 않는 만큼만 — 인구는 순마다 다시 차므로 꾸준히 뽑힘
+    // (예전엔 장수 있는 성 여섯 곳에서만 뽑아 금이 남아돌았음. 장수 없는 뒤쪽 성의 병력은 아래 「수송」이 앞으로 보냄)
+    let budget = (n.gold - floor) * (scope ? 1 : share);
+    const sites = mine.filter((c) => c.kind !== 'pass' && !c.founding).sort((x, y) => threatNear(s, grid, y) - threatNear(s, grid, x) || y.pop - x.pop);
+    for (const c of sites) {
+      if (budget < 5000) break;
+      const keep = (c.pop0 || c.pop) * (threatNear(s, grid, c) > 0 ? 0.3 : 0.55);
+      const m = Math.min(draftMax14(s, c), Math.floor(budget / draftCost(c, s) / 100) * 100, Math.max(0, Math.floor((c.pop - keep) * 10) * 100), Math.max(0, Math.floor(roomOf(c, s) / 100) * 100));
+      if (m >= 500 && draft14(s, c.id, m).ok) budget -= m * draftCost(c, s);
+    }
   }
   if (!scope && !daily) aiBuild(s, grid, nid, (c) => threatNear(s, grid, c), floor, 2);
   // 수송: 장수 없는 후방 성의 남는 병력을 가까운 장수 있는 성으로 보냄 (12칸 이내)

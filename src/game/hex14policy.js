@@ -39,6 +39,7 @@ export function dropPolicy(s, nid, k) {
 export function aiPolicy(s, nid, atWar, hungry) {
   const n = s.nations[nid];
   if ((n.policies || []).length >= policySlots(s, nid) || n.gold < POLICY_COST * 2) return;
-  const pref = hungry ? ['farming', 'commerce', 'conscript', 'military'] : atWar ? ['conscript', 'military', 'commerce', 'farming', 'fortify'] : ['commerce', 'farming', 'talent', 'fortify'];
+  // 돈부터 불리고(상업) 군을 키움(군비·징병령), 병량이 모자라면 둔전 먼저 — 직접 해 보니 이 순서가 가장 빨리 큼
+  const pref = hungry ? ['farming', 'commerce', 'military', 'conscript'] : ['commerce', 'military', 'conscript', 'farming', atWar ? 'fortify' : 'talent'];
   for (const k of pref) if (!hasPolicy(s, nid, k)) { adoptPolicy(s, nid, k); return; }
 }

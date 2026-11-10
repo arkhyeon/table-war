@@ -541,7 +541,7 @@ export function createHex14(world, base) {
     if (capOf >= 0) capTaken.add(capOf);
     const owner = capOf >= 0 ? capOf : regOwner(p.tile);
     const pass = p.kind === 'pass';
-    return { id, tile: p.tile, region: grid.region[p.tile], name: p.name, kind: p.kind, owner: owner === -1 ? null : owner, troops: 0, dur: pass ? 6000 : 3000, maxDur: pass ? 6000 : 3000, pop: 0, capital: capOf >= 0, bandit: null };
+    return { id, tile: p.tile, region: grid.region[p.tile], name: p.name, kind: p.kind, owner: owner === -1 ? null : owner, troops: 0, dur: pass ? 6000 : 3000, maxDur: pass ? 6000 : 3000, pop: 0, capital: capOf >= 0, bandit: null, plain: (!pass && base.regions[grid.region[p.tile]]?.plain) || undefined }; // plain: 중원 대평야 (세금 +20%, 주인이 바뀌어도 유지)
   });
   // 관할 구역: 나라 땅(역사 강역)은 그 나라 성이 먼저 맡음
   const hasCastle = new Set(castles.map((c) => c.owner).filter((o) => o !== null));
@@ -1442,10 +1442,20 @@ export function endTurn14(s, grid) {
   // 속국의 도시는 종주국 몫으로 셈 (속국만 남으면 천하통일)
   const lordOfN = (id) => (s.pacts || []).find((p) => p.type === 'vassal' && p.b === id)?.a ?? id;
   const top = alive.filter((n) => lordOfN(n.id) === n.id).map((n) => [n, cities.filter((c) => c.owner !== null && lordOfN(c.owner) === n.id).length]).sort((a, b) => b[1] - a[1])[0];
-  // 80%를 차지하면 통일 — 「계속 진행」을 고르면 남은 나라가 하나만 남을 때까지 이어 감
+  // 통일은 제 성만으로 80% (속국 성은 세지 않음) — 「계속 진행」을 고르면 남은 나라가 하나만 남을 때까지 이어 감
+  const own = alive.map((n) => [n, cities.filter((c) => c.owner === n.id).length]).sort((a, b) => b[1] - a[1])[0];
   if (alive.length === 1) s.over = { winner: alive[0].id, final: true };
-  else if (!s.keepPlaying && top && top[1] >= cities.length * 0.8) s.over = { winner: top[0].id };
+  else if (!s.keepPlaying && own && own[1] >= cities.length * 0.8) s.over = { winner: own[0].id };
   else if (!s.nations[s.playerId].alive && !s.spectator) s.over = { winner: null, lost: true };
+  // 대세: 한 세력이 속국까지 합쳐 80%에 닿으면 모든 속국이 풀려나고, 그 뒤로는 누구도 속국을 두지 못함 — 남은 성은 제 힘으로 차지해야 통일
+  if (!s.over && !s.endgame && top && top[1] >= cities.length * 0.8) {
+    s.endgame = { lord: top[0].id, turn: s.turn };
+    const freed = (s.pacts || []).filter((p) => p.type === 'vassal').map((p) => s.nations[p.b]?.name).filter(Boolean);
+    s.pacts = (s.pacts || []).filter((p) => p.type !== 'vassal');
+    const text = `${top[0].name} 세력이 속국까지 합쳐 성의 80%를 차지했습니다. ${freed.length ? `속국(${freed.slice(0, 6).join('·')}${freed.length > 6 ? ' 등' : ''})이 모두 풀려났고, ` : ''}이제 누구도 속국을 둘 수 없습니다 — 남은 성은 제 힘으로 차지해야 통일입니다.`;
+    log(s, `⚖️ 천하의 대세: ${text}`, 'capture', alive.map((n) => n.id));
+    if (!s.spectator) { s.eventsQ = s.eventsQ || []; s.eventsQ.push({ title: '천하의 대세', text, nations: [top[0].id] }); }
+  }
 }
 
 // 징병: 성에서 금으로 병사를 뽑음 (1명당 10금). 인구가 바닥날 때까지(1천은 남김) 얼마든지 — 뽑은 만큼 인구가 줄고, 인구가 줄면 금 수입도 줄어 듦(바닥나면 절반)

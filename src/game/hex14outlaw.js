@@ -56,7 +56,13 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   // 일어날 곳: 성에서 3~8칸 떨어진 빈 칸 (해적은 얕은 바다)
   const owned = cities.filter((c) => c.owner !== null && c.owner >= 0 && !isOutlaw(s, c.owner));
   if (!owned.length) return false;
-  const near = owned[Math.floor(rng() * owned.length)];
+  // 변방일수록 잘 일어남: 그 나라 도읍에서 먼 성일수록 (가장 먼 성은 도읍 곁 성의 4배) — 나라가 커질수록 뒤쪽 변방을 챙겨야 함
+  const capAt = new Map();
+  for (const c of s.castles) if (c.capital && c.owner !== null && c.owner >= 0) capAt.set(c.owner, c.tile);
+  const R = 25 * (grid.k || 1);
+  const wts = owned.map((c) => 1 + 3 * Math.min(1, capAt.has(c.owner) ? grid.dist(c.tile, capAt.get(c.owner)) / R : 0.3));
+  let pickR = rng() * wts.reduce((a, b) => a + b, 0), near = owned[0];
+  for (let i = 0; i < owned.length; i++) { pickR -= wts[i]; if (pickR <= 0) { near = owned[i]; break; } }
   const sea = rng() < 0.22;
   // 그 성 둘레 3~8칸에서 고름
   const ring = [];
