@@ -50,6 +50,12 @@ function foeCastleNear(s, grid, nid, c, r) {
   for (let k = 0; k < ids.length && ds[k] <= r; k++) { const x = s.castles[ids[k]]; if (x.owner !== null && x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner)) m = Math.max(m, x.troops); }
   return m;
 }
+// 그 성에서 r칸 안에 칠 수 있는 성(적 나라·빈 성)이 있나 — 전선 성 가리기
+function foeWithin(s, grid, nid, c, r) {
+  const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id];
+  for (let k = 0; k < ids.length && ds[k] <= r; k++) { const x = s.castles[ids[k]]; if (x.kind !== 'pass' && (x.owner === null || (x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && !s.nations[x.owner]?.outlaw))) return true; }
+  return false;
+}
 export function frontier(s, grid, nid, c) {
   // 가까운 순으로 보다가 우리 성을 만나면 끝 (예전엔 부를 때마다 모든 성을 훑었음)
   const L = nearList(s, grid), ids = L.ids[c.id], ds = L.ds[c.id], lim = 2 * grid.k;
@@ -221,6 +227,18 @@ function strategyDiplomacy(s, grid, nid, rng) {
   const alive = s.nations.filter((m) => m.alive && !m.horde);
   const avgC = alive.reduce((a, m) => a + citiesOf(s, m.id), 0) / Math.max(1, alive.length);
   const small = citiesOf(s, nid) <= 3 && citiesOf(s, nid) < avgC * 0.75;
+  // 약소국 외교: 날마다가 아니라 순마다 — ① 우리보다 1.5배 넘게 센 이웃(노리는 나라 말고)과는 정전 ② 같은 강국과 싸우는 이웃과는 동맹
+  //   (약소국은 맞서 싸워 버티지 못함: 빈 땅·약한 나라·남이 싸우는 틈을 노리고, 동맹·정전으로 등 뒤를 막음)
+  if (small || powerOf(s, nid) < Math.max(0, ...neighbors(s, grid, nid).map((x) => powerOf(s, x))) * 0.4) {
+    const nbS = neighbors(s, grid, nid), mp = powerOf(s, nid);
+    const big = nbS.filter((x) => x !== n.focus && !pactOf(s, nid, x) && !s.nations[x]?.outlaw && powerOf(s, x) > mp * 1.5).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
+    if (big !== undefined && (big !== s.playerId || s.spectator || rng() < 0.3)) propose(s, nid, big, 'truce', rng);
+    const bully = nbS.filter((x) => !pactOf(s, nid, x) && powerOf(s, x) > mp * 2).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
+    if (bully !== undefined) {
+      const mate = nbS.filter((x) => x !== bully && !pactOf(s, nid, x) && !s.nations[x]?.outlaw && enemy(s, x, bully) && bordering(s, grid, x, bully) && (x !== s.playerId || s.spectator)).sort((a, b) => powerOf(s, b) - powerOf(s, a))[0];
+      if (mate !== undefined && rng() < 0.5) propose(s, nid, mate, 'ally', rng);
+    }
+  }
   // 한 전선에 힘을 모음: 노리는 나라 말고도 약조 없는 이웃이 남으면, 그중 가장 센 나라와 정전 (등 뒤를 막고 반대편을 뚫음, 패권국은 빼고)
   {
     const nb0 = neighbors(s, grid, nid), heg = hegemonOf(s);
@@ -407,6 +425,25 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
       if (extra >= 3000 && grid.dist(c.tile, stage.tile) <= (18 + 20 * agg) * grid.k) sendTroops(s, grid, c.id, stage.id, extra);
     }
   }
+  // 2.6) 전선 보급: 싸움터에서 먼 뒤쪽 성에 쌓인 병력을 가장 가까운 전선 성(장수 있고 자리 있는 곳)으로 계속 보냄
+  //      병력이 늘어나는 건 괜찮음 — 뒤에 쌓아 두지 않고 앞으로 보내, 전선 성이 그걸 들고 나가 계속 싸우게 (한 순에 12곳까지)
+  if (!daily && !scope && mine.length >= 2) {
+    const isFront = (c) => threatNear(s, grid, c) > 0 || foeWithin(s, grid, nid, c, 10 * grid.k);
+    const hasGen = (c) => (genIdx.m.get(c.id) || []).some((g) => g.status === 'active' && g.castle === c.id);
+    const front = mine.filter((c) => c.kind !== 'pass' && isFront(c) && hasGen(c));
+    if (front.length) {
+      const room = new Map(front.map((f) => [f.id, roomOf(f, s) - (s.convoys || []).filter((v) => v.to === f.id).reduce((a, v) => a + v.troops, 0)]));
+      const rear = mine.filter((c) => !isFront(c) && !(s.convoys || []).some((v) => v.from === c.id))
+        .map((c) => [c, Math.floor((c.troops - Math.max(3000, c.troops * 0.15)) / 1000) * 1000]).filter(([, x]) => x >= 3000)
+        .sort((a, b) => b[1] - a[1]).slice(0, 12);
+      for (const [c, extra] of rear) {
+        const to = front.filter((f) => room.get(f.id) >= 3000).sort((a, b) => grid.dist(a.tile, c.tile) - grid.dist(b.tile, c.tile))[0];
+        if (!to) break;
+        const r = sendTroops(s, grid, c.id, to.id, Math.min(extra, room.get(to.id)));
+        if (r.ok) room.set(to.id, room.get(to.id) - Math.min(extra, room.get(to.id)));
+      }
+    }
+  }
   // 3) 출진: 남는 병력이 있는 성에서 노릴 성으로 (전략에 따라 남길 몫·대담함이 다름)
   const maxUnits = Math.max(3, Math.ceil(mine.length * 1.6 * P.units * (1 + agg)));
   for (const c of mine.sort((a, b) => b.troops - a.troops)) {
@@ -562,40 +599,46 @@ function landComp(grid) {
   compCache.set(grid, comp);
   return comp;
 }
-// 바다 건너 원정: 3순에 한 번, 도시 4곳 넘는 나라가 원정대 하나씩 (센 나라는 둘)
+// 바다 건너 원정: 3순에 한 번, 도시 4곳 넘는 나라가 항구 여러 곳(최대 4)의 병력을 모아 한 성을 침
+//   센 나라(가장 센 나라의 60% 이상)는 우리만큼 센 나라도, 그 밖엔 우리 힘 70% 아래 나라·빈 성만 노림
+//   (예전엔 항구 하나·약한 나라만 노려서, 다른 대륙에 큰 나라가 있으면 끝까지 아무도 못 건드려 세계판 3강 교착)
 function overseas(s, grid, nid, n, mine, mark) {
   if ((s.turn + nid) % 3 || mine.length < 4) return;
   const going = s.units.filter((u) => u.nation === nid && u.expedition && !u.dead).length;
-  const strong = powerOf(s, nid) >= Math.max(...s.nations.filter((m) => m.alive && !m.horde && !m.outlaw).map((m) => powerOf(s, m.id))) * 0.6;
-  if (going >= (strong ? 2 : 1)) return;
+  const myP = powerOf(s, nid);
+  const strong = myP >= Math.max(...s.nations.filter((m) => m.alive && !m.horde && !m.outlaw).map((m) => powerOf(s, m.id))) * 0.6;
+  if (going >= (strong ? 8 : 3)) return;
   const comp = landComp(grid);
   const home = new Set(mine.map((c) => comp[c.tile]));
-  const ports = mine.filter((c) => c.port && fighters(s, c).length && threatNear(s, grid, c) === 0);
+  const ports = mine.filter((c) => c.port && fighters(s, c).length && threatNear(s, grid, c) === 0)
+    .map((p) => { const gids = fighters(s, p).slice(0, 3).map((g) => g.id); return { p, gids, spare: Math.floor(Math.min(commandCap(s, gids), p.troops - Math.max(4000, p.troops * 0.35)) / 1000) * 1000 }; })
+    .filter((x) => x.spare >= 5000);
   if (!ports.length) return;
-  const myP = powerOf(s, nid), R = 70 * grid.k;
-  // 노릴 성: 우리 성이 없는 땅덩이의 빈 성, 또는 우리보다 훨씬 약한 나라의 성
-  const cands = s.castles.filter((x) => x.kind !== 'pass' && !home.has(comp[x.tile]) && (x.owner === null || (x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && !s.nations[x.owner]?.outlaw && powerOf(s, x.owner) < myP * 0.7))
+  const R = 70 * grid.k, lim = strong ? 1.0 : 0.7;
+  const pw = new Map(); const pOf = (x) => { if (!pw.has(x)) pw.set(x, powerOf(s, x)); return pw.get(x); };
+  const cands = s.castles.filter((x) => x.kind !== 'pass' && !home.has(comp[x.tile]) && (x.owner === null || (x.owner >= 0 && x.owner !== nid && enemy(s, nid, x.owner) && !s.nations[x.owner]?.outlaw && pOf(x.owner) < myP * lim))
     && !(x.owner === s.playerId && !s.spectator && s.turn <= graceOf(s)) && !s.units.some((u) => u.nation === nid && u.order?.kind === 'castle' && u.order.id === x.id));
   if (!cands.length) return;
+  // 가까운 항구 넷까지 모아 수비의 1.5배(성벽)×1.3배를 넘으면 출항
   let best = null;
-  for (const p of ports) {
-    const gids = fighters(s, p).slice(0, 3).map((g) => g.id);
-    const spare = Math.floor(Math.min(commandCap(s, gids), p.troops - Math.max(4000, p.troops * 0.35)) / 1000) * 1000;
-    if (spare < 8000) continue;
-    for (const x of cands) {
-      const d = grid.dist(p.tile, x.tile);
-      if (d > R) continue;
-      const guard = x.troops * (x.dur > x.maxDur * 0.3 ? 1.5 : 1) * 1.4; // 바다 건너는 원군이 없으니 넉넉히
-      if (guard > spare) continue;
-      const v = d / grid.k + x.troops / 2000 - (x.owner === null ? 4 : 0);
-      if (!best || v < best.v) best = { p, x, gids, spare, v };
-    }
+  for (const x of cands) {
+    const near = ports.map((q) => [q, grid.dist(q.p.tile, x.tile)]).filter(([, d]) => d <= R).sort((a, b) => a[1] - b[1]).slice(0, 4);
+    if (!near.length) continue;
+    const sum = near.reduce((a, [q]) => a + q.spare, 0);
+    const guard = x.troops * (x.dur > x.maxDur * 0.3 ? 1.5 : 1) * 1.3;
+    if (sum < guard) continue;
+    // 꼭 필요한 만큼의 항구만 (가까운 순)
+    const use = []; let acc = 0; for (const [q] of near) { if (acc >= guard) break; use.push(q); acc += q.spare; }
+    const v = near[0][1] / grid.k + x.troops / 2000 - (x.owner === null ? 4 : 0);
+    if (!best || v < best.v) best = { x, use, v };
   }
-  if (!best || !findPath(s, grid, best.p.tile, best.x.tile, nid, true)) return;
-  const r = sortie(s, grid, best.p.id, best.gids, best.spare);
-  if (!r.ok) return;
-  if (order(s, grid, mark(r.unit), 'castle', best.x.id).ok) r.unit.expedition = true;
-  else order(s, grid, r.unit, 'castle', best.p.id); // 길이 없으면 바로 돌아옴
+  if (!best || !findPath(s, grid, best.use[0].p.tile, best.x.tile, nid, true)) return;
+  for (const q of best.use) {
+    const r = sortie(s, grid, q.p.id, q.gids, q.spare);
+    if (!r.ok) continue;
+    if (order(s, grid, mark(r.unit), 'castle', best.x.id).ok) r.unit.expedition = true;
+    else order(s, grid, r.unit, 'castle', q.p.id); // 길이 없으면 바로 돌아옴
+  }
 }
 // 교착: 도시가 늘지 않은 지 8순 뒤부터 조금씩 과감해짐 (40순에 걸쳐 최대 45%) — 예전(12순 뒤·60순·35%)엔 대국끼리 수백 순 교착
 const stallOf = (s, n) => Math.max(0, Math.min(0.45, (s.turn - (n.stallSince ?? s.turn) - 8) / 40));
@@ -640,6 +683,8 @@ function pickTarget(s, grid, nid, from, troops, P = STRATS.expand, focus = null,
     const stall = stallOf(s, n); // 교착이 길수록 과감해짐
     const need = (n.strat === 'blitz' ? 0.85 : n.strat === 'expand' || n.strat === 'ride' || n.strat === 'coalition' ? 0.95 : 1.05) * (1 - stall) * (1 - 0.3 * agg); // 적당히 이길 만하면 친다 (병력이 넘치면 더 과감)
     if (guard * (c.dur > c.maxDur * 0.3 ? 1.5 : 1) * need > (troops + ours) * P.bold) continue; // 수비보다 넉넉히 모였을 때만
+    // 약한 나라는 센 나라를 함부로 건드리지 않음: 우리보다 1.5배 넘게 센 나라는 그 나라 병력이 딴 데 나가 싸우는 틈(30% 넘게 밖에)일 때만
+    if (!neutral && powerC(c.owner) > powerC(nid) * 1.5 && (busy.get(c.owner) || 0) < powerC(c.owner) * 0.3 && c.owner !== focus) continue;
     let v = d * 1.5 / grid.k + guard / 2000 + (neutral ? -6 : 0); // 빈 땅(중립 성)을 먼저
     if (!neutral && c.owner === focus) v -= 8;
     if (!neutral && c.capitalOf === c.owner) v -= 3; // 수도: 빼앗으면 그 나라가 흔들림
