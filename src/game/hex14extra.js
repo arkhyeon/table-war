@@ -335,19 +335,61 @@ function outlaws(s, grid, rng) {
 }
 
 // 반란: 너무 커진 나라는 도읍에서 먼 변방 도시가 가끔 떨어져 나감 (수비가 얇을수록, 충성 높은 장수가 지키면 덜)
+// 제국의 분열: 도읍에서 가장 먼 장수 없는 성을 중심으로, 둘레(12칸)의 장수 없는 성들(나라 성의 12%쯤, 2~30곳)이 수비병째 새 나라가 됨
+// 장수가 지키는 성은 따라가지 않음 — 변방에 장수를 두는 것이 곧 제국을 지키는 길
+function secede(s, grid, n, mine, rng) {
+  const cap = s.castles.find((c) => c.owner === n.id && c.capital) || mine[0];
+  const held = new Set(Object.values(s.generals).filter((g) => g.status === 'active' && g.castle !== null && g.castle !== undefined).map((g) => g.castle));
+  const loose = mine.filter((x) => x !== cap && !x.founding && !held.has(x.id) && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2));
+  if (loose.length < 2) return false;
+  const seed = loose.reduce((a, b) => (grid.dist(b.tile, cap.tile) > grid.dist(a.tile, cap.tile) ? b : a));
+  const want = Math.max(2, Math.min(30, Math.round(mine.length * 0.12)));
+  const part = loose.filter((x) => grid.dist(x.tile, seed.tile) <= 12 * (grid.k || 1)).sort((a, b) => grid.dist(a.tile, seed.tile) - grid.dist(b.tile, seed.tile)).slice(0, want);
+  if (part.length < 2) return false;
+  const id = s.nations.length;
+  const name = `${seed.name} 자립군`;
+  const troops = part.reduce((a, c) => a + c.troops, 0);
+  s.nations.push({ id, name, color: `hsl(${Math.round((id * 137.508 + 20) % 360)}, 62%, 50%)`, alive: true, isPlayer: false, gold: 30000 + 5000 * part.length, food: Math.round(troops * 0.03 * 40 + 30000), horde: false, pools: n.pools || [], policies: [] });
+  const dt = districtTiles(s);
+  for (const c of part) {
+    c.owner = id; c.bandit = null; c.capital = c === seed;
+    c.jobs = { farm: null, trade: null, draft: null };
+    for (const t of dt[c.id] || []) if (s.owner[t] === n.id) s.owner[t] = id;
+    s.owner[c.tile] = id;
+  }
+  // 우두머리와 부하 장수: 성 3곳마다 하나 더 (그 고을 무장이 일어섬)
+  const k = 1 + Math.floor(part.length / 3);
+  for (let i = 0; i < k; i++) {
+    const at = part[i % part.length], gid = `sec${s.turn}_${id}_${i}`;
+    s.generals[gid] = { id: gid, pool: n.pools?.[0], name: i ? `${at.name} 장군` : `${seed.name} 절도사`, war: rng.int(60, 85), lead: rng.int(i ? 55 : 70, 88), intel: rng.int(40, 75), pol: rng.int(40, 75), traits: [], nation: id, castle: at.id, unit: null, status: 'active', ruler: i === 0 || undefined };
+  }
+  s.rel = s.rel || {};
+  s.rel[n.id < id ? `${n.id}-${id}` : `${id}-${n.id}`] = 5;
+  s.secN = (s.secN || 0) + 1; // 분열이 일어난 횟수 (기록용)
+  const text = `나라가 너무 커져 변방이 갈라섰습니다. ${seed.name}을(를) 중심으로 성 ${part.length}곳(병력 ${fmtTroops(troops)})이 「${name}」(으)로 떨어져 나갔습니다! (장수가 지키는 성은 따라가지 않습니다)`;
+  if (n.id === s.playerId && !s.spectator) pushEvent(s, { title: '제국의 분열', text, nations: [n.id, id] });
+  log(s, `🔥 ${n.name}: ${text}`, 'capture', [n.id, id]);
+  return true;
+}
+
 function revolts(s, grid, rng) {
   const total = s.castles.filter((c) => c.kind === 'city').length || 1;
   for (const n of s.nations) {
     if (!n.alive || n.horde) continue;
     const mine = s.castles.filter((c) => c.owner === n.id && c.kind === 'city');
     const share = mine.length / total;
-    if (mine.length < 15 || share < 0.18 || rng() > Math.min(0.1, (mine.length - 12) * 0.003 + (share - 0.12) * 0.25)) continue;
+    // 큰 제국(도시 30% 이상): 클수록 잦고(30%에 순마다 4% → 65%쯤에 35%), 수비가 두터워도 장수 없는 변방 성은 떨어져 나감. 통일 막바지(75% 이상)엔 멈춤
+    const big = share >= 0.3;
+    if (share >= 0.75) continue;
+    // 제국의 분열: 도시 30%를 넘은 나라는 가끔(30%에 순마다 2% → 60%에 8%, 최대 12%) 도읍에서 먼 장수 없는 변방 성들이 한꺼번에 떨어져 나가 새 나라를 세움
+    if (big && rng() < Math.min(0.12, 0.02 + (share - 0.3) * 0.2) && secede(s, grid, n, mine, rng)) continue;
+    if (mine.length < 15 || share < 0.18 || rng() > (big ? Math.min(0.2, 0.04 + (share - 0.3) * 0.5) : Math.min(0.1, (mine.length - 12) * 0.003 + (share - 0.12) * 0.25))) continue;
     const cap = s.castles.find((c) => c.owner === n.id && c.capital) || mine[0];
     const guard = (c) => Object.values(s.generals).filter((g) => g.castle === c.id && g.status === 'active').reduce((a, g) => Math.max(a, g.loyal ?? 70), 0);
     // 장수가 지키는 성은 반란이 안 일어남 (귀찮지 않게: 장수 없는 변방만)
     const c = mine.filter((x) => x !== cap && !Object.values(s.generals).some((g) => g.castle === x.id && g.status === 'active') && !s.units.some((u) => u.nation !== n.id && grid.dist(u.tile, x.tile) <= 2))
       .map((x) => [x, grid.dist(x.tile, cap.tile) / (1 + x.troops / 15000) / (1 + guard(x) / 100)]).sort((a, b) => b[1] - a[1])[0]?.[0];
-    if (!c || c.troops > 20000) continue; // 수비가 두터우면 반란이 못 일어남
+    if (!c || (!big && c.troops > 20000)) continue; // 수비가 두터우면 반란이 못 일어남 (큰 제국은 수비병째 돌아섬)
     // 장수는 도읍으로 피신, 성은 반란군(중립)이 차지
     for (const g of Object.values(s.generals)) if (g.castle === c.id && g.status === 'active') g.castle = cap.id;
     // 절반은 가까운 이웃 나라(약조 없는)로 귀순, 아니면 반란군(중립)
@@ -355,7 +397,7 @@ function revolts(s, grid, rng) {
     const to = near && rng() < 0.5 ? near.owner : null;
     c.owner = to;
     c.bandit = to === null ? '반란군' : null;
-    c.troops = Math.max(6000, Math.round(c.troops * 0.9));
+    c.troops = Math.max(6000, Math.round(c.troops * (big ? 0.6 : 0.9)));
     for (const t of districtTiles(s)[c.id]) if (s.owner[t] === n.id) s.owner[t] = to === null ? -1 : to;
     s.owner[c.tile] = to === null ? -1 : to;
     const text = `나라가 너무 커져 변방이 흔들립니다. ${c.name}에서 반란이 일어나 ${to === null ? '떨어져 나갔습니다' : `${s.nations[to].name}에 귀순했습니다`}!`;

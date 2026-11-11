@@ -136,8 +136,16 @@ export function envoyOf(s, nid) {
 export const incomeOf = (s, nid) => s.castles.reduce((a, c) => a + (c.owner === nid ? goldOf(s, c) : 0), 0);
 // 친선 금액: 주는 나라와 받는 나라 수입(2순 치)의 기하평균 — 내가 커질수록, 상대가 클수록 같은 우호에 돈이 더 듦
 // 친선: 금 1만·3만 두 가지. 1만에 우호 +10 (크든 작든 같음, 사신 정치만큼 더)
-export const giftSizes = () => [10000, 30000];
-export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round((amt / 10000) * 10 * envoyOf(s, a).mult)));
+// 기준액 = 두 나라 한 순 수입의 기하평균의 절반 (적어도 1만) — 큰 나라끼리는 그만큼 큰돈이 들어야 우호가 오름 (푼돈으로 평화를 사지 못하게)
+export const giftBase = (s, a, b) => Math.max(10000, Math.round((Math.sqrt(Math.max(1, incomeOf(s, a)) * Math.max(1, incomeOf(s, b))) * 0.5) / 1000) * 1000);
+export const giftSizes = (s, a, b) => { const base = s && a !== undefined && b !== undefined ? giftBase(s, a, b) : 10000; return [base, base * 3]; };
+export const giftGain = (s, a, b, amt) => Math.min(30, Math.max(1, Math.round((amt / giftBase(s, a, b)) * 10 * envoyOf(s, a).mult)));
+// 전쟁 기억: a가 b의 성을 마지막으로 빼앗은 지 몇 순 지났나 (없으면 아주 큰 수)
+export const WAR_MEMORY = 12;
+export const sinceHit = (s, a, b) => s.turn - (s.hits?.[`${a}>${b}`] ?? -9999);
+export const atWar = (s, a, b) => sinceHit(s, a, b) <= WAR_MEMORY || sinceHit(s, b, a) <= WAR_MEMORY;
+// 배신 횟수: a가 약조가 끝나자마자 b를 친 횟수 (3년 지나면 잊음)
+export const betrayals = (s, a, b) => { const x = s.betray?.[`${a}>${b}`]; return x && s.turn - x.t < 108 ? x.n : 0; };
 // 약소국 결속·대국 영토 관리 감점은 없앰 (크든 작든 같은 규칙)
 
 // 받아들일 확률 (b가 a의 제안을)
@@ -146,7 +154,7 @@ export function hegemonOf(s) {
   const cc = (id) => s.castles.filter((c) => c.owner === id && c.kind !== 'pass').length;
   const total = s.castles.filter((c) => c.kind !== 'pass').length || 1;
   const ranked = s.nations.filter((n) => n.alive && !n.horde).map((n) => [n.id, cc(n.id)]).sort((x, y) => y[1] - x[1]);
-  if (!ranked.length || ranked[0][1] < total * 0.3 || (ranked[1] && ranked[0][1] < ranked[1][1] * 1.5)) return null;
+  if (!ranked.length || ranked[0][1] < total * 0.3 || (ranked[1] && ranked[0][1] < ranked[1][1] * 1.5 && ranked[0][1] < total * 0.4)) return null; // 40%를 넘으면 2등이 따라붙어도 패권국
   // 아무리 커져도·판이 길어져도 견제는 계속됨 (큰 나라가 견제 없이 굴러가지 않게)
   return ranked[0][0];
 }
@@ -157,6 +165,20 @@ export function dominantOf(s) {
   return ranked.length && ranked[0][1] >= total * 0.45 ? ranked[0][0] : null;
 }
 export function acceptChance(s, a, b, type) {
+  // 배신당한 나라는 그 나라의 약조를 꺼림 (한 번에 −35%p), 서로 성을 빼앗는 중이면 이기고 있는 쪽은 받지 않음
+  const base = acceptChance0(s, a, b, type);
+  if (base <= 0) return 0;
+  let ch = base - 0.35 * betrayals(s, a, b);
+  const nb = s.nations[b];
+  if (nb?.focus === a && !(b === s.playerId && !s.spectator)) ch -= 0.3; // 우리를 노리기로 한 나라는 잘 받아 주지 않음
+  if (atWar(s, a, b)) {
+    // 싸우는 중: 받는 쪽(b)이 밀리고 있을 때만 — a에게 최근 성을 잃었고 힘도 달릴 때. 이기고 있거나 맞설 만하면 거절
+    const losing = sinceHit(s, a, b) <= WAR_MEMORY && powerOf(s, b) < powerOf(s, a) * 0.6;
+    ch = losing ? ch * 0.6 : 0;
+  }
+  return Math.max(0, Math.min(0.95, ch));
+}
+function acceptChance0(s, a, b, type) {
   const rel = relOf(s, a, b);
   const env = envoyOf(s, a).bonus;
   const pa = powerOf(s, a), pb = powerOf(s, b);
@@ -179,6 +201,7 @@ export function acceptChance(s, a, b, type) {
 export function gift(s, a, b, amt) {
   const n = s.nations[a];
   if (n.gold < amt) return { ok: false, msg: '금이 모자랍니다.' };
+  if (atWar(s, a, b)) return { ok: false, msg: `${s.nations[b].name}과(와) 싸우는 중이라(서로 성을 빼앗은 지 ${WAR_MEMORY}순 안) 선물을 받지 않습니다.` };
   const up = giftGain(s, a, b, amt);
   n.gold -= amt;
   s.nations[b].gold += amt;
@@ -510,6 +533,28 @@ function spreadLand(s, grid) {
   }
 }
 
+// 약조가 끝남: 끝난 순을 적어 두고(바로 치면 배신), 서로의 땅이나 성 곁(3칸)에 있던 부대는 가장 가까운 제 성으로 물러남
+// — 약조 중에 상대 성 옆에 군을 세워 두었다가 끝나는 날 기습하지 못하게
+export function pactOver(s, grid, a, b) {
+  s.pactEnded = s.pactEnded || {};
+  s.pactEnded[key(a, b)] = s.turn + 1;
+  if (!grid) return;
+  const R = 3 * (grid.k || 1);
+  for (const [me, other] of [[a, b], [b, a]]) {
+    const theirs = s.castles.filter((c) => c.owner === other), mine = s.castles.filter((c) => c.owner === me);
+    if (!mine.length) continue;
+    let sent = 0;
+    for (const u of s.units) {
+      if (u.nation !== me || u.dead) continue;
+      if (!(s.owner[u.tile] === other || theirs.some((c) => grid.dist(c.tile, u.tile) <= R))) continue;
+      const home = mine.reduce((x, y) => (grid.dist(y.tile, u.tile) < grid.dist(x.tile, u.tile) ? y : x));
+      home.troops += u.troops;
+      for (const id of u.gens) { const g = s.generals[id]; if (g && g.unit === u.id) { g.unit = null; g.castle = home.id; } }
+      u.dead = true; sent++;
+    }
+    if (sent) { s.units = s.units.filter((u) => !u.dead); log(s, `↩️ 약조가 끝나 ${s.nations[other].name} 땅에 있던 ${s.nations[me].name} 부대 ${sent}개가 제 성으로 물러났습니다.`, 'diplo', [me, other]); }
+  }
+}
 // 외교: 약조가 끝나면 알림, 우호는 조금씩 30으로, 컴퓨터끼리 동맹·정전
 // 국경이 맞닿은 나라: 두 나라 성 사이가 12칸 안 (멀리 떨어진 나라끼리는 약조를 맺지 않음)
 export function bordering(s, grid, a, b) {
@@ -532,6 +577,7 @@ function diplomacyTurn(s, rng, grid) {
       if (me !== null && (p.a === me || p.b === me)) s.eventsQ.push({ title: `${PACT[p.type]} 종료`, text: `${s.nations[other(p)].name}과(와)의 ${PACT[p.type]}이 끝났습니다. 이제 서로 칠 수 있습니다!`, nations: [other(p)] });
     }
   }
+  for (const p of s.pacts) if (p.type !== 'vassal' && p.until <= s.turn + 1 && s.nations[p.a].alive && s.nations[p.b].alive) pactOver(s, grid, p.a, p.b);
   s.pacts = s.pacts.filter((p) => (p.type === 'vassal' || p.until > s.turn + 1) && s.nations[p.a].alive && s.nations[p.b].alive);
   for (const k of Object.keys(s.rel)) s.rel[k] += s.rel[k] > 30 ? -0.5 : 0.5;
   const alive = s.nations.filter((n) => n.alive && !n.horde);
@@ -546,7 +592,7 @@ function diplomacyTurn(s, rng, grid) {
       const m = cand.length ? rng.pick(cand) : null;
       if (m) propose(s, n.id, m.id, 'ally', rng);
     }
-    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id && bordering(s, grid, n.id, x.id))); const amt = 10000; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
+    if (n.gold > 80000 && rng() < 0.3) { const m = rng.pick(alive.filter((x) => x.id !== n.id && bordering(s, grid, n.id, x.id))); const amt = m ? giftBase(s, n.id, m.id) : 0; if (m && n.gold > amt * 4) gift(s, n.id, m.id, amt); }
     const foe = ranked.find((m) => m.id !== n.id && !pactOf(s, n.id, m.id) && powerOf(s, m.id) > powerOf(s, n.id) * 1.8 && bordering(s, grid, n.id, m.id)); // 맞닿은 강국과만 정전
     if (foe && rng() < 0.4) propose(s, n.id, foe.id, 'truce', rng);
   }

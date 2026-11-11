@@ -84,17 +84,18 @@ function spawnOne(s, grid, rng, oid, cities, cap) {
   }
   if (spot < 0) return false;
   const kind = kindOf(grid, spot);
-  const avg = owned.reduce((a, c) => a + c.troops, 0) / owned.length;
+  const natC = owned.filter((c) => c.owner === near.owner);
+  const avg = natC.reduce((a, c) => a + c.troops, 0) / Math.max(1, natC.length); // 그 나라 성의 평균 수비 — 큰 나라 변방엔 그만큼 큰 무리가, 작은 나라 곁엔 작은 무리가 일어남
   // 도적이 그동안 이기고 성을 깰수록 새로 일어나는 무리도 커짐 (최대 1.6배)
   const st = s.outlawStats || {}, fame = Math.min(0.6, ((st.kill || 0) + (st.smash || 0) * 2) * 0.03);
-  const troops = Math.round(Math.max(5000, Math.min(25000 * (1 + fame), avg * (0.75 + rng() * 0.7) * (1 + fame))) / 1000) * 1000; // 꽤 아프게
+  const troops = Math.round(Math.max(5000, Math.min(Math.max(25000, avg * 1.2) * (1 + fame), avg * (0.75 + rng() * 0.7) * (1 + fame))) / 1000) * 1000; // 꽤 아프게
   const gid = `out_${s.turn}_${spot}`;
   const boss = BOSS[Math.floor(rng() * BOSS.length)];
   const name = `${kind} ${rankOf(troops)} ${boss}`;
   const tier = troops >= 15000 ? 3 : troops >= 10000 ? 2 : 1;
   s.generals[gid] = { id: gid, name, war: 72 + Math.floor(rng() * 20), lead: 62 + Math.floor(rng() * 20), intel: 20 + Math.floor(rng() * 20), pol: 10 + Math.floor(rng() * 15), traits: [['맹장', tier], [KIND_TRAIT[kind], tier]], boss, kind, nation: oid, castle: null, unit: null, status: 'active' };
   const uid = s.nextUnit++;
-  s.units.push({ id: uid, nation: oid, gens: [gid], troops, max: troops, morale: 90, tile: spot, path: [], order: null, mp: 0, home: null, wait: 0, cd: 0, navy: kind === '해적', ships: kind === '해적' || undefined, outlaw: kind });
+  s.units.push({ id: uid, nation: oid, gens: [gid], troops, max: troops, morale: 90, tile: spot, max0: troops, path: [], order: null, mp: 0, home: null, wait: 0, cd: 0, navy: kind === '해적', ships: kind === '해적' || undefined, outlaw: kind });
   s.generals[gid].unit = uid;
   const victims = owned.filter((c) => grid.dist(c.tile, spot) <= 8).map((c) => c.owner);
   log(s, `🏴 ${near.name} 근처에 ${name}의 ${kind} ${fmtTroops(troops)}이(가) 일어났습니다!`, 'bad', [...new Set(victims)]);
@@ -131,7 +132,7 @@ export function outlawDay(s, grid, rng) {
 // 도적 무리가 이길 때마다 세를 불림: 흩어진 병사·백성이 모여들고 사기가 오르며 두목이 단련됨
 export function outlawGrow(s, u, add, morale, stat, why, nations = []) {
   if (!u || u.dead) return;
-  const cap = 40000;
+  const cap = Math.max(40000, (u.max0 || 0) * 2); // 처음 규모의 두 배까지 (작은 무리는 4만까지)
   const before = u.troops;
   u.troops = Math.min(cap, Math.round((u.troops + add) / 100) * 100);
   u.max = Math.max(u.max || 0, u.troops);

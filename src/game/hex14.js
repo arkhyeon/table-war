@@ -1355,6 +1355,20 @@ function capture(s, grid, c, u) {
   // 그 성 관할 안의 옛 주인 시설(망루·진지·목책)은 새 주인 것이 됨
   for (const f of s.forts || []) if (f.owner === old && s.district?.[f.tile] === c.id) { f.owner = u.nation; f.builder = null; }
   addRel(s, u.nation, old, -15);
+  if (old !== null && old !== -1 && old !== undefined && old >= 0) {
+    // 전쟁 기억: 성을 빼앗은 순 (이기고 있는 쪽은 한동안 정전을 받지 않고, 싸우는 사이엔 선물도 안 통함)
+    const hk = `${u.nation}>${old}`;
+    s.hits = s.hits || {};
+    s.hits[hk] = s.turn;
+    // 배신: 약조가 끝난 지 9순 안에 그 나라 성을 빼앗으면 「배신」으로 남아, 그 나라는 다음 약조를 꺼림 (약조 하나에 한 번만 셈)
+    const pk = u.nation < old ? `${u.nation}-${old}` : `${old}-${u.nation}`;
+    const ended = s.pactEnded?.[pk];
+    if (ended !== undefined && s.turn - ended <= 9) {
+      s.betray = s.betray || {};
+      const b = s.betray[hk];
+      if (!b || b.pact !== ended) { s.betray[hk] = { n: (b && s.turn - b.t < 108 ? b.n : 0) + 1, t: s.turn, pact: ended }; log(s, `🗡️ ${s.nations[u.nation].name}이(가) 약조가 끝나자마자 ${s.nations[old].name}을(를) 쳤습니다. ${s.nations[old].name}은(는) 이 배신을 잊지 않습니다.`, 'diplo', [u.nation, old]); }
+    }
+  }
   // 성에 있던 장수: 절반은 가까운 자기 성으로, 절반은 포로
   const rng = makeRng(`cap:${s.seed}:${s.turn}:${s.day}:${c.id}`);
   for (const g of Object.values(s.generals)) {

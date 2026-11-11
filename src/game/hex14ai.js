@@ -1,5 +1,5 @@
 // ───────── 삼국지14식 모드: 컴퓨터 나라 (전략 고르기·출진·공성·요격·귀환) ─────────
-import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, renewPact, hegemonOf, bordering, MARKET } from './hex14gov.js';
+import { foodUse, HARVEST_MONTH, powerOf, trade, pactOf, propose, renewPact, hegemonOf, bordering, MARKET, breakPact, pactBanned, makePact, BREAK_NOTICE } from './hex14gov.js';
 import { aiBuild, aiForts } from './hex14build.js';
 import { aiPolicy } from './hex14policy.js';
 import { lordOf } from './hex14vassal.js';
@@ -208,6 +208,28 @@ function threatNear0(s, grid, c) {
 // 전략에 맞는 외교: 수성·사방 방어는 노리지 않는 이웃과 정전, 반패권은 다른 나라와 동맹
 function strategyDiplomacy(s, grid, nid, rng) {
   const n = s.nations[nid];
+  // 반패권 동맹: 패권국을 노리는 나라는 패권국과 맺은 약조를 깨고(3순 뒤 효력), 같은 뜻을 가진 맞닿은 나라와는 동맹을 맺어 서로 싸우지 않음
+  {
+    const heg = hegemonOf(s);
+    if (heg !== null && heg !== nid && n.strat === 'coalition' && n.focus === heg && lordOf(s, nid) !== heg) {
+      const p = pactOf(s, nid, heg);
+      if (p && p.type !== 'vassal' && p.broken === undefined && p.until - s.turn > BREAK_NOTICE) breakPact(s, nid, heg);
+      for (const m of s.nations) {
+        if (!m.alive || m.horde || m.outlaw || m.id === nid || m.id === heg || m.strat !== 'coalition' || m.focus !== heg) continue;
+        if (m.id === s.playerId && !s.spectator) continue; // 플레이어에게는 사신으로 청함 (아래 동맹 제안)
+        if (pactOf(s, nid, m.id) || pactBanned(s, nid, m.id) || !bordering(s, grid, nid, m.id)) continue;
+        makePact(s, nid, m.id, 'ally');
+      }
+    }
+  }
+  // 사방이 약조로 막혀 칠 곳이 없으면(가까운 빈 성도 없음) 가장 약한 약조 이웃과의 약조를 깸 — 약조만 이어 가며 영영 서로 못 치는 일이 없게
+  if (s.turn % 6 === 3) {
+    const nb1 = neighbors(s, grid, nid);
+    if (nb1.length && !nb1.some((x) => !pactOf(s, nid, x)) && !s.castles.some((c) => c.owner === null && c.kind !== 'pass' && frontier(s, grid, nid, c) <= 12 * grid.k)) {
+      const cand = nb1.filter((x) => { const p = pactOf(s, nid, x); return p && p.type !== 'vassal' && p.broken === undefined; }).sort((a, b) => powerOf(s, a) - powerOf(s, b))[0];
+      if (cand !== undefined && powerOf(s, nid) >= powerOf(s, cand) * 0.8) breakPact(s, nid, cand);
+    }
+  }
   // 약조 연장: 끝나기 3순 전, 노리는 나라가 아니고 우리만큼 센 상대면 연장을 청함 (만료되자마자 대국과 전면전이 나지 않게)
   for (const p of (s.pacts || []).filter((x) => x.type !== 'vassal' && (x.a === nid || x.b === nid) && x.until - s.turn <= 3 && x.until > s.turn)) {
     const o = p.a === nid ? p.b : p.a;
@@ -252,11 +274,11 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
   if (!n.alive) return;
   indexGenerals(s);
   // 전략은 군단(플레이어 나라)이 아닐 때만 고름: 1년마다, 또는 도시 수가 크게 바뀌면
-  if (!daily && !scope && s.turn % 6 === 0) {
+  if (!daily && !scope && s.turn % 3 === 0) {
     const heg = hegemonOf(s);
     // 한꺼번에 몰려오지 않게: 확인할 때마다 절반만, 이미 두 나라와 싸우는 나라는 끼지 않음
     const busyWars = new Set(s.units.filter((u) => u.nation === nid && u.order?.kind === 'castle').map((u) => s.castles[u.order.id]?.owner).filter((o) => o !== null && o !== undefined && o >= 0 && o !== nid && o !== heg)).size;
-    if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && busyWars < 2 && makeRng(`heg:${s.seed}:${s.turn}:${nid}`)() < 0.5 && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
+    if (heg !== null && heg !== nid && n.focus !== heg && lordOf(s, nid) !== heg && busyWars < 3 && makeRng(`heg:${s.seed}:${s.turn}:${nid}`)() < 0.8 && neighbors(s, grid, nid).includes(heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); }
   }
   const leaderStall = !scope && s.turn - (n.stallSince ?? s.turn) >= 24 && n.strat !== 'blitz' && s.turn - (n.stratAt || 0) >= 12; // 정체한 1등은 결전을 고를 수 있게 다시 생각
   if (!scope && (!n.strat || leaderStall || s.turn - (n.stratAt || 0) >= 36 || Math.abs(citiesOf(s, nid) - (n.stratCities ?? 0)) >= 3)) {
