@@ -8,7 +8,7 @@ import { fmtTroops, fmtGold } from './format.js';
 import { fixJosa } from './josa.js';
 import { getScenario } from './scenarios.js';
 import { PLACES, placeExists, placeName } from './places.js';
-import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits } from './hex14gov.js';
+import { initGov, govTurn, pactOf, addRel, goldOf, ensureTraits, hegemonOf } from './hex14gov.js';
 import { buildTurn, lv, fortsDay, fortAt } from './hex14build.js';
 import { hasPolicy } from './hex14policy.js';
 import { outlawTurn, outlawDay, outlawSack, outlawGrow } from './hex14outlaw.js';
@@ -1030,6 +1030,11 @@ export function stepDay(s, grid) {
   }
   const rng = makeRng(`hex:${s.seed}:${s.turn}:${s.day}`);
   const cas = castleAt(s);
+  // 연합군: 패권국이 있는 동안, 패권국의 부대·성을 치는 다른 나라(그 속국은 빼고)는 공격이 세짐 — 패권국이 클수록 더 (도시 30%에 +20% → 70%에 +80%)
+  const heg = hegemonOf(s);
+  const coalB = heg === null ? 0 : Math.max(0.2, Math.min(0.8, 0.2 + (s.castles.filter((c) => c.owner === heg && c.kind !== 'pass').length / Math.max(1, s.castles.filter((c) => c.kind !== 'pass').length) - 0.3) * 1.5));
+  const hegSide = new Set(heg === null ? [] : [heg, ...(s.pacts || []).filter((p) => p.type === 'vassal' && p.a === heg).map((p) => p.b)]);
+  const coal = (att, def) => (heg !== null && def === heg && !hegSide.has(att) && !s.nations[att]?.outlaw ? 1 + coalB : 1);
   // 1) 이동 (느린 부대부터 섞어서): 하루 이동력만큼, 적 부대 옆 칸에 들어서면 멈춤(통제 구역)
   for (const u of rng.shuffle(s.units.slice())) {
     if (u.dead) continue;
@@ -1088,7 +1093,7 @@ export function stepDay(s, grid) {
     const tb = (1 + (tr === T.PLAINS || tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '기마') : 0) + (tr === T.MOUNTAIN || tr === T.HILLS ? t14(ug, '산악') : 0)
       + (u.troops < tgt.troops ? t14(ug, '돌격') : u.troops > tgt.troops ? t14(ug, '추격') : 0) /* 돌격: 열세일 때 · 추격: 우세할 때 몰아붙임 */ + (tr === T.DESERT || tr === T.TUNDRA ? t14(ug, '사막') : 0) + (tr === T.FOREST || tr === T.HILLS ? t14(ug, '화공') : 0)
       + (grid.river[tgt.tile] ? t14(ug, '도하') / 2 : 0)) / (1 - t14(ug, '위압')) / (1 + t14(tg, '매복'));
-    let dmg = tb * (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1);
+    let dmg = tb * (u.siege ? 0.8 : 1) * u.troops * 0.03 * (a.atk / d.def) * (0.6 + u.morale / 250) / (DEF[grid.terrain[tgt.tile]] || 1) * rng.range(0.9, 1.1) * sea(u) / sea(tgt) * (u.atkB || 1) * coal(u.nation, tgt.nation);
     // 일기토
     maybeDuel(s, u, tgt, rng);
     // 전법: 고유 전법(이름난 장수) 또는 능력 70 이상의 돌격·일제사격·화계 (부대마다 3일에 한 번)
@@ -1174,7 +1179,7 @@ export function stepDay(s, grid) {
     const walled = c.dur > 0;
     // 물 위에서 치면 약함 (수군 장수·조선소·수군 육성이 있으면 괜찮음)
     const sea = grid.sea[u.tile] ? (has14(s, u, '수군') ? 1 + t14(gensOf(s, u.gens), '수군') : u.ships || hasPolicy(s, u.nation, 'navy') ? 1 : 0.75) : 1;
-    a.atk *= sea;
+    a.atk *= sea * coal(u.nation, c.owner);
     // 공성병기: 성벽을 5배로 깎음 (평원 싸움에선 짐이라 −10%)
     const ug = gensOf(s, u.gens);
     // 성을 지키는 장수의 특성: 수성·궁술 방어↑, 철벽 피해↓, 축성 성벽↑ / 공격 쪽 공성은 성벽을 더 깎음
@@ -1446,6 +1451,7 @@ export function endTurn14(s, grid) {
   for (const c of s.castles) { const over = c.troops - capOf(c, s); if (over > 0) { c.troops -= Math.round(over * 0.15); if (c.owner === s.playerId && over > 5000) log(s, `🏚️ ${c.name}에 병력이 넘쳐(수용 ${fmtTroops(capOf(c, s))}) ${fmtTroops(Math.round(over * 0.15))}이 흩어졌습니다. 남는 병력은 부대로 내보내세요.`, 'info', [c.owner]); } }
   checkRulers(s);
   buildTurn(s, grid, redistrict);
+  { const h2 = hegemonOf(s); if (h2 !== (s.hegNow ?? null)) { s.hegNow = h2; if (h2 !== null) { const text = `${s.nations[h2].name}이(가) 패권국으로 떠올랐습니다. 다른 나라들이 모두 손을 잡고 ${s.nations[h2].name}을(를) 칩니다 — 연합군은 패권국을 칠 때 공격이 세집니다(패권국이 클수록 더).`; log(s, `⚖️ ${text}`, 'diplo', s.nations.filter((n) => n.alive).map((n) => n.id)); if (!s.spectator) { s.eventsQ = s.eventsQ || []; s.eventsQ.push({ title: '천하 반패권', text, nations: [h2] }); } } } }
   s.duelDone = null;
   s.turn += 1;
   s.day = 0;

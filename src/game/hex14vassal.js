@@ -3,7 +3,7 @@
 // 항복 권유: 아주 약한 나라(또는 오래된 속국)를 통째로 흡수 — 도시·장수·부대가 넘어옴
 import { fmtGold } from './format.js';
 import { log, enemy } from './hex14.js';
-import { powerOf, pactOf, relOf, addRel, incomeOf, PACT, dominantOf, bordering } from './hex14gov.js';
+import { powerOf, pactOf, relOf, addRel, incomeOf, PACT, dominantOf, bordering, hegemonOf } from './hex14gov.js';
 
 const cities = (s, nid) => s.castles.filter((c) => c.owner === nid && c.kind !== 'pass').length;
 export const lordOf = (s, nid) => (s.pacts || []).find((p) => p.type === 'vassal' && p.b === nid)?.a ?? null;
@@ -146,6 +146,8 @@ export function vassalTurn(s, grid, rng) {
   for (const p of (s.pacts || []).filter((x) => x.type === 'vassal')) {
     const lord = s.nations[p.a], vas = s.nations[p.b];
     if (!lord?.alive || !vas?.alive) continue;
+    // 종주국이 패권국이 되면 컴퓨터 속국은 독립해 반패권에 섬 (속국이 패권국의 방패·먹잇감이 되지 않게)
+    if ((p.b !== s.playerId || s.spectator) && hegemonOf(s) === p.a) { declareIndependence(s, p.b); continue; }
     // 컴퓨터 속국이 종주국보다 1.2배 넘게 세지면 독립 (종주국보다 커진 속국이 계속 조공하지 않게)
     if ((p.b !== s.playerId || s.spectator) && powerOf(s, p.b) > powerOf(s, p.a) * 1.2 && cities(s, p.b) > cities(s, p.a)) { declareIndependence(s, p.b); continue; }
     const pay = Math.round(incomeOf(s, p.b) * 0.15);

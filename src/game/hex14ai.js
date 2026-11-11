@@ -214,10 +214,11 @@ function strategyDiplomacy(s, grid, nid, rng) {
     if (heg !== null && heg !== nid && n.strat === 'coalition' && n.focus === heg && lordOf(s, nid) !== heg) {
       const p = pactOf(s, nid, heg);
       if (p && p.type !== 'vassal' && p.broken === undefined && p.until - s.turn > BREAK_NOTICE) breakPact(s, nid, heg);
+      // 패권국과 그 속국 말고는 모두 한편: 서로 동맹을 맺어 싸움을 멈춤 (멀리 있는 나라끼리도) — 힘이 서로를 향하지 않고 패권국으로만 쏠리게
       for (const m of s.nations) {
-        if (!m.alive || m.horde || m.outlaw || m.id === nid || m.id === heg || m.strat !== 'coalition' || m.focus !== heg) continue;
+        if (!m.alive || m.horde || m.outlaw || m.id === nid || m.id === heg || lordOf(s, m.id) === heg) continue;
         if (m.id === s.playerId && !s.spectator) continue; // 플레이어에게는 사신으로 청함 (아래 동맹 제안)
-        if (pactOf(s, nid, m.id) || pactBanned(s, nid, m.id) || !bordering(s, grid, nid, m.id)) continue;
+        if (pactOf(s, nid, m.id) || pactBanned(s, nid, m.id)) continue;
         makePact(s, nid, m.id, 'ally');
       }
     }
@@ -285,6 +286,8 @@ export function aiTurn14(s, grid, nid, scope = null, daily = false) {
     chooseStrategy(s, grid, nid);
     n.stratCities = citiesOf(s, nid);
   }
+  // 천하 반패권: 패권국이 있는 동안은 맞닿았든 아니든 모두가 그 나라를 노림 (그 속국만 빼고)
+  if (!scope && !daily) { const heg = hegemonOf(s); if (heg !== null && heg !== nid && lordOf(s, nid) !== heg && (n.strat !== 'coalition' || n.focus !== heg)) { n.strat = 'coalition'; n.focus = heg; n.stratAt = s.turn; n.stratCities = citiesOf(s, nid); } }
   const P = STRATS[(!scope && n.strat) || 'expand'];
   const agg = scope ? 0 : stockOf(s, nid); // 쌓인 병력이 많을수록 과감 (남길 몫↓·덜 이길 만해도 침·물러서지 않음·합동 공격 여러 번)
   // 교착: 도시 수가 늘지 않은 지 오래되면 조금씩 과감해짐 (12순 뒤부터, 최대 20%)
